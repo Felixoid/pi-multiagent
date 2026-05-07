@@ -80,9 +80,10 @@ export function resolveAgentCallerSkills(input: {
 		input.diagnostics.push({ code: "caller-skills-duplicate", message: `${input.label} selects caller skill ${duplicate} more than once.`, path: input.path, severity: "error" });
 		return undefined;
 	}
-	if (!input.context?.parentSkills.apiAvailable) {
+	const parentSkills = input.context?.parentSkills;
+	if (parentSkills === undefined || !parentSkills.apiAvailable) {
 		if (!selection.explicit || selection.mode === "inherit") return [];
-		input.diagnostics.push({ code: "caller-skills-inventory-unavailable", message: input.context?.parentSkills.errorMessage ?? `Cannot resolve callerSkills for ${input.label}: parent Pi skill inventory is unavailable.`, path: input.path, severity: "error" });
+		input.diagnostics.push({ code: "caller-skills-inventory-unavailable", message: parentSkills?.errorMessage ?? `Cannot resolve callerSkills for ${input.label}: parent Pi skill inventory is unavailable.`, path: input.path, severity: "error" });
 		return undefined;
 	}
 	if (!input.tools.includes("read")) {
@@ -90,7 +91,6 @@ export function resolveAgentCallerSkills(input: {
 		input.diagnostics.push({ code: "caller-skills-read-required", message: `${input.label} selects callerSkills, but Pi exposes skill files to subagents only when the built-in read tool is granted. Add tools:["read"] or set callerSkills:"none".`, path: input.path, severity: "error" });
 		return undefined;
 	}
-	const parentSkills = input.context.parentSkills;
 	if (!parentSkills.readActive) return resolveFromUnavailableCaller(selection, input);
 	return resolveVisibleCallerSkills(selection, input, parentSkills);
 }
@@ -101,7 +101,7 @@ export function verifyResolvedCallerSkillSources(skills: ResolvedCallerSkill[]):
 		if (checked.has(skill.source.realpath)) continue;
 		checked.add(skill.source.realpath);
 		const current = readCallerSkillSource(skill);
-		if (current.error) return `Caller skill source changed before launch for ${skill.name}: ${current.error}`;
+		if ("error" in current) return `Caller skill source changed before launch for ${skill.name}: ${current.error}`;
 		if (!sameCallerSkillSourceState(skill.source, current.source)) return `Caller skill source changed before launch for ${skill.name}; refusing to load stale skill instructions.`;
 	}
 	return undefined;
@@ -172,7 +172,7 @@ function selectedMissingNames(selection: NormalizedCallerSkillsSelection, visibl
 function callerSkillVisible(skill: ParentSkillInfo | undefined, input: { context: CallerSkillResolutionContext | undefined; diagnostics: AgentDiagnostic[] }): boolean {
 	if (!skill) return false;
 	const source = readCallerSkillSourceCached(skill, input.context);
-	if (source.error) {
+	if ("error" in source) {
 		input.diagnostics.push({ code: "caller-skill-source-unavailable", message: `Skipping caller skill ${skill.name}: ${source.error}`, path: skill.sourceInfo.path, severity: "warning" });
 		return false;
 	}
@@ -182,7 +182,7 @@ function callerSkillVisible(skill: ParentSkillInfo | undefined, input: { context
 function toResolvedCallerSkill(skill: ParentSkillInfo | undefined, input: { context: CallerSkillResolutionContext | undefined }): ResolvedCallerSkill | undefined {
 	if (!skill) return undefined;
 	const source = readCallerSkillSourceCached(skill, input.context);
-	if (source.error || source.hidden) return undefined;
+	if ("error" in source || source.hidden) return undefined;
 	return { name: skill.name, description: skill.description, source: source.source };
 }
 

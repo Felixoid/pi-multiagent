@@ -373,7 +373,7 @@ npm pack --dry-run --json
 git diff --check
 ```
 
-`pnpm run gate` runs unit tests, graph-cookbook example validation, fake Pi smoke, package-load checks, package-content checks, public-doc portability checks, and source-size checks.
+`pnpm run gate` runs package-local TypeScript source typechecking, unit tests, graph-cookbook example validation, fake Pi smoke, package-load checks, package-content checks, public-doc portability checks, and source-size checks.
 
 ## Reference
 

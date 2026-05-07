@@ -126,7 +126,7 @@ export function verifyResolvedExtensionSources(grants: ResolvedExtensionToolGran
 		if (checked.has(grant.source.realpath)) continue;
 		checked.add(grant.source.realpath);
 		const current = readExtensionSource(grant.source.path);
-		if (current.error) return `Extension tool source changed before launch for ${grant.name}: ${current.error}`;
+		if ("error" in current) return `Extension tool source changed before launch for ${grant.name}: ${current.error}`;
 		if (!sameSourceState(grant.source, current.source)) return `Extension tool source changed before launch for ${grant.name}; refusing to load stale extension code.`;
 	}
 	return undefined;
@@ -211,7 +211,7 @@ function resolveExtensionToolGrant(
 		return undefined;
 	}
 	const source = readExtensionSource(tool.sourceInfo.path);
-	if (source.error) {
+	if ("error" in source) {
 		diagnostics.push({ code: "extension-tool-source-unloadable", message: `${label} requests ${grant.name}, but its parent source is not child-loadable: ${source.error}`, path, severity: "error" });
 		return undefined;
 	}
@@ -255,7 +255,7 @@ function findReservedSourceCollision(tools: ParentToolInfo[], selected: ParentTo
 		if (!RESERVED_EXTENSION_TOOL_NAMES.has(candidate.name)) continue;
 		if (sameParentSource(candidate.sourceInfo, selected)) return candidate;
 		const source = readExtensionSource(candidate.sourceInfo.path);
-		if (!source.error && sameResolvedExtensionSource(selectedSource, source.source)) return candidate;
+		if (!("error" in source) && sameResolvedExtensionSource(selectedSource, source.source)) return candidate;
 	}
 	return undefined;
 }

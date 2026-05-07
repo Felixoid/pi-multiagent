@@ -16,20 +16,21 @@ export interface MaterializedAgentTeamInput {
 }
 
 export function materializeAgentTeamInput(input: AgentTeamInput, cwd: string): MaterializedAgentTeamInput {
-	if (input.graphFile === undefined) return { input, diagnostics: [] };
-	const diagnostics = validateGraphFileWrapper(input);
+	const graphFile = input.graphFile;
+	if (graphFile === undefined) return { input, diagnostics: [] };
+	const diagnostics = validateGraphFileWrapper(input, graphFile);
 	if (diagnostics.some((item) => item.severity === "error")) return { input, diagnostics };
-	const resolved = resolveGraphFile(input.graphFile, cwd);
+	const resolved = resolveGraphFile(graphFile, cwd);
 	if (resolved.diagnostic) return { input, diagnostics: [...diagnostics, resolved.diagnostic] };
 	const loaded = readGraphFile(resolved.path ?? "");
 	if (loaded.diagnostics.length > 0) return { input, diagnostics: [...diagnostics, ...loaded.diagnostics] };
 	return { input: loaded.input ?? input, diagnostics };
 }
 
-function validateGraphFileWrapper(input: AgentTeamInput): AgentDiagnostic[] {
+function validateGraphFileWrapper(input: AgentTeamInput, graphFile: string): AgentDiagnostic[] {
 	const diagnostics: AgentDiagnostic[] = [];
 	if (input.action !== "run") diagnostics.push(makeDiagnostic("graph-file-run-only", "graphFile is valid only with action:\"run\".", "/graphFile"));
-	if (!input.graphFile.trim()) diagnostics.push(makeDiagnostic("graph-file-required", "graphFile must be a non-empty relative JSON path.", "/graphFile"));
+	if (!graphFile.trim()) diagnostics.push(makeDiagnostic("graph-file-required", "graphFile must be a non-empty relative JSON path.", "/graphFile"));
 	const forbidden: string[] = [];
 	if (input.objective !== undefined) forbidden.push("objective");
 	if (input.library !== undefined) forbidden.push("library");

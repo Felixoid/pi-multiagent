@@ -2,6 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import type { Dirent, Stats } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import type { ResolvedExtensionSource } from "./types.ts";
 
@@ -10,7 +11,7 @@ const MAX_EXTENSION_FINGERPRINT_ENTRIES = 2048;
 
 export function readExtensionSource(path: string): { source: ResolvedExtensionSource; error?: never } | { source?: never; error: string } {
 	if (!isAbsolute(path)) return { error: "sourceInfo.path is not an absolute path" };
-	let lexicalStats: ReturnType<typeof lstatSync>;
+	let lexicalStats: Stats;
 	try {
 		lexicalStats = lstatSync(path);
 	} catch (error) {
@@ -25,16 +26,16 @@ export function readExtensionSource(path: string): { source: ResolvedExtensionSo
 		return { error: `sourceInfo.path realpath failed: ${errorMessage(error)}` };
 	}
 	const lexicalAfter = readLexicalStats(path);
-	if (lexicalAfter.error) return { error: lexicalAfter.error };
+	if (lexicalAfter.error !== undefined) return { error: lexicalAfter.error };
 	if (!sameNode(lexicalStats, lexicalAfter.stats)) return { error: "sourceInfo.path changed during inspection" };
-	let stats: ReturnType<typeof statSync>;
+	let stats: Stats;
 	try {
 		stats = statSync(realpath);
 	} catch (error) {
 		return { error: `sourceInfo.path stat failed: ${errorMessage(error)}` };
 	}
 	const fingerprint = fingerprintExtensionSource(realpath, stats);
-	if (fingerprint.error) return { error: fingerprint.error };
+	if (fingerprint.error !== undefined) return { error: fingerprint.error };
 	return {
 		source: {
 			path,
@@ -60,7 +61,7 @@ export function sameResolvedExtensionSource(left: ResolvedExtensionSource, right
 	return left.realpath === right.realpath || (left.dev === right.dev && left.ino === right.ino);
 }
 
-function readLexicalStats(path: string): { stats: ReturnType<typeof lstatSync>; error?: never } | { stats?: never; error: string } {
+function readLexicalStats(path: string): { stats: Stats; error?: never } | { stats?: never; error: string } {
 	try {
 		return { stats: lstatSync(path) };
 	} catch (error) {
@@ -68,7 +69,7 @@ function readLexicalStats(path: string): { stats: ReturnType<typeof lstatSync>; 
 	}
 }
 
-function fingerprintExtensionSource(path: string, stats: ReturnType<typeof statSync>): { sha256: string; error?: never } | { sha256?: never; error: string } {
+function fingerprintExtensionSource(path: string, stats: Stats): { sha256: string; error?: never } | { sha256?: never; error: string } {
 	if (stats.isFile()) {
 		if (stats.size > MAX_EXTENSION_HASH_BYTES) return { error: `sourceInfo.path exceeds ${MAX_EXTENSION_HASH_BYTES} byte fingerprint limit` };
 		return { sha256: createHash("sha256").update(readFileSync(path)).digest("hex") };
@@ -80,7 +81,7 @@ function fingerprintExtensionSource(path: string, stats: ReturnType<typeof statS
 	while (stack.length > 0) {
 		const current = stack.pop();
 		if (!current) continue;
-		let children: ReturnType<typeof readdirSync>;
+		let children: Dirent<string>[];
 		try {
 			children = readdirSync(current.dir, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name));
 		} catch (error) {
@@ -91,7 +92,7 @@ function fingerprintExtensionSource(path: string, stats: ReturnType<typeof statS
 			if (entries > MAX_EXTENSION_FINGERPRINT_ENTRIES) return { error: `sourceInfo.path directory has more than ${MAX_EXTENSION_FINGERPRINT_ENTRIES} entries; use a single-file extension source for delegation` };
 			const fullPath = join(current.dir, child.name);
 			const relative = current.relative ? `${current.relative}/${child.name}` : child.name;
-			let childStats: ReturnType<typeof lstatSync>;
+			let childStats: Stats;
 			try {
 				childStats = lstatSync(fullPath);
 			} catch (error) {
@@ -110,7 +111,7 @@ function fingerprintExtensionSource(path: string, stats: ReturnType<typeof statS
 	return { sha256: hash.digest("hex") };
 }
 
-function sameNode(left: ReturnType<typeof lstatSync>, right: ReturnType<typeof lstatSync>): boolean {
+function sameNode(left: Stats, right: Stats): boolean {
 	return left.dev === right.dev && left.ino === right.ino && left.mode === right.mode && left.size === right.size && left.mtimeMs === right.mtimeMs;
 }
 

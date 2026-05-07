@@ -96,8 +96,8 @@ export interface AgentDiscoveryResult {
 
 export interface ExtensionToolProvenanceSpec {
 	source: string;
-	scope: ExtensionSourceScope | undefined;
-	origin: ExtensionSourceOrigin | undefined;
+	scope?: ExtensionSourceScope;
+	origin?: ExtensionSourceOrigin;
 }
 
 export interface ExtensionToolGrantSpec {
