@@ -1,6 +1,6 @@
 /** TypeBox schema for the `agent_team` Pi tool. */
 
-import { StringEnum } from "@mariozechner/pi-ai";
+import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
 import {
 	AGENT_REFERENCE_PATTERN,

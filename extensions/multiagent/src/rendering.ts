@@ -1,8 +1,8 @@
 /** Compact TUI rendering for the model-native `agent_team` tool. */
 
-import type { AgentToolResult, Theme } from "@mariozechner/pi-coding-agent";
-import { getMarkdownTheme } from "@mariozechner/pi-coding-agent";
-import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
+import type { AgentToolResult, Theme } from "@earendil-works/pi-coding-agent";
+import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import type { AgentTeamInput } from "./schemas.ts";
 import type { AgentRunResult, AgentTeamDetails } from "./types.ts";
 import { isAgentTeamDetails } from "./types.ts";

@@ -1,6 +1,6 @@
 {
   "name": "pi-multiagent",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
   "description": "Adds the agent_team delegation tool and pi-multiagent skill to Pi.",
   "keywords": [
@@ -21,6 +21,7 @@
   "homepage": "https://github.com/Tiziano-AI/pi-multiagent#readme",
   "files": [
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "agents/*.md",
     "assets/*.webp",
@@ -38,9 +39,9 @@
     "gate": "pnpm test && pnpm run smoke:pi && pnpm run check:pack && pnpm run check:pi-load && pnpm run check:public-docs && pnpm run check:source-size"
   },
   "peerDependencies": {
-    "@mariozechner/pi-ai": "*",
-    "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*",
+    "@earendil-works/pi-ai": ">=0.74.0",
+    "@earendil-works/pi-coding-agent": ">=0.74.0",
+    "@earendil-works/pi-tui": ">=0.74.0",
     "typebox": "*"
   },
   "pi": {

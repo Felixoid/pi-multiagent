@@ -360,6 +360,7 @@ The model-facing aggregate output is capped at 2000 lines or 50KB. When possible
 | `examples/graphs/*.json` | Schema-checked cookbook examples. |
 | `assets/pi-multiagent-gallery.webp` | Pi package-gallery preview image referenced by `package.json` `pi.image`. |
 | `README.md` | Human-facing install, evaluation, operation, and validation guide. |
+| `CHANGELOG.md` | Release notes for packaged versions. |
 
 Bundled agents are not Pi skills. They are prompts for `agent_team` library refs.
 

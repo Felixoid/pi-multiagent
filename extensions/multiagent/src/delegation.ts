@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import type { AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/pi-coding-agent";
+import type { AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
 import { catalogAgents } from "./agents.ts";
 import { spawnPiJson } from "./child-runtime.ts";
 import type { SpawnProcess } from "./child-launch.ts";

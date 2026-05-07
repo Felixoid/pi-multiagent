@@ -55,6 +55,7 @@ function requiredPackedFiles(): string[] {
 	return [
 		"package.json",
 		"README.md",
+		"CHANGELOG.md",
 		"LICENSE",
 		...collectFiles("agents", ".md"),
 		...collectFiles("assets", ".webp"),
