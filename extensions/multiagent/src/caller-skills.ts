@@ -1,4 +1,4 @@
-/** Caller-visible Pi skill inheritance for isolated subagents. */
+/** Explicit caller-visible Pi skill selection for isolated subagents. */
 
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
@@ -6,13 +6,13 @@ import { isAbsolute } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type {
 	AgentDiagnostic,
-	CallerSkillSelectionSpec,
 	ParentSkillInfo,
 	ParentSkillInventory,
 	ResolvedCallerSkill,
 	ResolvedCallerSkillSource,
 } from "./types.ts";
 import { MAX_CALLER_SKILLS, SKILL_NAME_PATTERN } from "./types.ts";
+import { findNearestWorkspaceRoot, isContainedPath } from "./project-root.ts";
 
 const SKILL_NAME_REGEX = new RegExp(SKILL_NAME_PATTERN);
 const MAX_SKILL_HASH_BYTES = 4 * 1024 * 1024;
@@ -21,10 +21,12 @@ const EMPTY_PARENT_SKILLS: ParentSkillInventory = { apiAvailable: true, readActi
 export interface CallerSkillResolutionContext {
 	parentSkills: ParentSkillInventory | undefined;
 	sourceCache: Map<string, SkillSourceReadResult>;
+	cwdRealpath: string | undefined;
+	workspaceRootRealpath: string | undefined;
 }
 
 interface NormalizedCallerSkillsSelection {
-	mode: "inherit" | "none" | "include" | "exclude";
+	mode: "none" | "include";
 	names: string[];
 	explicit: boolean;
 }
@@ -55,20 +57,22 @@ export function getParentSkillInventory(pi: ExtensionAPI): ParentSkillInventory 
 	}
 }
 
-export function createCallerSkillResolutionContext(parentSkills: ParentSkillInventory | undefined): CallerSkillResolutionContext {
-	return { parentSkills: parentSkills ?? EMPTY_PARENT_SKILLS, sourceCache: new Map() };
+export function createCallerSkillResolutionContext(parentSkills: ParentSkillInventory | undefined, cwd: string): CallerSkillResolutionContext {
+	const cwdRealpath = safeRealpath(cwd);
+	const workspaceRoot = cwdRealpath ? findWorkspaceRoot(cwdRealpath) : undefined;
+	return { parentSkills: parentSkills ?? EMPTY_PARENT_SKILLS, sourceCache: new Map(), cwdRealpath, workspaceRootRealpath: workspaceRoot ? safeRealpath(workspaceRoot) : undefined };
 }
 
 export function resolveAgentCallerSkills(input: {
-	selection: CallerSkillSelectionSpec | undefined;
-	explicit: boolean;
+	selection: string[] | undefined;
 	tools: string[];
 	label: string;
 	path: string;
+	allowProjectCode: boolean;
 	diagnostics: AgentDiagnostic[];
 	context: CallerSkillResolutionContext | undefined;
 }): ResolvedCallerSkill[] | undefined {
-	const selection = normalizeCallerSkillsSelection(input.selection, input.explicit);
+	const selection = normalizeCallerSkillsSelection(input.selection);
 	if (selection.mode === "none") return [];
 	const invalidNames = selection.names.filter((name) => !SKILL_NAME_REGEX.test(name));
 	if (invalidNames.length > 0) {
@@ -82,13 +86,13 @@ export function resolveAgentCallerSkills(input: {
 	}
 	const parentSkills = input.context?.parentSkills;
 	if (parentSkills === undefined || !parentSkills.apiAvailable) {
-		if (!selection.explicit || selection.mode === "inherit") return [];
-		input.diagnostics.push({ code: "caller-skills-inventory-unavailable", message: parentSkills?.errorMessage ?? `Cannot resolve callerSkills for ${input.label}: parent Pi skill inventory is unavailable.`, path: input.path, severity: "error" });
+		if (!selection.explicit) return [];
+		input.diagnostics.push({ code: "caller-skills-inventory-unavailable", message: parentSkills?.errorMessage ?? `Cannot resolve selected skills for ${input.label}: parent Pi skill inventory is unavailable.`, path: input.path, severity: "error" });
 		return undefined;
 	}
 	if (!input.tools.includes("read")) {
-		if (!selection.explicit || selection.mode === "inherit") return [];
-		input.diagnostics.push({ code: "caller-skills-read-required", message: `${input.label} selects callerSkills, but Pi exposes skill files to subagents only when the built-in read tool is granted. Add tools:["read"] or set callerSkills:"none".`, path: input.path, severity: "error" });
+		if (!selection.explicit) return [];
+		input.diagnostics.push({ code: "caller-skills-read-required", message: `${input.label} selects skills, but Pi exposes skill files to subagents only when the filesystem read/discovery suite is granted. Enable graph.authority.allowFilesystemRead or remove agent.skills.`, path: input.path, severity: "error" });
 		return undefined;
 	}
 	if (!parentSkills.readActive) return resolveFromUnavailableCaller(selection, input);
@@ -118,23 +122,24 @@ function resolveFromUnavailableCaller(selection: NormalizedCallerSkillsSelection
 function resolveVisibleCallerSkills(selection: NormalizedCallerSkillsSelection, input: {
 	label: string;
 	path: string;
+	allowProjectCode: boolean;
 	diagnostics: AgentDiagnostic[];
 	context: CallerSkillResolutionContext | undefined;
 }, parentSkills: ParentSkillInventory): ResolvedCallerSkill[] | undefined {
 	const parentByName = parentSkillMap(parentSkills, input);
-	if (!parentByName) return undefined;
+	if (!parentByName || !validateCallerSkillSourcePolicy(selection, parentByName, input)) return undefined;
 	const visibleNames = visibleSelectedNames(selection, parentByName, input);
 	const missing = selectedMissingNames(selection, visibleNames);
 	if (missing.length > 0) {
 		input.diagnostics.push({ code: "caller-skills-unknown", message: `${input.label} references caller skills not visible to the calling model: ${missing.join(", ")}.`, path: input.path, severity: "error" });
 		return undefined;
 	}
-	const inherited = inheritedSkillNames(selection, visibleNames).map((name) => toResolvedCallerSkill(parentByName.get(name), input)).filter((skill): skill is ResolvedCallerSkill => skill !== undefined);
-	if (inherited.length > MAX_CALLER_SKILLS) {
-		input.diagnostics.push({ code: "caller-skills-too-many", message: `${input.label} would inherit ${inherited.length} caller skills; maximum is ${MAX_CALLER_SKILLS}. Use callerSkills.include to select a smaller set.`, path: input.path, severity: "error" });
+	const resolved = selectedSkillNames(selection, visibleNames).map((name) => toResolvedCallerSkill(parentByName.get(name), input)).filter((skill): skill is ResolvedCallerSkill => skill !== undefined);
+	if (resolved.length > MAX_CALLER_SKILLS) {
+		input.diagnostics.push({ code: "caller-skills-too-many", message: `${input.label} selects ${resolved.length} caller skills; maximum is ${MAX_CALLER_SKILLS}. Use a smaller agent.skills list.`, path: input.path, severity: "error" });
 		return undefined;
 	}
-	return inherited;
+	return resolved;
 }
 
 function parentSkillMap(parentSkills: ParentSkillInventory, input: { path: string; diagnostics: AgentDiagnostic[] }): Map<string, ParentSkillInfo> | undefined {
@@ -146,26 +151,43 @@ function parentSkillMap(parentSkills: ParentSkillInventory, input: { path: strin
 	return new Map(parentSkills.skills.map((skill) => [skill.name, skill]));
 }
 
+function validateCallerSkillSourcePolicy(selection: NormalizedCallerSkillsSelection, parentByName: Map<string, ParentSkillInfo>, input: { label: string; path: string; allowProjectCode: boolean; context: CallerSkillResolutionContext | undefined; diagnostics: AgentDiagnostic[] }): boolean {
+	let valid = true;
+	for (const skill of policyCandidateSkills(selection, parentByName)) {
+		const source = readCallerSkillSourceCached(skill, input.context);
+		if ("error" in source || source.hidden || input.allowProjectCode || !callerSkillRequiresProjectAuthority(source.source, input.context)) continue;
+		input.diagnostics.push({ code: "caller-skills-project-code-authority-required", message: `${input.label} selects caller skill ${skill.name} from ${source.source.scope} scope; set graph.authority.allowProjectCode:true or choose a user-scoped skill.`, path: input.path, severity: "error" });
+		valid = false;
+	}
+	return valid;
+}
+
+function policyCandidateSkills(selection: NormalizedCallerSkillsSelection, parentByName: Map<string, ParentSkillInfo>): ParentSkillInfo[] {
+	if (selection.mode === "include") return selection.names.map((name) => parentByName.get(name)).filter((skill): skill is ParentSkillInfo => skill !== undefined);
+	return [];
+}
+
+function callerSkillRequiresProjectAuthority(source: ResolvedCallerSkillSource, context: CallerSkillResolutionContext | undefined): boolean {
+	return source.scope === "project" || source.scope === "temporary" || (context?.cwdRealpath !== undefined && isContainedPath(context.cwdRealpath, source.realpath)) || (context?.workspaceRootRealpath !== undefined && isContainedPath(context.workspaceRootRealpath, source.realpath));
+}
+
 function visibleSelectedNames(selection: NormalizedCallerSkillsSelection, parentByName: Map<string, ParentSkillInfo>, input: { context: CallerSkillResolutionContext | undefined; diagnostics: AgentDiagnostic[] }): Set<string> {
-	const requested = selection.mode === "include" || selection.mode === "exclude" ? new Set(selection.names) : undefined;
+	const requested = new Set(selection.names);
 	const visible = new Set<string>();
 	for (const skill of parentByName.values()) {
-		if (selection.mode === "include" && !requested?.has(skill.name)) continue;
-		if (selection.mode !== "include" && requested?.has(skill.name)) continue;
+		if (!requested.has(skill.name)) continue;
 		if (callerSkillVisible(skill, input)) visible.add(skill.name);
 	}
-	if (selection.mode === "exclude") for (const name of selection.names) if (callerSkillVisible(parentByName.get(name), input)) visible.add(name);
 	return visible;
 }
 
-function inheritedSkillNames(selection: NormalizedCallerSkillsSelection, visibleNames: Set<string>): string[] {
+function selectedSkillNames(selection: NormalizedCallerSkillsSelection, visibleNames: Set<string>): string[] {
 	if (selection.mode === "include") return selection.names.filter((name) => visibleNames.has(name));
-	if (selection.mode === "exclude") return Array.from(visibleNames).filter((name) => !selection.names.includes(name));
-	return Array.from(visibleNames);
+	return [];
 }
 
 function selectedMissingNames(selection: NormalizedCallerSkillsSelection, visibleNames: Set<string>): string[] {
-	if (selection.mode !== "include" && selection.mode !== "exclude") return [];
+	if (selection.mode !== "include") return [];
 	return selection.names.filter((name) => !visibleNames.has(name));
 }
 
@@ -233,11 +255,21 @@ function sameCallerSkillSourceState(left: ResolvedCallerSkillSource, right: Reso
 	return left.realpath === right.realpath && left.dev === right.dev && left.ino === right.ino && left.size === right.size && left.mtimeMs === right.mtimeMs && left.sha256 === right.sha256;
 }
 
-function normalizeCallerSkillsSelection(selection: CallerSkillSelectionSpec | undefined, explicit: boolean): NormalizedCallerSkillsSelection {
-	if (selection === "none") return { mode: "none", names: [], explicit };
-	if (selection === "inherit" || selection === undefined) return { mode: "inherit", names: [], explicit };
-	if (selection.include !== undefined) return { mode: "include", names: selection.include, explicit };
-	return { mode: "exclude", names: selection.exclude ?? [], explicit };
+function normalizeCallerSkillsSelection(selection: string[] | undefined): NormalizedCallerSkillsSelection {
+	if (selection === undefined) return { mode: "none", names: [], explicit: false };
+	return { mode: "include", names: selection, explicit: true };
+}
+
+function findWorkspaceRoot(cwd: string): string {
+	return findNearestWorkspaceRoot(cwd);
+}
+
+function safeRealpath(path: string): string | undefined {
+	try {
+		return realpathSync(path);
+	} catch {
+		return undefined;
+	}
 }
 
 function parseDisableModelInvocation(content: string): boolean {

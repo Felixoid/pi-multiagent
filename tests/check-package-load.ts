@@ -1,44 +1,120 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { readFile } from "node:fs/promises";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const rawPackage = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
-assert.equal(typeof rawPackage === "object" && rawPackage !== null, true);
-assert.equal(typeof rawPackage.pi === "object" && rawPackage.pi !== null, true);
-assert.equal(Array.isArray(rawPackage.pi.extensions), true);
-assert.equal(rawPackage.pi.extensions.length > 0, true);
+await loadPackageRoot(packageRoot, "source tree");
+
+const packedRoot = await mkdtemp(join(tmpdir(), "pi-multiagent-pack-load-"));
+try {
+	const pack = spawnSync("npm", ["pack", "--pack-destination", packedRoot, "--json"], { cwd: packageRoot, encoding: "utf8" });
+	if (pack.stderr.length > 0) process.stderr.write(pack.stderr);
+	assert.equal(pack.status, 0, pack.error?.message ?? pack.stderr);
+	const tarballPath = parsePackTarballPath(pack.stdout, packedRoot);
+	const extract = spawnSync("tar", ["-xzf", tarballPath, "-C", packedRoot], { cwd: packedRoot, encoding: "utf8" });
+	if (extract.stderr.length > 0) process.stderr.write(extract.stderr);
+	assert.equal(extract.status, 0, extract.error?.message ?? extract.stderr);
+	await loadPackageRoot(join(packedRoot, "package"), "packed artifact");
+} finally {
+	await rm(packedRoot, { recursive: true, force: true });
+}
 
 interface RegisteredTool {
 	name: string;
+	description?: string;
+	promptSnippet?: string;
+	promptGuidelines?: string[];
 	execute: (toolCallId: string, params: object, signal: AbortSignal | undefined, onUpdate: unknown, ctx: object) => Promise<{ content: { type: string; text: string }[] }>;
 }
 
-for (const extensionPath of rawPackage.pi.extensions) {
-	assert.equal(typeof extensionPath, "string");
-	const moduleUrl = pathToFileURL(join(packageRoot, extensionPath)).href;
-	const moduleRecord: unknown = await import(moduleUrl);
-	assert.equal(typeof moduleRecord === "object" && moduleRecord !== null && "default" in moduleRecord, true);
-	const extension = moduleRecord.default;
-	assert.equal(typeof extension, "function", `${extensionPath} default export should be a Pi extension function`);
-	const tools: RegisteredTool[] = [];
-	extension({
-		registerTool(tool: RegisteredTool) {
-			tools.push(tool);
-		},
-		getThinkingLevel() {
-			return undefined;
-		},
-	});
-	const tool = tools.find((candidate) => candidate.name === "agent_team");
-	assert.ok(tool, `${extensionPath} should register agent_team`);
-	const catalog = await tool.execute(
-		"package-load-catalog",
-		{ action: "catalog", library: { sources: ["package"], query: "review" } },
-		undefined,
-		undefined,
-		{ cwd: packageRoot, hasUI: false, model: undefined, ui: { confirm: async () => false } },
-	);
-	assert.equal(catalog.content[0].text.includes("package:reviewer"), true);
+async function loadPackageRoot(root: string, label: string): Promise<void> {
+	const rawPackage: unknown = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+	if (!isRecord(rawPackage)) throw new Error(`${label}: package.json should parse to an object`);
+	const pi = rawPackage.pi;
+	if (!isRecord(pi)) throw new Error(`${label}: package.json should contain pi metadata`);
+	const extensions = pi.extensions;
+	assert.equal(Array.isArray(extensions), true, `${label}: pi.extensions should be an array`);
+	assert.equal(extensions.length > 0, true, `${label}: pi.extensions should not be empty`);
+	await assertSkillManifest(root, label, pi.skills);
+
+	for (const [index, extensionPath] of extensions.entries()) {
+		assert.equal(typeof extensionPath, "string", `${label}: extension path should be a string`);
+		const moduleUrl = pathToFileURL(join(root, extensionPath)).href;
+		const moduleRecord: unknown = await import(`${moduleUrl}?load=${encodeURIComponent(label)}-${index}`);
+		assert.equal(isRecord(moduleRecord) && "default" in moduleRecord, true, `${label}: ${extensionPath} should export a default Pi extension function`);
+		const extension = moduleRecord.default;
+		assert.equal(typeof extension, "function", `${label}: ${extensionPath} default export should be a Pi extension function`);
+		const tools: RegisteredTool[] = [];
+		extension({
+			on() {},
+			registerMessageRenderer() {},
+			registerTool(tool: RegisteredTool) {
+				tools.push(tool);
+			},
+			sendMessage() {},
+			getThinkingLevel() {
+				return undefined;
+			},
+		});
+		const tool = tools.find((candidate) => candidate.name === "agent_team");
+		assert.ok(tool, `${label}: ${extensionPath} should register agent_team`);
+		assert.match(tool.description ?? "", /peek.*one step/);
+		assert.equal((tool.description ?? "").length < 1400, true, `${label}: agent_team description should stay compact`);
+		assert.equal((tool.promptGuidelines ?? []).join("\n").length < 3600, true, `${label}: agent_team prompt guidelines should stay within model-facing budget`);
+		assert.match(tool.promptSnippet ?? "", /catalog.*start.*retrieve.*peek.*message.*cancel.*cleanup/);
+		assert.equal(tool.promptGuidelines?.some((line) => /Action decision tree/.test(line) && /peek with stepId for exactly one step/.test(line)), true, `${label}: agent_team should expose a compact action decision tree`);
+		const catalog = await tool.execute(
+			`${label}-catalog`,
+			{ action: "catalog", library: { sources: ["package"], query: "review" } },
+			undefined,
+			undefined,
+			{ cwd: root, hasUI: false, model: undefined, ui: { confirm: async () => false } },
+		);
+		assert.equal(catalog.content[0].text.includes("package:reviewer"), true, `${label}: catalog should include package:reviewer`);
+		const webCatalog = await tool.execute(
+			`${label}-web-catalog`,
+			{ action: "catalog", library: { sources: ["package"], query: "web research" } },
+			undefined,
+			undefined,
+			{ cwd: root, hasUI: false, model: undefined, ui: { confirm: async () => false } },
+		);
+		assert.equal(webCatalog.content[0].text.includes("package:web-researcher"), true, `${label}: catalog should include package:web-researcher`);
+		const validationCatalog = await tool.execute(
+			`${label}-validation-catalog`,
+			{ action: "catalog", library: { sources: ["package"], query: "run validation commands" } },
+			undefined,
+			undefined,
+			{ cwd: root, hasUI: false, model: undefined, ui: { confirm: async () => false } },
+		);
+		assert.equal(validationCatalog.content[0].text.includes("package:validator"), true, `${label}: catalog should include package:validator`);
+	}
+}
+
+async function assertSkillManifest(root: string, label: string, skills: unknown): Promise<void> {
+	assert.equal(Array.isArray(skills), true, `${label}: pi.skills should be an array`);
+	assert.equal((skills as unknown[]).includes("./skills"), true, `${label}: pi.skills should include ./skills`);
+	const skill = await readFile(join(root, "skills", "pi-multiagent", "SKILL.md"), "utf8");
+	const frontmatter = skill.split("---", 3)[1] ?? "";
+	assert.match(frontmatter, /^name: pi-multiagent$/m, `${label}: pi-multiagent skill should declare frontmatter name`);
+	assert.match(skill, /references\/graph-cookbook\.md/, `${label}: pi-multiagent skill should reference the graph cookbook`);
+	await readFile(join(root, "skills", "pi-multiagent", "references", "graph-cookbook.md"), "utf8");
+}
+
+function parsePackTarballPath(stdout: string, destination: string): string {
+	const firstJson = stdout.indexOf("[");
+	const lastJson = stdout.lastIndexOf("]");
+	assert.equal(firstJson >= 0 && lastJson >= firstJson, true, "npm pack did not emit JSON");
+	const parsed: unknown = JSON.parse(stdout.slice(firstJson, lastJson + 1));
+	assert.equal(Array.isArray(parsed), true, "npm pack JSON should be an array");
+	const manifest: unknown = parsed[0];
+	if (!isRecord(manifest)) throw new Error("npm pack entry should be an object");
+	assert.equal(typeof manifest.filename, "string", "npm pack entry should include filename");
+	return join(destination, manifest.filename);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
 }

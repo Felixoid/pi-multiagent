@@ -1,0 +1,72 @@
+{
+  "objective": "Implement a human-approved change from a prior read-only plan. Before starting this graph, copy prior artifact paths, exact current human approval text, allowed mutationScope, exclusions, and validation command scope into the graph.",
+  "library": {
+    "sources": [
+      "package"
+    ]
+  },
+  "authority": {
+    "allowFilesystemRead": true,
+    "allowShellTools": true,
+    "allowMutationTools": true
+  },
+  "steps": [
+    {
+      "id": "approval-check",
+      "agent": {
+        "ref": "package:planner"
+      },
+      "task": "Verify that this graph text contains prior plan artifact paths, exact current human approval, concrete mutationScope, explicit exclusions, and validation command scope. Do not edit. Return GO or BLOCK with the missing field. If the approval is absent, stale, vague, or broader than this graph, return BLOCK."
+    },
+    {
+      "id": "implementation-worker",
+      "agent": {
+        "ref": "package:worker"
+      },
+      "needs": [
+        "approval-check"
+      ],
+      "mutationScope": "REPLACE before start. Allowed files/globs: <exact approved paths>. Allowed mutation class: <specific approved edit type>. Explicit exclusions: <paths/actions not allowed>. Validation commands authorized: <exact commands or none>. Stop if broader than current parent authorization.",
+      "task": "If approval-check is not GO, or mutationScope is placeholder, missing, or broader than the exact human approval, vague, or inconsistent with approval, do not edit. Otherwise implement only the approved change. Return changed paths and validation commands run."
+    },
+    {
+      "id": "validation-proof",
+      "agent": {
+        "ref": "package:validator"
+      },
+      "needs": [
+        "implementation-worker"
+      ],
+      "task": "Run only validation commands explicitly copied here by the parent: REPLACE_WITH_EXACT_APPROVED_VALIDATION_COMMANDS. If this placeholder remains, no commands are present, or scope is only implied by upstream evidence, return needs-command-scope without running commands. Do not edit, install, publish, deploy, delete, or run network commands."
+    },
+    {
+      "id": "final-review",
+      "agent": {
+        "ref": "package:reviewer"
+      },
+      "after": [
+        "approval-check",
+        "implementation-worker",
+        "validation-proof"
+      ],
+      "task": "Review the completed change, authorization trail, and validation evidence. Do not run commands or edit. Return findings first and ship/block recommendation."
+    },
+    {
+      "id": "final-decision",
+      "agent": {
+        "ref": "package:synthesizer"
+      },
+      "after": [
+        "approval-check",
+        "implementation-worker",
+        "validation-proof",
+        "final-review"
+      ],
+      "task": "Return final status, authorization evidence, changed paths, observed validation, blockers, residual risk, and exact next action. Do not invent validation."
+    }
+  ],
+  "limits": {
+    "concurrency": 1,
+    "timeoutSecondsPerStep": 9000
+  }
+}

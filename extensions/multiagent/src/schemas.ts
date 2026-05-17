@@ -1,32 +1,42 @@
-/** TypeBox schema for the `agent_team` Pi tool. */
+/** TypeBox schema for the detached-only `agent_team` Pi tool. */
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
 import {
-	AGENT_REFERENCE_PATTERN,
 	AGENT_TEAM_ACTION_VALUES,
 	BUILTIN_CHILD_TOOL_NAMES,
-	CALLER_SKILL_SELECTION_MODE_VALUES,
+	DEFAULT_MAX_RUN_SECONDS,
+	DEFAULT_NOTIFY_MAX_NOTICES,
+	DEFAULT_NOTIFY_MIN_INTERVAL_SECONDS,
+	DEFAULT_NOTIFY_MODE,
+	DEFAULT_RETRIEVE_MAX_BYTES,
+	DEFAULT_TERMINAL_RETENTION_SECONDS,
 	DEFAULT_TIMEOUT_SECONDS_PER_STEP,
 	EXTENSION_SOURCE_ORIGIN_VALUES,
 	EXTENSION_SOURCE_SCOPE_VALUES,
-	INVOCATION_AGENT_KIND_VALUES,
 	LIBRARY_SOURCE_VALUES,
-	MAX_CALLER_SKILLS,
+	MAX_CLIENT_MESSAGE_ID_CHARS,
 	MAX_CONCURRENCY,
 	MAX_DEPENDENCIES_PER_STEP,
-	MAX_INVOCATION_AGENTS,
-	MAX_MODEL_FIELD_CHARS,
+	MAX_MAX_RUN_SECONDS,
+	MAX_NOTIFY_MAX_NOTICES,
+	MAX_NOTIFY_MIN_INTERVAL_SECONDS,
+	MAX_PARENT_MESSAGE_CHARS,
 	MAX_PATH_FIELD_CHARS,
+	MAX_RETRIEVE_MAX_BYTES,
+	MAX_RETRIEVE_WAIT_SECONDS,
 	MAX_SHORT_TEXT_FIELD_CHARS,
 	MAX_STEPS,
+	MAX_TERMINAL_RETENTION_SECONDS,
 	MAX_TEXT_FIELD_CHARS,
 	MAX_TIMEOUT_SECONDS_PER_STEP,
+	MESSAGE_CHANNEL_VALUES,
+	NOTIFY_MODE_VALUES,
 	PROJECT_AGENTS_POLICY_VALUES,
 	PUBLIC_ID_PATTERN,
+	RUN_ID_PATTERN,
 	SKILL_NAME_PATTERN,
 	SOURCE_QUALIFIED_LIBRARY_REF_PATTERN,
-	THINKING_LEVEL_VALUES,
 	TOOL_NAME_PATTERN,
 } from "./types.ts";
 
@@ -36,34 +46,37 @@ function publicId(description: string) {
 	return Type.String({ description, minLength: 1, maxLength: 63, pattern: PUBLIC_ID_PATTERN });
 }
 
-function sourceQualifiedLibraryRef(description: string) {
-	return Type.String({ description, minLength: 1, maxLength: 72, pattern: SOURCE_QUALIFIED_LIBRARY_REF_PATTERN });
-}
-
-function agentReference(description: string) {
-	return Type.String({ description, minLength: 1, maxLength: 72, pattern: AGENT_REFERENCE_PATTERN });
-}
-
 function nonEmptyText(description: string, maxLength = MAX_TEXT_FIELD_CHARS) {
 	return Type.String({ description, minLength: 1, maxLength });
 }
 
+function sourceQualifiedLibraryRef(description: string) {
+	return Type.String({ description, minLength: 1, maxLength: 72, pattern: SOURCE_QUALIFIED_LIBRARY_REF_PATTERN });
+}
+
 const LibrarySchema = Type.Object(
 	{
-		sources: Type.Optional(
-			Type.Array(StringEnum(LIBRARY_SOURCE_VALUES), {
-				description: 'Reusable agent sources. Default ["package", "user"]. package=packaged agents/*.md; user=${PI_CODING_AGENT_DIR}/agents or ~/.pi/agent/agents; project=nearest project .pi/agents and requires projectAgents. Run steps use source-qualified refs such as "package:reviewer".',
-				minItems: 1,
-				maxItems: 3,
-			}),
-		),
-		query: Type.Optional(Type.String({ description: 'Catalog-only search query. Run calls reject query; use source-qualified refs instead.', minLength: 1, maxLength: MAX_SHORT_TEXT_FIELD_CHARS })),
-		projectAgents: Type.Optional(
-			StringEnum(PROJECT_AGENTS_POLICY_VALUES, {
-				description: 'Project-agent policy for nearest project .pi/agents. Default "deny". Use "allow" only for trusted repositories; "confirm" fails closed without UI.',
-				default: "deny",
-			}),
-		),
+		sources: Type.Optional(Type.Array(StringEnum(LIBRARY_SOURCE_VALUES), { description: 'Catalog-only sources. Default ["package", "user"]. For start, use graph.library.sources.', minItems: 1, maxItems: 3 })),
+		query: Type.Optional(Type.String({ description: "Catalog-only routing search. Exact phrases and non-stopword query terms are matched against refs, descriptions, tags, sources, default tools, model, and path.", minLength: 1, maxLength: MAX_SHORT_TEXT_FIELD_CHARS })),
+		projectAgents: Type.Optional(StringEnum(PROJECT_AGENTS_POLICY_VALUES, { description: 'Catalog project-agent policy. Default "deny". Use "allow" only when trusted; "confirm" requires UI.', default: "deny" })),
+	},
+	StrictObjectOptions,
+);
+
+const GraphLibrarySchema = Type.Object(
+	{
+		sources: Type.Optional(Type.Array(StringEnum(LIBRARY_SOURCE_VALUES), { description: 'Start-only library sources. Default ["package"]. Include "project" only with graph.authority.allowProjectCode:true.', minItems: 1, maxItems: 3 })),
+	},
+	StrictObjectOptions,
+);
+
+const AuthoritySchema = Type.Object(
+	{
+		allowFilesystemRead: Type.Optional(Type.Boolean({ description: "Allow the filesystem read/discovery suite: read, grep, find, and ls. Default false.", default: false })),
+		allowShellTools: Type.Optional(Type.Boolean({ description: "Allow the bash shell probe tool. Bash is trusted command execution and can mutate through commands. Default false.", default: false })),
+		allowMutationTools: Type.Optional(Type.Boolean({ description: "Allow structured edit and write child tools. Default false.", default: false })),
+		allowExtensionCode: Type.Optional(Type.Boolean({ description: "Allow explicit extensionTools grants. Default false.", default: false })),
+		allowProjectCode: Type.Optional(Type.Boolean({ description: "Allow project agents, project/local extension sources, and project/temporary caller skill sources. Default false.", default: false })),
 	},
 	StrictObjectOptions,
 );
@@ -71,184 +84,108 @@ const LibrarySchema = Type.Object(
 const ExtensionToolFromSchema = Type.Object(
 	{
 		source: nonEmptyText("Parent tool sourceInfo.source expected for this extension tool grant; this is provenance, not an install source.", MAX_SHORT_TEXT_FIELD_CHARS),
-		scope: Type.Optional(
-			StringEnum(EXTENSION_SOURCE_SCOPE_VALUES, {
-				description: 'Optional expected parent sourceInfo.scope: "user", "project", or "temporary".',
-			}),
-		),
-		origin: Type.Optional(
-			StringEnum(EXTENSION_SOURCE_ORIGIN_VALUES, {
-				description: 'Optional expected parent sourceInfo.origin: "package" or "top-level".',
-			}),
-		),
+		scope: Type.Optional(StringEnum(EXTENSION_SOURCE_SCOPE_VALUES, { description: 'Optional expected parent sourceInfo.scope: "user", "project", or "temporary".' })),
+		origin: Type.Optional(StringEnum(EXTENSION_SOURCE_ORIGIN_VALUES, { description: 'Optional expected parent sourceInfo.origin: "package" or "top-level".' })),
 	},
 	StrictObjectOptions,
 );
 
 const ExtensionToolGrantSchema = Type.Object(
 	{
-		name: Type.String({ description: 'Parent-active extension tool name to expose to this child, such as "exa_search". Built-in tools stay in tools[].', minLength: 1, maxLength: 64, pattern: TOOL_NAME_PATTERN }),
+		name: Type.String({ description: "Parent-active extension tool name to expose to this step.", minLength: 1, maxLength: 64, pattern: TOOL_NAME_PATTERN }),
 		from: ExtensionToolFromSchema,
 	},
 	StrictObjectOptions,
 );
 
-const CallerSkillNamesSchema = Type.Array(Type.String({ description: "Caller-visible Pi skill name.", minLength: 1, maxLength: 64, pattern: SKILL_NAME_PATTERN }), {
-	description: "Caller-visible Pi skill names from the current parent model context.",
+const SkillNamesSchema = Type.Array(Type.String({ description: "Caller-visible Pi skill name.", minLength: 1, maxLength: 64, pattern: SKILL_NAME_PATTERN }), {
+	description: "Explicit include-only caller-visible Pi skill names for this step.",
 	minItems: 1,
-	maxItems: MAX_CALLER_SKILLS,
+	maxItems: 128,
 });
 
-const CallerSkillsSchema = Type.Union(
-	[
-		StringEnum(CALLER_SKILL_SELECTION_MODE_VALUES, {
-			description: 'Caller Pi skill inheritance. Default "inherit" relays the caller model\'s currently visible Pi skills to read-enabled children; "none" disables skill inheritance.',
-			default: "inherit",
-		}),
-		Type.Object({ include: CallerSkillNamesSchema }, StrictObjectOptions),
-		Type.Object({ exclude: CallerSkillNamesSchema }, StrictObjectOptions),
-	],
-	{ description: 'Caller Pi skill inheritance selection: "inherit", "none", {"include":[...]}, or {"exclude":[...]}. Names are selected from the caller model\'s current visible Pi skills; this is not a separate agent_team skill catalog.' },
-);
-
-const AgentSpecSchema = Type.Object(
+const StepAgentSchema = Type.Object(
 	{
-		id: publicId('Invocation-local agent id used by steps. Lowercase letters, digits, and hyphens only. Reserved: "agent-team-synthesizer".'),
-		kind: StringEnum(INVOCATION_AGENT_KIND_VALUES, {
-			description: '"inline" defines a temporary agent for this call. "library" binds a source-qualified package/user/project agent.',
-		}),
-		ref: Type.Optional(sourceQualifiedLibraryRef('Source-qualified library ref such as "package:reviewer". Required when kind is "library".')),
-		description: Type.Optional(nonEmptyText("Short purpose for this invocation-local agent.", MAX_SHORT_TEXT_FIELD_CHARS)),
-		system: Type.Optional(nonEmptyText("Inline agent system prompt. Required when kind is inline.")),
-		tools: Type.Optional(
-			Type.Array(StringEnum(BUILTIN_CHILD_TOOL_NAMES), {
-				description: 'Explicit built-in child tool allowlist. Empty array means no tools. Inline agents default to no tools; library agents inherit declared built-in tools unless overridden. Extension tools such as exa_search use extensionTools[]. Prefer ["read","grep","find","ls"] for read-only work. Add "bash" only when command execution is needed and trusted.',
-				maxItems: 24,
-			}),
-		),
-		extensionTools: Type.Optional(
-			Type.Array(ExtensionToolGrantSchema, {
-				description: 'Explicit grants for parent-active extension tools. Each grant loads the extension code into the child with --no-extensions plus explicit --extension. Grants require sourceInfo provenance and are not a sandbox.',
-				maxItems: 24,
-			}),
-		),
-		callerSkills: Type.Optional(CallerSkillsSchema),
-		model: Type.Optional(nonEmptyText("Optional Pi model pattern or provider/model id for this agent.", MAX_MODEL_FIELD_CHARS)),
-		thinking: Type.Optional(
-			StringEnum(THINKING_LEVEL_VALUES, {
-				description: 'Optional thinking level. "inherit" uses the parent Pi setting.',
-			}),
-		),
-		cwd: Type.Optional(nonEmptyText("Existing working directory for this agent's steps.", MAX_PATH_FIELD_CHARS)),
-		outputContract: Type.Optional(nonEmptyText("Reusable output contract appended to this agent's delegated tasks.")),
+		system: Type.Optional(nonEmptyText("Inline step-agent system prompt. Set exactly one of system or ref; runtime planning rejects missing or mixed bindings.")),
+		ref: Type.Optional(sourceQualifiedLibraryRef('Source-qualified library ref such as "package:reviewer". Set exactly one of system or ref; runtime planning rejects missing or mixed bindings.')),
+		tools: Type.Optional(Type.Array(StringEnum(BUILTIN_CHILD_TOOL_NAMES), { description: "Explicit built-in child tool profile. Every child keeps at least the read/discovery suite, so omitted or [] resolves to read, grep, find, and ls and requires graph.authority.allowFilesystemRead:true. For library agents, explicit tools replace the whole catalog defaultTools profile; mandatory read/discovery is then added. It does not append. Any read/discovery primitive expands to the full read, grep, find, ls suite.", maxItems: 24 })),
+		extensionTools: Type.Optional(Type.Array(ExtensionToolGrantSchema, { description: "Explicit parent-active extension tool grants for this step.", maxItems: 24 })),
+		skills: Type.Optional(SkillNamesSchema),
 	},
-	StrictObjectOptions,
+	{ ...StrictObjectOptions, description: "Step-local inline agent or source-qualified library agent. Set exactly one of system or ref. No invocation-local agent registry is used." },
 );
 
 const StepSchema = Type.Object(
 	{
-		id: publicId("Unique step id. Dependency outputs are addressed by this id. Lowercase letters, digits, and hyphens only."),
-		agent: agentReference("Invocation-local agent id or source-qualified library ref to run."),
-		task: nonEmptyText("Concrete delegated task. Upstream dependency outputs are appended automatically as untrusted evidence, not instructions."),
-		needs: Type.Optional(
-			Type.Array(publicId("Step id that must finish before this step starts."), {
-				description: "Step ids that must finish before this step starts. Omit or empty means ready to run concurrently when capacity is available.",
-				maxItems: MAX_DEPENDENCIES_PER_STEP,
-			}),
-		),
-		cwd: Type.Optional(nonEmptyText("Existing working directory for this step.", MAX_PATH_FIELD_CHARS)),
-		outputContract: Type.Optional(nonEmptyText("Step-specific output contract.")),
-	},
-	StrictObjectOptions,
-);
-
-const SynthesisSchema = Type.Object(
-	{
-		id: Type.Optional(publicId('Synthetic step id. Default "synthesis".')),
-		agent: Type.Optional(agentReference("Invocation-local agent id or source-qualified library ref for synthesis. If omitted, a no-tool agent-team-synthesizer is created for inline upstream output. Oversized upstream output is passed as file refs and the receiver is launched with read.")),
-		from: Type.Optional(
-			Type.Array(publicId("Step id to synthesize."), {
-				description: "Step ids to synthesize. Default all non-synthesis steps.",
-				minItems: 1,
-				maxItems: MAX_STEPS,
-			}),
-		),
-		task: nonEmptyText("Synthesis instruction. Referenced step outputs are appended automatically as untrusted evidence, not instructions."),
-		allowPartial: Type.Optional(
-			Type.Boolean({ description: "If true, synthesize even when referenced steps fail. Default false.", default: false }),
-		),
-		outputContract: Type.Optional(nonEmptyText("Synthesis output contract.")),
-	},
-	StrictObjectOptions,
-);
-
-const ExtensionToolPolicySchema = Type.Object(
-	{
-		projectExtensions: Type.Optional(
-			StringEnum(PROJECT_AGENTS_POLICY_VALUES, {
-				description: 'Project-scoped extension tool policy. Default "deny". Use "allow" only for trusted repositories; "confirm" fails closed without UI.',
-				default: "deny",
-			}),
-		),
-		localExtensions: Type.Optional(
-			StringEnum(PROJECT_AGENTS_POLICY_VALUES, {
-				description: 'Temporary or current-workspace local extension tool policy. Default "deny". Use "allow" only for trusted local extension code; "confirm" fails closed without UI.',
-				default: "deny",
-			}),
-		),
+		id: publicId("Unique step id."),
+		agent: StepAgentSchema,
+		task: nonEmptyText("Concrete delegated task. Upstream outputs are appended as untrusted evidence."),
+		mutationScope: Type.Optional(nonEmptyText("First-class mutation authorization for this step. Required when effective tools can mutate through edit/write or when package:worker receives bash. Must name the allowed file set or mutation class; placeholders are denied.")),
+		needs: Type.Optional(Type.Array(publicId("Strict dependency step id; every listed step must succeed before this step starts."), { description: "Step ids that must succeed before this step starts.", maxItems: MAX_DEPENDENCIES_PER_STEP })),
+		after: Type.Optional(Type.Array(publicId("Terminal dependency step id; listed steps may succeed or fail before this step starts."), { description: "Step ids that must terminalize before this step starts, regardless of success or failure.", maxItems: MAX_DEPENDENCIES_PER_STEP })),
+		cwd: Type.Optional(nonEmptyText("Existing working directory for this step, resolved inside the invocation cwd.", MAX_PATH_FIELD_CHARS)),
 	},
 	StrictObjectOptions,
 );
 
 const LimitsSchema = Type.Object(
 	{
-		concurrency: Type.Optional(
-			Type.Number({
-				description: `Maximum concurrent runnable steps. Default ${MAX_CONCURRENCY}; hard max ${MAX_CONCURRENCY}. For write-capable or side-effectful graphs, set needs edges or concurrency: 1 unless file ownership is disjoint.`,
-				minimum: 1,
-				maximum: MAX_CONCURRENCY,
-				multipleOf: 1,
-			}),
-		),
-		timeoutSecondsPerStep: Type.Optional(
-			Type.Number({
-				description: `Optional per-step subprocess timeout in seconds, from 1 to ${MAX_TIMEOUT_SECONDS_PER_STEP}. Default ${DEFAULT_TIMEOUT_SECONDS_PER_STEP}. Raise it for broad, untrusted, implementation, release, bash-using, or other tool-using runs rather than setting short values.`,
-				minimum: 1,
-				maximum: MAX_TIMEOUT_SECONDS_PER_STEP,
-				default: DEFAULT_TIMEOUT_SECONDS_PER_STEP,
-			}),
-		),
+		concurrency: Type.Optional(Type.Number({ description: `Maximum concurrent runnable steps. Default ${MAX_CONCURRENCY}.`, minimum: 1, maximum: MAX_CONCURRENCY, multipleOf: 1 })),
+		timeoutSecondsPerStep: Type.Optional(Type.Number({ description: `Per-step subprocess timeout seconds. Default ${DEFAULT_TIMEOUT_SECONDS_PER_STEP}.`, minimum: 1, maximum: MAX_TIMEOUT_SECONDS_PER_STEP, multipleOf: 1, default: DEFAULT_TIMEOUT_SECONDS_PER_STEP })),
+	},
+	StrictObjectOptions,
+);
+
+const GraphSchema = Type.Object(
+	{
+		objective: nonEmptyText("Overall objective for the detached run."),
+		library: Type.Optional(GraphLibrarySchema),
+		authority: Type.Optional(AuthoritySchema),
+		steps: Type.Array(StepSchema, { description: "Static DAG steps.", minItems: 1, maxItems: MAX_STEPS }),
+		limits: Type.Optional(LimitsSchema),
+	},
+	StrictObjectOptions,
+);
+
+const NotifyOptionsSchema = Type.Object(
+	{
+		mode: Type.Optional(StringEnum(NOTIFY_MODE_VALUES, { description: 'Pushed update mode for detached start: "none", "final", or "milestones". Default "milestones".', default: DEFAULT_NOTIFY_MODE })),
+		maxNotices: Type.Optional(Type.Number({ description: "Maximum non-terminal milestone notices before terminal notice. Default 12.", minimum: 0, maximum: MAX_NOTIFY_MAX_NOTICES, multipleOf: 1, default: DEFAULT_NOTIFY_MAX_NOTICES })),
+		minIntervalSeconds: Type.Optional(Type.Number({ description: "Minimum seconds between non-terminal milestone notices. Default 10.", minimum: 0, maximum: MAX_NOTIFY_MIN_INTERVAL_SECONDS, multipleOf: 1, default: DEFAULT_NOTIFY_MIN_INTERVAL_SECONDS })),
+	},
+	StrictObjectOptions,
+);
+
+const StartOptionsSchema = Type.Object(
+	{
+		maxRunSeconds: Type.Optional(Type.Number({ description: "Maximum live run seconds before expiry cancellation.", minimum: 1, maximum: MAX_MAX_RUN_SECONDS, multipleOf: 1, default: DEFAULT_MAX_RUN_SECONDS })),
+		terminalRetentionSeconds: Type.Optional(Type.Number({ description: "Seconds to retain terminal run state for retrieve/cleanup.", minimum: 1, maximum: MAX_TERMINAL_RETENTION_SECONDS, multipleOf: 1, default: DEFAULT_TERMINAL_RETENTION_SECONDS })),
+		notify: Type.Optional(NotifyOptionsSchema),
 	},
 	StrictObjectOptions,
 );
 
 export const AgentTeamSchema = Type.Object(
 	{
-		action: StringEnum(AGENT_TEAM_ACTION_VALUES, {
-			description: 'Use "catalog" to list reusable agents. Use "run" to execute a bounded graph of inline or source-qualified library agents.',
-		}),
-		objective: Type.Optional(nonEmptyText("Overall objective for the team. Required for run; rejected for catalog.")),
-		graphFile: Type.Optional(nonEmptyText("Run-only relative path to a JSON file containing a complete agent_team run graph. Mutually exclusive with objective, library, extensionToolPolicy, callerSkills, agents, steps, synthesis, and limits.", MAX_PATH_FIELD_CHARS)),
+		action: StringEnum(AGENT_TEAM_ACTION_VALUES, { description: 'Action decision: "catalog" discovers refs/provenance, "start" launches a detached graph, "retrieve" reads compact run/sink state or performs a bounded wait/read with waitSeconds, "peek" inspects exactly one step, "message" queues one live clarification/scope repair, "cancel" stops a live run only when stopping is explicitly more valuable than completion, and "cleanup" deletes terminal artifacts when retained evidence is no longer needed.' }),
 		library: Type.Optional(LibrarySchema),
-		extensionToolPolicy: Type.Optional(ExtensionToolPolicySchema),
-		callerSkills: Type.Optional(CallerSkillsSchema),
-		agents: Type.Optional(
-			Type.Array(AgentSpecSchema, {
-				description: "Invocation-local inline agents and reusable library bindings. Optional; steps can directly use source-qualified library refs.",
-				maxItems: MAX_INVOCATION_AGENTS,
-			}),
-		),
-		steps: Type.Optional(
-			Type.Array(StepSchema, {
-				description: "Dependency graph steps. Steps without needs launch when concurrency permits. Steps with needs receive upstream outputs automatically. Serialize write-capable steps unless ownership is disjoint.",
-				minItems: 1,
-				maxItems: MAX_STEPS,
-			}),
-		),
-		synthesis: Type.Optional(SynthesisSchema),
-		limits: Type.Optional(LimitsSchema),
+		graph: Type.Optional(GraphSchema),
+		graphFile: Type.Optional(nonEmptyText("Start-only relative path to a pure detached graph JSON file.", MAX_PATH_FIELD_CHARS)),
+		options: Type.Optional(StartOptionsSchema),
+		runId: Type.Optional(Type.String({ description: "Detached run bearer capability returned by start.", minLength: 28, maxLength: 100, pattern: RUN_ID_PATTERN })),
+		cursor: Type.Optional(Type.String({ description: "Retrieve cursor returned by a prior retrieve call.", minLength: 1, maxLength: 128 })),
+		stepId: Type.Optional(publicId("Step id for retrieve wait/debug targeting only, or the required target for peek/message. Retrieve stepId does not select step text; use peek for one-step output.")),
+		waitSeconds: Type.Optional(Type.Number({ description: "Retrieve-only bounded wait/read control. Before returning the same compact retrieve snapshot, wait until a material parent-visible event occurs or this timeout expires: run terminal/cancel/expiry, sink or targeted step finish, failed/blocked/timed-out/canceled step, or error diagnostic. Routine assistant/tool activity does not wake retrieve.", minimum: 1, maximum: MAX_RETRIEVE_WAIT_SECONDS, multipleOf: 1 })),
+		maxBytes: Type.Optional(Type.Number({ description: "Retrieve/peek-only aggregate child-output preview byte cap used only when preview:true, and for debug events; not valid for catalog or start.", minimum: 1, maximum: MAX_RETRIEVE_MAX_BYTES, multipleOf: 1, default: DEFAULT_RETRIEVE_MAX_BYTES })),
+		preview: Type.Optional(Type.Boolean({ description: "Retrieve/peek-only opt-in to include bounded assistant text previews. Default false returns status, diagnostics, step rows, artifact indexes, and artifact paths without child final text.", default: false })),
+		debugEvents: Type.Optional(Type.Boolean({ description: "Retrieve-only opt-in to include raw background event records. Default false.", default: false })),
+		channel: Type.Optional(StringEnum(MESSAGE_CHANNEL_VALUES, { description: 'Message-only child RPC channel. "steer" queues after the current assistant turn/tool batch before the next LLM call; "follow_up" defers a live follow-up until the child is quiescent before terminalization, if still messageable. It is not post-terminal chat and must not be used to force premature finals.' })),
+		text: Type.Optional(nonEmptyText("Parent message text for a live step; use for bounded clarification or scope repair, not impatience.", MAX_PARENT_MESSAGE_CHARS)),
+		clientMessageId: Type.Optional(Type.String({ description: "Optional idempotency key for message.", minLength: 1, maxLength: MAX_CLIENT_MESSAGE_ID_CHARS })),
+		reason: Type.Optional(nonEmptyText("Optional cancel reason; cancel only for explicit stop, unsafe/stuck/obsolete work, or user-prioritized interruption.", MAX_SHORT_TEXT_FIELD_CHARS)),
 	},
 	StrictObjectOptions,
 );
 
 export type AgentTeamInput = Static<typeof AgentTeamSchema>;
+export type GraphSpec = Static<typeof GraphSchema>;

@@ -1,0 +1,35 @@
+{
+  "objective": "Run named read-only validation commands and preserve observed proof without mutation.",
+  "library": {
+    "sources": [
+      "package"
+    ]
+  },
+  "authority": {
+    "allowFilesystemRead": true,
+    "allowShellTools": true
+  },
+  "steps": [
+    {
+      "id": "validation-proof",
+      "agent": {
+        "ref": "package:validator"
+      },
+      "task": "Run only the parent-named read-only validation commands copied into this task: REPLACE with exact commands before running this graph, or return needs-command-scope without running anything. Report pass/fail/deferred per command with cwd, important output, and failure bucket. Do not edit, install, publish, deploy, delete, or run network commands."
+    },
+    {
+      "id": "final-proof",
+      "agent": {
+        "ref": "package:synthesizer"
+      },
+      "after": [
+        "validation-proof"
+      ],
+      "task": "Summarize observed command results, deferred commands, failure buckets, and residual risk. If validation-proof failed, was empty, or returned needs-command-scope, preserve that as the decision instead of inventing proof."
+    }
+  ],
+  "limits": {
+    "concurrency": 1,
+    "timeoutSecondsPerStep": 9000
+  }
+}

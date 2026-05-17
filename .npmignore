@@ -5,9 +5,13 @@
 .github/
 .gitignore
 .npmignore
+AGENTS.md
+ARCH.md
 CONTINUE.md
-PLAN.md
 HANDOFF.md
+PLAN.md
+TODO.md
+VISION.md
 
 # Tests and development-only checks
 tests/
@@ -30,6 +34,9 @@ build/
 tmp/
 .cache/
 *.tsbuildinfo
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
 *.tgz
 *.log
 npm-debug.log*

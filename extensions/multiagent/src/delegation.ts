@@ -1,386 +1,161 @@
-/** Model-native delegation runtime for isolated Pi subprocess agents. */
+/** Public detached agent_team action dispatcher. */
 
-import { spawn } from "node:child_process";
-import { lstatSync, realpathSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
-import type { AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
-import { catalogAgents } from "./agents.ts";
-import { spawnPiJson } from "./child-runtime.ts";
-import type { SpawnProcess } from "./child-launch.ts";
-import { buildDelegatedTask, cleanupPromptFile, writePromptFile } from "./delegated-prompt.ts";
-import type { AgentTeamInput } from "./schemas.ts";
-import type {
-	AgentDiagnostic,
-	AgentDiscoveryResult,
-	AgentInvocationDefaults,
-	AgentRunResult,
-	AgentTeamDetails,
-	ExtensionToolPolicy,
-	LibraryOptions,
-	ParentSkillInventory,
-	ParentToolInventory,
-	ResolvedAgent,
-	TeamLimits,
-	TeamStepSpec,
-} from "./types.ts";
-import { appendDiagnostic, createRunResult, finishRunStatus, isFailedResult, isTerminalResult, noteFailureCause } from "./json-events.ts";
-import { normalizeLimits } from "./limits.ts";
-import { prepareAutomaticHandoff } from "./handoff.ts";
-import { catalogParentExtensionTools, normalizeExtensionToolPolicy, verifyResolvedExtensionSources } from "./tool-policy.ts";
-import { verifyResolvedCallerSkillSources } from "./caller-skills.ts";
-import { persistFullStepOutputs, writeTempMarkdown } from "./output-files.ts";
-import { blockStep, createPlaceholder, makeDiagnostic, resolveRunPlan, validatePreflightShape } from "./planning.ts";
-import { formatDetailsForModel, formatSize, modelText, truncateHead } from "./result-format.ts";
-import { snapshotAgent, snapshotCatalogAgent, snapshotResult } from "./snapshot.ts";
+import { randomBytes } from "node:crypto";
+import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
+import { Compile } from "typebox/compile";
+import { catalogAgents, discoverAgents, normalizeLibraryOptions } from "./agents.ts";
+import { DetachedRun } from "./detached-run.ts";
+import { forgetDetachedRun, getDetachedRun, listDetachedRuns, registerDetachedRun } from "./detached-registry.ts";
+import { materializeAgentTeamInput } from "./graph-file.ts";
+import { resolveDetachedGraph, validatePreflightShape } from "./planning.ts";
+import { finalizeDetails, hasDiagnosticError, makeDetails, type AgentTeamRuntimeOptions, unavailableTools } from "./runtime-options.ts";
+import { catalogParentExtensionToolDiagnostics } from "./tool-policy.ts";
+import { AgentTeamSchema, type AgentTeamInput, type GraphSpec } from "./schemas.ts";
+import type { AgentDiagnostic, AgentTeamDetails } from "./types.ts";
+import { AGENT_TEAM_ACTION_VALUES, DEFAULT_GRAPH_LIBRARY_SOURCES, DEFAULT_RETRIEVE_MAX_BYTES, MAX_LIVE_DETACHED_RUNS, MAX_RETAINED_DETACHED_RUNS, type ExecutionAction } from "./types.ts";
 
-interface RunTeamOptions {
-	cwd: string;
-	discovery: AgentDiscoveryResult;
-	library: LibraryOptions;
-	defaults: AgentInvocationDefaults;
-	parentTools?: ParentToolInventory;
-	parentSkills?: ParentSkillInventory;
-	extensionToolPolicy?: ExtensionToolPolicy;
-	signal: AbortSignal | undefined;
-	onUpdate: AgentToolUpdateCallback<AgentTeamDetails> | undefined;
-	spawnProcess?: SpawnProcess;
+const validateAgentTeamInput = Compile(AgentTeamSchema);
+
+export async function runAgentTeam(rawInput: unknown, options: AgentTeamRuntimeOptions): Promise<AgentToolResult<AgentTeamDetails>> {
+	const rawPreflightDiagnostics = validatePreflightShape(rawInput);
+	const rawSchemaDiagnostics = validateInputSchema(rawInput);
+	const rawDiagnostics = [...rawPreflightDiagnostics, ...rawSchemaDiagnostics];
+	const materialized = hasDiagnosticError(rawDiagnostics) ? { input: rawInput, diagnostics: [] } : materializeAgentTeamInput(rawInput, options.cwd);
+	const inputForValidation = materialized.input;
+	const materializedPreflightDiagnostics = materialized.input === rawInput ? [] : validatePreflightShape(inputForValidation);
+	const materializedSchemaDiagnostics = materialized.input === rawInput ? [] : validateInputSchema(inputForValidation);
+	const diagnostics = [...options.materializationDiagnostics, ...options.catalogPreparationDiagnostics, ...rawDiagnostics, ...materialized.diagnostics, ...materializedPreflightDiagnostics, ...materializedSchemaDiagnostics];
+	if (hasDiagnosticError(diagnostics)) return finalizeDetails(makeDetails(detailsAction(inputForValidation), false, diagnostics, options));
+	const input = inputForValidation as AgentTeamInput;
+	if (input.action === "catalog") return finalizeDetails(catalog(input, options, diagnostics));
+	if (input.action === "start") return finalizeDetails(start(input, options, diagnostics));
+	if (input.action === "retrieve") return finalizeDetails(await retrieve(input, options, diagnostics));
+	if (input.action === "peek") return finalizeDetails(peek(input, options, diagnostics));
+	if (input.action === "message") return finalizeDetails(await message(input, options, diagnostics));
+	if (input.action === "cancel") return finalizeDetails(cancel(input, options, diagnostics));
+	if (input.action === "cleanup") return finalizeDetails(cleanup(input, options, diagnostics));
+	return finalizeDetails(makeDetails("missing/invalid", false, diagnostics, options, undefined, { code: "action-invalid", message: "Unknown action." }));
 }
 
-interface RunOneOptions {
-	defaultCwd: string;
-	objective: string;
-	agent: ResolvedAgent;
-	step: TeamStepSpec;
-	upstream: AgentRunResult[];
-	defaults: AgentInvocationDefaults;
-	limits: TeamLimits;
-	signal: AbortSignal | undefined;
-	spawnProcess: SpawnProcess;
-	onPartial: ((result: AgentRunResult) => void) | undefined;
+function catalog(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): AgentTeamDetails {
+	const discovery = discoverAgents({ cwd: options.cwd, packageAgentsDir: options.packageAgentsDir, library: options.catalogLibrary });
+	const allDiagnostics = [...diagnostics, ...discovery.diagnostics, ...catalogParentExtensionToolDiagnostics(options.parentTools)];
+	return makeDetails("catalog", !hasDiagnosticError(allDiagnostics), allDiagnostics, options, { library: { ...options.catalogLibrary, sources: discovery.sources }, catalog: catalogAgents(discovery, options.catalogLibrary.query) });
 }
 
-export async function runAgentTeam(
-	input: AgentTeamInput,
-	options: RunTeamOptions,
-): Promise<AgentToolResult<AgentTeamDetails>> {
-	if (options.discovery.diagnostics.some((item) => item.severity === "error") && input.graphFile !== undefined) {
-		return finalizeResult(makeDetails(input, options, [], [], options.discovery.diagnostics));
-	}
-	const actionDiagnostics = validatePreflightShape(input);
-	if (actionDiagnostics.some((item) => item.severity === "error")) {
-		return finalizeResult(makeDetails(input, options, [], [], [...options.discovery.diagnostics, ...actionDiagnostics]));
-	}
-	if (input.action === "catalog") {
-		const catalog = catalogAgents(options.discovery, options.library.query);
-		return finalizeResult(makeDetails(input, options, catalog, [], options.discovery.diagnostics));
-	}
-	return runTeam(input, options);
+function start(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): AgentTeamDetails {
+	if (options.signal?.aborted) return makeDetails("start", false, diagnostics, options, undefined, { code: "start-aborted-before-run-id", message: "Start was aborted before a runId was registered; no child process was launched." });
+	const graph = input.graph as GraphSpec | undefined;
+	if (!graph) return makeDetails("start", false, diagnostics, options, undefined, { code: "start-graph-missing", message: "Start requires graph or graphFile." });
+	const librarySources = graph.library?.sources && graph.library.sources.length > 0 ? graph.library.sources : DEFAULT_GRAPH_LIBRARY_SOURCES;
+	const library = normalizeLibraryOptions({ sources: librarySources, projectAgents: graph.authority?.allowProjectCode ? "allow" : "deny" });
+	const discovery = discoverAgents({ cwd: options.cwd, packageAgentsDir: options.packageAgentsDir, library });
+	const resolved = resolveDetachedGraph(graph, discovery.agents, [...diagnostics, ...discovery.diagnostics], { cwd: options.cwd, invocationCwd: options.cwd, parentTools: options.parentTools ?? unavailableTools(), parentSkills: options.parentSkills }, input.options);
+	if (resolved.steps.length !== graph.steps.length || hasDiagnosticError(resolved.diagnostics)) return makeDetails("start", false, resolved.diagnostics, options, { library: { ...library, sources: discovery.sources } }, { code: "start-planning-failed", message: "Detached graph planning failed; no child process was launched." });
+	const capacityError = detachedRunCapacityError();
+	if (capacityError) return makeDetails("start", false, resolved.diagnostics, options, { library: { ...library, sources: discovery.sources } }, capacityError);
+	const run = new DetachedRun(createRunId(), resolved, detachedRunOptions(options), { ...library, sources: discovery.sources });
+	registerDetachedRun(run);
+	run.start();
+	return run.details("start");
 }
 
-async function runTeam(input: AgentTeamInput, options: RunTeamOptions): Promise<AgentToolResult<AgentTeamDetails>> {
-	const plan = resolveRunPlan(input, options.discovery.agents, options.discovery.diagnostics, {
-		parentTools: options.parentTools ?? { apiAvailable: false, errorMessage: undefined, tools: [] },
-		parentSkills: options.parentSkills,
-		extensionToolPolicy: options.extensionToolPolicy ?? normalizeExtensionToolPolicy(input.extensionToolPolicy),
-		cwd: options.cwd,
-	});
-	if (plan.diagnostics.some((item) => item.severity === "error")) {
-		return finalizeResult(makeDetails(input, options, [], [], plan.diagnostics, plan.agents));
-	}
-	const limits = normalizeLimits(input);
-	const spawnProcess = options.spawnProcess ?? spawn;
-	const resultById = new Map<string, AgentRunResult>();
-	for (const step of plan.steps) resultById.set(step.id, createPlaceholder(step, plan.agents));
-	emitUpdate(input, options, plan.agents, orderedResults(plan.steps, resultById), plan.diagnostics);
-	const pending = new Map(plan.steps.map((step) => [step.id, step]));
-	const running = new Map<string, Promise<void>>();
-
-	const startReadySteps = () => {
-		let changed = false;
-		for (const step of Array.from(pending.values())) {
-			if (hasFailedDependency(step, resultById)) {
-				const failed = failedDependencies(step, resultById);
-				const hint = step.synthesis ? " Use synthesis.allowPartial:true after inspecting failed lanes." : "";
-				resultById.set(step.id, blockStep(step, plan.agents, `Blocked because dependency failed: ${failed.join(", ")}.${hint}`));
-				pending.delete(step.id);
-				changed = true;
-			}
-		}
-		for (const step of Array.from(pending.values())) {
-			if (running.size >= limits.concurrency) break;
-			if (!dependenciesReady(step, resultById)) continue;
-			pending.delete(step.id);
-			changed = true;
-			const task = runScheduledStep(step, input, options, plan.objective, plan.agents, plan.steps, resultById, plan.diagnostics, limits, spawnProcess).finally(
-				() => {
-					running.delete(step.id);
-				},
-			);
-			running.set(step.id, task);
-		}
-		return changed;
-	};
-
-	while (pending.size > 0 || running.size > 0) {
-		const changed = startReadySteps();
-		if (running.size === 0) {
-			if (!changed && pending.size > 0) {
-				for (const step of pending.values()) resultById.set(step.id, blockStep(step, plan.agents, "Blocked because no runnable dependency order remains."));
-				pending.clear();
-			}
-			continue;
-		}
-		await Promise.race(Array.from(running.values()));
-	}
-	return finalizeResult(makeDetails(input, options, [], orderedResults(plan.steps, resultById), plan.diagnostics, plan.agents));
+async function retrieve(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): Promise<AgentTeamDetails> {
+	const run = getDetachedRun(input.runId);
+	if (!run) return makeDetails("retrieve", false, diagnostics, options, undefined, runNotFoundError());
+	if (input.stepId && !run.hasStep(input.stepId)) return run.details("retrieve", { stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RETRIEVE_MAX_BYTES, preview: input.preview === true, ok: false, error: { code: "step-not-found", message: "No step in the retained detached run matches stepId." } });
+	if (input.waitSeconds !== undefined) await run.waitForChange({ stepId: input.stepId, cursor: input.cursor, seconds: input.waitSeconds });
+	return run.details("retrieve", { cursor: input.cursor, stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RETRIEVE_MAX_BYTES, preview: input.preview === true, includeEvents: input.debugEvents === true });
 }
 
-async function runScheduledStep(
-	step: TeamStepSpec,
-	input: AgentTeamInput,
-	options: RunTeamOptions,
-	objective: string,
-	agents: ResolvedAgent[],
-	steps: TeamStepSpec[],
-	resultById: Map<string, AgentRunResult>,
-	diagnostics: AgentDiagnostic[],
-	limits: TeamLimits,
-	spawnProcess: SpawnProcess,
-): Promise<void> {
-	const agent = agents.find((candidate) => candidate.id === step.agent);
-	if (!agent) return;
-	const upstream = step.needs.map((id) => resultById.get(id)).filter((result): result is AgentRunResult => result !== undefined);
-	const handoff = await prepareAutomaticHandoff(step, agent, upstream, diagnostics);
-	if (handoff.blockReason) {
-		resultById.set(step.id, blockStep(step, agents, handoff.blockReason, "upstream handoff artifact unavailable"));
-		emitUpdate(input, options, agents, orderedResults(steps, resultById), diagnostics);
-		return;
-	}
-	const result = await runOneAgent({
-		defaultCwd: options.cwd,
-		objective,
-		agent: handoff.launchAgent,
-		step,
-		upstream,
-		defaults: options.defaults,
-		limits,
-		signal: options.signal,
-		spawnProcess,
-		onPartial: (partial) => {
-			resultById.set(step.id, partial);
-			emitUpdate(input, options, agents, orderedResults(steps, resultById), diagnostics);
-		},
-	});
-	resultById.set(step.id, result);
-	emitUpdate(input, options, agents, orderedResults(steps, resultById), diagnostics);
+function peek(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): AgentTeamDetails {
+	const run = getDetachedRun(input.runId);
+	if (!run) return makeDetails("peek", false, diagnostics, options, undefined, runNotFoundError());
+	if (!input.stepId || !run.hasStep(input.stepId)) return run.details("peek", { stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RETRIEVE_MAX_BYTES, preview: input.preview === true, ok: false, error: { code: "step-not-found", message: "No step in the retained detached run matches stepId." } });
+	return run.details("peek", { stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RETRIEVE_MAX_BYTES, preview: input.preview === true });
 }
 
-async function runOneAgent(options: RunOneOptions): Promise<AgentRunResult> {
-	const cwd = resolveTaskCwd(options.defaultCwd, options.step.cwd ?? options.agent.cwd);
-	const task = buildDelegatedTask(options.objective, options.step, options.agent, options.upstream);
-	const result = createRunResult({
-		id: options.step.id,
-		agent: options.agent.id,
-		agentName: options.agent.name,
-		agentRef: options.agent.ref,
-		agentSource: options.agent.source,
-		task,
-		cwd,
-		needs: options.step.needs,
-		synthesis: options.step.synthesis,
-	});
-	options.onPartial?.(snapshotResult(result));
-	if (options.signal?.aborted) {
-		finishRunStatus(result, undefined, { aborted: true, timedOut: false, launched: false });
-		appendDiagnostic(result, "Subagent was aborted before launch.");
-		return result;
-	}
-	if (!isExistingDirectory(cwd)) {
-		result.errorMessage = `Working directory is not a directory: ${cwd}`;
-		noteFailureCause(result, result.errorMessage);
-		finishRunStatus(result, undefined, { aborted: false, timedOut: false });
-		return snapshotResult(result);
-	}
-	const projectSettings = options.agent.tools.includes("bash") ? findProjectSettingsFile(cwd) : undefined;
-	if (projectSettings) {
-		result.errorMessage = `Bash-enabled subagent refused cwd with project settings: ${projectSettings}`;
-		noteFailureCause(result, result.errorMessage);
-		finishRunStatus(result, undefined, { aborted: false, timedOut: false });
-		return snapshotResult(result);
-	}
-	const extensionSourceError = verifyResolvedExtensionSources(options.agent.extensionTools);
-	if (extensionSourceError) return failBeforeLaunch(result, extensionSourceError);
-	const callerSkillSourceError = verifyResolvedCallerSkillSources(options.agent.callerSkills);
-	if (callerSkillSourceError) return failBeforeLaunch(result, callerSkillSourceError);
-	let prompt: { dir: string; filePath: string } | undefined;
+async function message(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): Promise<AgentTeamDetails> {
+	const run = getDetachedRun(input.runId);
+	if (!run) return makeDetails("message", false, diagnostics, options, undefined, runNotFoundError());
+	const receipt = await run.message(input.stepId ?? "", input.channel ?? "steer", input.text ?? "", input.clientMessageId);
+	return run.details("message", { message: receipt, ok: receipt.accepted, error: receipt.accepted ? undefined : { code: "message-not-delivered", message: receipt.undeliveredReason ?? "Message was not delivered." } });
+}
+
+function cancel(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): AgentTeamDetails {
+	const run = getDetachedRun(input.runId);
+	if (!run) return makeDetails("cancel", false, diagnostics, options, undefined, runNotFoundError());
+	run.cancel(input.reason);
+	return run.details("cancel");
+}
+
+function cleanup(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): AgentTeamDetails {
+	const run = getDetachedRun(input.runId);
+	if (!run) return makeDetails("cleanup", false, diagnostics, options, undefined, runNotFoundError());
+	if (!run.snapshot().terminal) return run.details("cleanup", { ok: false, error: { code: "cleanup-run-live", message: "Cleanup is denied while the run is live; let healthy work finish, or cancel only when stopping is explicit, then retrieve terminal state first." } });
 	try {
-		prompt = await writePromptFile(options.agent);
-		if (options.signal?.aborted) {
-			finishRunStatus(result, undefined, { aborted: true, timedOut: false, launched: false });
-			appendDiagnostic(result, "Subagent was aborted before launch.");
-		} else {
-			const outcome = await spawnPiJson({
-				agent: options.agent,
-				defaults: options.defaults,
-				limits: options.limits,
-				cwd,
-				promptPath: prompt.filePath,
-				task,
-				result,
-				signal: options.signal,
-				spawnProcess: options.spawnProcess,
-				onPartial: () => {
-					options.onPartial?.(snapshotResult(result));
-				},
-			});
-			finishRunStatus(result, outcome.exitCode, { aborted: outcome.aborted, timedOut: outcome.timedOut, exitSignal: outcome.exitSignal, failureTerminated: outcome.failureTerminated, launched: outcome.launched, closeout: outcome.closeout });
-		}
+		const receipt = run.cleanup();
+		forgetDetachedRun(run.id);
+		return run.details("cleanup", { cleanup: receipt });
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		result.errorMessage = `Subagent launch error: ${message}`;
-		noteFailureCause(result, result.errorMessage);
-		appendDiagnostic(result, result.errorMessage);
-		finishRunStatus(result, undefined, { aborted: false, timedOut: false });
-	} finally {
-		if (prompt) await cleanupPromptFile(prompt.dir, result);
-	}
-	return snapshotResult(result);
-}
-
-function failBeforeLaunch(result: AgentRunResult, message: string): AgentRunResult {
-	result.errorMessage = message;
-	noteFailureCause(result, result.errorMessage);
-	appendDiagnostic(result, result.errorMessage);
-	finishRunStatus(result, undefined, { aborted: false, timedOut: false, launched: false, closeout: "no_child_process" });
-	return snapshotResult(result);
-}
-
-async function finalizeResult(details: AgentTeamDetails): Promise<AgentToolResult<AgentTeamDetails>> {
-	const detailsWithStepFiles = await persistFullStepOutputs(details);
-	const text = formatDetailsForModel(detailsWithStepFiles);
-	const truncation = truncateHead(text);
-	let outputText = truncation.content;
-	let fullOutputPath: string | undefined;
-	if (truncation.truncated || truncation.firstLineExceedsLimit) {
-		let note: string;
-		try {
-			fullOutputPath = await writeTempMarkdown("pi-multiagent-output-", "agent-team-output.md", text);
-			note = `[agent_team output truncated: ${truncation.outputLines}/${truncation.totalLines} lines (${formatSize(truncation.outputBytes)} of ${formatSize(truncation.totalBytes)}). Full aggregate JSON-string file path: ${JSON.stringify(fullOutputPath)}]`;
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			const safeMessage = modelText(message);
-			note = `[agent_team output truncated: ${truncation.outputLines}/${truncation.totalLines} lines (${formatSize(truncation.outputBytes)} of ${formatSize(truncation.totalBytes)}). Full aggregate could not be saved: ${safeMessage}]`;
-			detailsWithStepFiles.diagnostics.push(makeDiagnostic("full-output-persist-failed", `Could not persist full aggregate output: ${safeMessage}`, "warning"));
-		}
-		outputText = outputText.length > 0 ? `${outputText}\n\n${note}` : note;
-	}
-	return { content: [{ type: "text", text: outputText }], details: { ...detailsWithStepFiles, fullOutputPath } };
-}
-
-function makeDetails(
-	input: AgentTeamInput,
-	options: RunTeamOptions,
-	catalog: AgentTeamDetails["catalog"],
-	steps: AgentRunResult[],
-	diagnostics: AgentDiagnostic[],
-	agents: ResolvedAgent[] = [],
-): AgentTeamDetails {
-	return {
-		kind: "agent_team",
-		action: input.action === "catalog" || input.action === "run" ? input.action : "missing/invalid",
-		objective: input.objective,
-		library: { ...options.library, sources: options.discovery.sources },
-		catalog: catalog.map(snapshotCatalogAgent),
-		extensionTools: catalogParentExtensionTools(options.parentTools),
-		agents: agents.map(snapshotAgent),
-		steps,
-		diagnostics: diagnostics.map((diagnostic) => ({ ...diagnostic })),
-		fullOutputPath: undefined,
-	};
-}
-
-function emitUpdate(
-	input: AgentTeamInput,
-	options: RunTeamOptions,
-	agents: ResolvedAgent[],
-	steps: AgentRunResult[],
-	diagnostics: AgentDiagnostic[],
-): void {
-	options.onUpdate?.({ content: [{ type: "text", text: progressText(steps) }], details: makeDetails(input, options, [], steps.map(snapshotResult), diagnostics, agents) });
-}
-
-function progressText(results: AgentRunResult[]): string {
-	const running = results.filter((result) => result.status === "running").length;
-	const terminal = results.filter(isTerminalResult).length;
-	return `agent_team: ${terminal}/${results.length} terminal, ${running} running`;
-}
-
-function orderedResults(steps: TeamStepSpec[], resultById: Map<string, AgentRunResult>): AgentRunResult[] {
-	return steps.map((step) => resultById.get(step.id)).filter((result): result is AgentRunResult => result !== undefined).map(snapshotResult);
-}
-
-function dependenciesReady(step: TeamStepSpec, resultById: Map<string, AgentRunResult>): boolean {
-	return step.needs.every((id) => {
-		const result = resultById.get(id);
-		if (!result || !isTerminalResult(result)) return false;
-		return step.allowFailedDependencies || !isFailedResult(result);
-	});
-}
-
-function hasFailedDependency(step: TeamStepSpec, resultById: Map<string, AgentRunResult>): boolean {
-	return failedDependencies(step, resultById).length > 0;
-}
-
-function failedDependencies(step: TeamStepSpec, resultById: Map<string, AgentRunResult>): string[] {
-	if (step.allowFailedDependencies) return [];
-	return step.needs.filter((id) => {
-		const result = resultById.get(id);
-		return result !== undefined && isTerminalResult(result) && isFailedResult(result);
-	});
-}
-
-function resolveTaskCwd(defaultCwd: string, taskCwd: string | undefined): string {
-	if (!taskCwd || taskCwd.trim().length === 0) return defaultCwd;
-	return isAbsolute(taskCwd) ? taskCwd : resolve(defaultCwd, taskCwd);
-}
-
-function isExistingDirectory(path: string): boolean {
-	try {
-		return statSync(path).isDirectory();
-	} catch {
-		return false;
+		return run.details("cleanup", { ok: false, error: { code: "cleanup-artifacts-failed", message: `Cleanup failed while deleting retained artifacts: ${error instanceof Error ? error.message : String(error)}` } });
 	}
 }
 
-function findProjectSettingsFile(cwd: string): string | undefined {
-	const lexical = findProjectSettingsFileInAncestors(cwd);
-	if (lexical) return lexical;
-	const real = safeRealpath(cwd);
-	if (!real || real === cwd) return undefined;
-	return findProjectSettingsFileInAncestors(real);
+function runNotFoundError(): { code: string; message: string } {
+	const runs = listDetachedRuns().map((run) => run.snapshot());
+	const recent = summarizeRunCapacity(runs);
+	return { code: "run-not-found", message: `No retained detached run matches runId. Run ids are process/session-local and can disappear after retention expiry, cleanup, extension reload, or session shutdown; preserve artifact paths before cleanup. Retained runs now: ${runs.length}; recent: ${recent}.` };
 }
 
-function findProjectSettingsFileInAncestors(cwd: string): string | undefined {
-	let current = cwd;
-	while (true) {
-		const candidate = join(current, ".pi", "settings.json");
-		try {
-			lstatSync(candidate);
-			return candidate;
-		} catch {
-			// Keep walking ancestors until the filesystem root.
-		}
-		const parent = dirname(current);
-		if (parent === current) return undefined;
-		current = parent;
+function detachedRunCapacityError(): { code: string; message: string } | undefined {
+	const runs = listDetachedRuns();
+	const snapshots = runs.map((run) => run.snapshot());
+	const liveRuns = snapshots.filter((run) => !run.terminal);
+	const terminalRuns = snapshots.filter((run) => run.terminal);
+	if (liveRuns.length >= MAX_LIVE_DETACHED_RUNS) return { code: "detached-run-live-cap-reached", message: `Too many live detached runs (${liveRuns.length}); retrieve and preserve evidence, then cancel only runs that are stuck, obsolete, unsafe, or explicitly lower value than the new work. Maximum live runs: ${MAX_LIVE_DETACHED_RUNS}. Live runs: ${summarizeRunCapacity(liveRuns)}.` };
+	if (snapshots.length >= MAX_RETAINED_DETACHED_RUNS) return { code: "detached-run-retained-cap-reached", message: `Too many retained detached runs (${snapshots.length}); cleanup terminal runs only after preserving needed artifacts. Maximum retained runs: ${MAX_RETAINED_DETACHED_RUNS}. Terminal runs: ${summarizeRunCapacity(terminalRuns)}.` };
+	return undefined;
+}
+
+function summarizeRunCapacity(runs: ReturnType<DetachedRun["snapshot"]>[]): string {
+	const rows = runs.slice(0, 5).map((run) => `${run.runId}:${run.status}`).join(", ");
+	if (runs.length === 0) return "none";
+	return runs.length > 5 ? `${rows}, +${runs.length - 5} more` : rows;
+}
+
+function detachedRunOptions(options: AgentTeamRuntimeOptions): AgentTeamRuntimeOptions {
+	return { ...options, onUpdate: undefined };
+}
+
+function validateInputSchema(input: unknown): AgentDiagnostic[] {
+	if (validateAgentTeamInput.Check(input)) return [];
+	const first = [...validateAgentTeamInput.Errors(input)][0];
+	const path = first?.instancePath || "/";
+	const message = first ? `agent_team input schema violation at ${path}: ${first.message}` : "agent_team input does not match the public schema; check action-specific fields, enum values, bounds, and unknown properties.";
+	return [{ code: "input-schema-invalid", message, path, severity: "error", repair: schemaRepair(input, path) }];
+}
+
+function schemaRepair(input: unknown, path: string): string {
+	if (isRecord(input)) {
+		if (path === "/maxBytes" || input.maxBytes !== undefined) return "maxBytes must be between 1 and 200000 and is valid only for retrieve and peek previews; catalog narrowing uses library.query.";
+		if (path === "/preview" || input.preview !== undefined) return "preview must be true or false and is valid only for retrieve and peek; previews default to false.";
+		if (path === "/channel" || input.channel !== undefined) return 'Use channel:"steer" or channel:"follow_up" for message.';
+		if (path === "/text" || input.text !== undefined) return "Message text must be a non-empty string.";
 	}
+	return "Use the action-specific control set: catalog uses library; start uses graph/graphFile plus options; retrieve/peek use runId and preview controls; message uses runId, stepId, channel, text, and optional clientMessageId.";
 }
 
-function safeRealpath(path: string): string | undefined {
-	try {
-		return realpathSync(path);
-	} catch {
-		return undefined;
-	}
+function detailsAction(input: unknown): ExecutionAction | "missing/invalid" {
+	if (!isRecord(input) || typeof input.action !== "string") return "missing/invalid";
+	if (AGENT_TEAM_ACTION_VALUES.includes(input.action as ExecutionAction)) return input.action as ExecutionAction;
+	return "missing/invalid";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function createRunId(): string {
+	return `agt_${randomBytes(32).toString("base64url")}`;
+}

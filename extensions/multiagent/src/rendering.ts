@@ -1,146 +1,256 @@
-/** Compact TUI rendering for the model-native `agent_team` tool. */
+/** Human TUI rendering for the detached `agent_team` tool. */
 
-import type { AgentToolResult, Theme } from "@earendil-works/pi-coding-agent";
-import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
-import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+import type { AgentToolResult, MessageRenderOptions, Theme, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
+import { Text, type Component } from "@earendil-works/pi-tui";
+import { basename } from "node:path";
 import type { AgentTeamInput } from "./schemas.ts";
-import type { AgentRunResult, AgentTeamDetails } from "./types.ts";
-import { isAgentTeamDetails } from "./types.ts";
-import { assistantOutputArtifactPath, assistantOutputInlineText, assistantOutputIsFile } from "./assistant-output.ts";
-import { aggregateUsage, fallbackResultText, formatUsageStats } from "./result-format.ts";
+import {
+	attentionLines,
+	focusedActivitySummary,
+	humanActivity,
+	humanRunStatus,
+	humanStepStatus,
+	liveProgressSummary,
+	objectiveTitle,
+	pendingSummary,
+	progressMeter,
+	shortRunId,
+	statusColor,
+	stepsByStatus,
+	truncate,
+} from "./rendering-live.ts";
+import type { AgentTeamDetails, RunSnapshot } from "./types.ts";
 
-interface RenderOptions {
+export { AgentTeamLiveRunsWidget, formatAgentTeamLiveStatus, renderAgentTeamLiveRunsWidget } from "./rendering-live.ts";
+
+const OBJECTIVE_CHARS = 76;
+const VALUE_CHARS = 88;
+const MAX_IDS = 3;
+
+interface CardOptions {
 	expanded: boolean;
-	isPartial: boolean;
+	includeAction: boolean;
 }
 
-export function renderAgentTeamCall(args: AgentTeamInput, theme: Theme) {
-	if (args.action === "catalog") {
-		const query = args.library?.query ? ` ${theme.fg("dim", args.library.query)}` : "";
-		return new Text(`${theme.fg("toolTitle", theme.bold("agent_team"))} ${theme.fg("accent", "catalog")}${query}`, 0, 0);
+interface RenderContext {
+	lastComponent: Component | undefined;
+}
+
+export function renderAgentTeamCall(args: AgentTeamInput, theme: Theme, context?: RenderContext): Component {
+	const text = reuseText(context?.lastComponent);
+	text.setText(formatCall(args, theme));
+	return text;
+}
+
+export function renderAgentTeamResult(result: AgentToolResult<AgentTeamDetails>, options: ToolRenderResultOptions, theme: Theme, context?: RenderContext): Component {
+	const text = reuseText(context?.lastComponent);
+	const details = result.details;
+	if (!details) {
+		text.setText(theme.fg("dim", "agent_team: no details"));
+		return text;
 	}
-	if (args.graphFile) {
-		return new Text(`${theme.fg("toolTitle", theme.bold("agent_team"))} ${theme.fg("accent", "graphFile")} ${theme.fg("dim", shorten(args.graphFile, 120))}`, 0, 0);
+	text.setText(formatAgentTeamCard(details, theme, { expanded: options.expanded, includeAction: true }).join("\n"));
+	return text;
+}
+
+export function renderAgentTeamNoticeMessage(details: AgentTeamDetails | undefined, _content: string | unknown, options: MessageRenderOptions, theme: Theme): Component {
+	if (!details) {
+		const fallback = typeof _content === "string" ? _content.trim() : "";
+		return new Text(fallback.length > 0 ? fallback : theme.fg("warning", "agent_team notice: missing details"), 0, 0);
 	}
-	const agents = args.agents?.length ?? 0;
-	const steps = args.steps?.length ?? 0;
-	const synthesis = args.synthesis ? " + synthesis" : "";
-	return new Text(
-		`${theme.fg("toolTitle", theme.bold("agent_team"))} ${theme.fg("accent", `run ${steps} step(s)`)}${theme.fg(
-			"muted",
-			` ${agents} explicit agent(s)${synthesis}`,
-		)}\n  ${theme.fg("dim", shorten(args.objective ?? "objective missing", 120))}`,
-		0,
-		0,
-	);
+	return new Text(formatAgentTeamCard(details, theme, { expanded: options.expanded, includeAction: false }).join("\n"), 0, 0);
 }
 
-export function renderAgentTeamResult(result: AgentToolResult<AgentTeamDetails>, options: RenderOptions, theme: Theme) {
-	const details = isAgentTeamDetails(result.details) ? result.details : undefined;
-	if (!details) return new Text(primaryText(result), 0, 0);
-	if (isValidationError(details)) return new Text(primaryText(result), 0, 0);
-	if (details.action === "catalog") return renderCatalog(details, theme);
-	if (options.expanded) return renderExpandedRun(details, theme);
-	return new Text(renderCollapsedRun(details, options.isPartial, theme), 0, 0);
+export function formatAgentTeamNoticeText(details: AgentTeamDetails | undefined): string {
+	if (!details) return "agent_team notice unavailable";
+	return formatAgentTeamPlainCard(details).join("\n");
 }
 
-function isValidationError(details: AgentTeamDetails): boolean {
-	return details.diagnostics.some((item) => item.severity === "error") && details.steps.length === 0 && details.catalog.length === 0;
+export function formatAgentTeamCard(details: AgentTeamDetails, theme: Theme, options: CardOptions): string[] {
+	if (details.action === "catalog") return formatCatalog(details, theme);
+	if (!details.run) return formatNoRun(details, theme, options.includeAction);
+	const run = details.run;
+	const lines = [formatResultHeader(details, run, theme, options.includeAction), `${progressMeter(run.counts, theme)} ${theme.fg("dim", liveProgressSummary(run.counts))}`];
+	const attention = actionErrorLines(details, theme).concat(attentionLines(details, theme, 2));
+	if (attention.length > 0) lines.push(theme.fg("warning", "needs attention"), ...attention.slice(0, 2));
+	const working = focusedActivitySummary(details);
+	if (working) lines.push(`${theme.fg("muted", "working now")} ${theme.fg("dim", working)}`);
+	const pending = stepsByStatus(details, "pending");
+	if (pending.length > 0) lines.push(`${theme.fg("muted", "queued next")} ${theme.fg("dim", pendingSummary(pending))}`);
+	const tail = formatResultTail(details, theme);
+	if (tail) lines.push(tail);
+	if (options.expanded) lines.push(formatExpanded(details, theme));
+	return lines.filter((line) => line.length > 0);
 }
 
-function renderCatalog(details: AgentTeamDetails, theme: Theme) {
-	const rows = details.catalog.map((agent) => `${theme.fg("accent", agent.ref)} ${theme.fg("muted", `sha256:${agent.sha256.slice(0, 12)}`)} ${agent.description}`);
-	return new Text(
-		[
-			`${theme.fg("toolTitle", theme.bold("agent_team catalog"))} ${theme.fg("accent", `${details.catalog.length} agent(s)`)}`,
-			`Sources: ${details.library.sources.join(", ")}`,
-			...rows.slice(0, 12),
-			details.catalog.length > 12 ? theme.fg("muted", `+${details.catalog.length - 12} more`) : "",
-		]
-			.filter((line) => line.length > 0)
-			.join("\n"),
-		0,
-		0,
-	);
+function formatCall(args: AgentTeamInput, theme: Theme): string {
+	const title = theme.fg("toolTitle", theme.bold("agent_team"));
+	const action = stringProperty(args, "action");
+	const runId = stringProperty(args, "runId");
+	const stepId = stringProperty(args, "stepId");
+	const channel = stringProperty(args, "channel");
+	if (action === "start") return `${title} ${theme.fg("accent", "launch")} ${theme.fg("dim", startTarget(args))}`;
+	if (action === "retrieve") return `${title} ${theme.fg("accent", args.debugEvents === true ? "status debug" : "status")} ${theme.fg("dim", shortRunId(runId))}`;
+	if (action === "peek") return `${title} ${theme.fg("accent", "inspect step")} ${theme.fg("dim", `${shortRunId(runId)} ${stepId ?? ""}`.trim())}`;
+	if (action === "message") return `${title} ${theme.fg("accent", "send note")} ${theme.fg("dim", `${stepId ?? "step"} ${channel ?? ""}`.trim())}`;
+	if (action === "cancel") return `${title} ${theme.fg("accent", "stop run")} ${theme.fg("dim", shortRunId(runId))}`;
+	if (action === "cleanup") return `${title} ${theme.fg("accent", "clean evidence")} ${theme.fg("dim", shortRunId(runId))}`;
+	const query = catalogQuery(args);
+	return `${title} ${theme.fg("accent", "catalog")}${query ? ` ${theme.fg("dim", query)}` : ""}`;
 }
 
-function renderCollapsedRun(details: AgentTeamDetails, isPartial: boolean, theme: Theme): string {
-	const running = details.steps.filter((step) => step.status === "running").length;
-	const terminal = details.steps.filter((step) => step.status !== "pending" && step.status !== "running").length;
-	const failures = details.steps.filter((step) => ["failed", "aborted", "timed_out", "blocked"].includes(step.status)).length;
-	const status = isPartial || running > 0 ? theme.fg("warning", "[running]") : failures > 0 ? theme.fg("warning", "[mixed]") : theme.fg("success", "[ok]");
-	const lines = [`${status} ${theme.fg("toolTitle", theme.bold("agent_team run"))} ${theme.fg("accent", `${terminal}/${details.steps.length} terminal`)}`];
-	for (const step of details.steps) lines.push(renderStepCollapsed(step, theme));
-	const usage = formatUsageStats(aggregateUsage(details.steps), undefined);
-	if (usage.length > 0) lines.push(theme.fg("dim", `Total: ${usage}`));
-	return lines.join("\n\n");
-}
-
-function renderExpandedRun(details: AgentTeamDetails, theme: Theme) {
-	const container = new Container();
-	container.addChild(new Text(`${theme.fg("toolTitle", theme.bold("agent_team run"))}\n${theme.fg("dim", details.objective ?? "")}`, 0, 0));
-	const mdTheme = getMarkdownTheme();
-	for (const step of details.steps) {
-		container.addChild(new Spacer(1));
-		container.addChild(new Text(`${statusLabel(step, theme)} ${theme.fg("accent", step.id)} ${theme.fg("muted", `agent=${step.agentRef}`)}`, 0, 0));
-		if (step.needs.length > 0) container.addChild(new Text(theme.fg("dim", `needs: ${step.needs.join(", ")}`), 0, 0));
-		if (step.events.length > 0) {
-			for (const event of step.events) container.addChild(new Text(renderEventLine(event.label, event.preview, event.status, theme), 0, 0));
-		}
-		const output = fallbackResultText(step).trim();
-		if (output.length > 0) container.addChild(new Markdown(output, 0, 0, mdTheme));
-		const outputPath = assistantOutputArtifactPath(step);
-		if (outputPath) container.addChild(new Text(theme.fg("dim", `full output: ${outputPath}`), 0, 0));
-		if (step.stderr.trim().length > 0) container.addChild(new Text(theme.fg("warning", step.stderr.trim()), 0, 0));
-		const usage = formatUsageStats(step.usage, step.model);
-		if (usage.length > 0) container.addChild(new Text(theme.fg("dim", usage), 0, 0));
-	}
-	return container;
-}
-
-function renderStepCollapsed(step: AgentRunResult, theme: Theme): string {
-	const activity = step.events.slice(-3).map((event) => renderEventLine(event.label, event.preview, event.status, theme));
-	const output = assistantOutputInlineText(step).trim();
-	if (output.length > 0) activity.push(theme.fg("toolOutput", shorten(output.replace(/\s+/g, " "), 180)));
-	else if (assistantOutputIsFile(step)) activity.push(theme.fg("dim", "output saved to file"));
+function formatCatalog(details: AgentTeamDetails, theme: Theme): string[] {
+	const activeExtensions = details.extensionTools.filter((tool) => tool.active).length;
 	return [
-		`${statusLabel(step, theme)} ${theme.fg("accent", step.id)} ${theme.fg("muted", `agent=${step.agentRef}`)}`,
-		activity.length > 0 ? activity.join("\n") : theme.fg("muted", step.status === "pending" ? "pending" : "no output"),
-	].join("\n");
+		`${theme.fg(details.ok ? "success" : "error", `catalog ${details.ok ? "ok" : "error"}`)} ${theme.fg("dim", `${details.catalog.length} agent(s), ${activeExtensions} active extension tool(s)`)}`,
+	];
 }
 
-function renderEventLine(label: string, preview: string, status: string | undefined, theme: Theme): string {
-	const marker = status === "error" ? theme.fg("error", "x") : status === "done" ? theme.fg("success", "+") : theme.fg("muted", "> ");
-	const suffix = preview.length > 0 ? ` ${theme.fg("dim", shorten(preview, 120))}` : "";
-	return `${marker}${theme.fg("muted", label)}${suffix}`;
+function formatAgentTeamPlainCard(details: AgentTeamDetails): string[] {
+	if (details.action === "catalog") return [`agent_team catalog ${details.ok ? "ok" : "error"} ${details.catalog.length} agent(s)`];
+	if (!details.run) return [`agent_team ${details.action} ${details.ok ? "ok" : "error"}${details.error ? ` ${details.error.code}` : ""}`];
+	const run = details.run;
+	const state = humanResultState(details, run);
+	const subject = state === "stop requested" || state === "message queued" || state === "message denied" ? shortRunId(run.runId) : objectiveTitle(run.objective, OBJECTIVE_CHARS) || shortRunId(run.runId);
+	const lines = [`agent_team ${state} ${subject}`, `runId=${run.runId}`, `${plainProgressMeter(run.counts)} ${liveProgressSummary(run.counts)}`];
+	const attention = plainAttentionLine(details);
+	if (attention) lines.push(`needs attention ${attention}`);
+	const working = focusedActivitySummary(details);
+	if (working) lines.push(`working now ${working}`);
+	const pending = stepsByStatus(details, "pending");
+	if (pending.length > 0) lines.push(`queued next ${pendingSummary(pending)}`);
+	const tail = formatPlainResultTail(details);
+	if (tail) lines.push(tail);
+	lines.push("untrusted status evidence; retrieve/peek for artifacts");
+	return lines.filter((line) => line.length > 0);
 }
 
-function statusLabel(step: AgentRunResult, theme: Theme): string {
-	switch (step.status) {
-		case "succeeded":
-			return theme.fg("success", "[ok]");
-		case "failed":
-			return theme.fg("error", "[fail]");
-		case "aborted":
-			return theme.fg("warning", "[abort]");
-		case "timed_out":
-			return theme.fg("warning", "[timeout]");
-		case "blocked":
-			return theme.fg("warning", "[blocked]");
-		case "pending":
-			return theme.fg("muted", "[pending]");
-		case "running":
-			return theme.fg("warning", "[run]");
+function plainAttentionLine(details: AgentTeamDetails): string | undefined {
+	if (details.error) return `${details.error.code} ${truncate(details.error.message, VALUE_CHARS)}`;
+	const diagnostic = details.diagnostics.find((item) => item.severity === "error");
+	if (diagnostic) return `${diagnostic.code} ${truncate(diagnostic.message, VALUE_CHARS)}`;
+	const step = details.steps.find((item) => item.status === "failed" || item.status === "blocked" || item.status === "timed_out" || item.status === "canceled");
+	if (!step) return undefined;
+	return `${step.id} ${humanStepStatus(step.status)}${step.errorMessage ? `: ${truncate(humanActivity(step.errorMessage), VALUE_CHARS)}` : ""}`;
+}
+
+function plainProgressMeter(counts: RunSnapshot["counts"]): string {
+	const total = Math.max(1, Object.values(counts).reduce((sum, count) => sum + count, 0));
+	const done = counts.succeeded + counts.failed + counts.blocked + counts.timed_out + counts.canceled;
+	const filled = Math.min(14, Math.round((done / total) * 14));
+	return `[${"=".repeat(filled)}${"-".repeat(14 - filled)}]`;
+}
+
+function formatPlainResultTail(details: AgentTeamDetails): string {
+	if (details.message) return `message ${details.message.stepId} ${details.message.accepted ? "queued" : details.message.undeliveredReason ?? "denied"}`;
+	if (details.cleanup) return `evidence cleaned ${details.cleanup.deletedPaths.length} retained path(s) deleted`;
+	if (details.outputs.length > 0) return `final evidence ${summarizePlainOutputs(details.outputs)}`;
+	return `last update ${truncate(humanActivity(details.run?.lastEvent ?? "state changed"), VALUE_CHARS)}`;
+}
+
+function summarizePlainOutputs(outputs: AgentTeamDetails["outputs"]): string {
+	const visible = outputs.slice(0, MAX_IDS).map((output) => `${output.stepId} ${humanStepStatus(output.status)} ${artifactName(output.filePath)}`).join(", ");
+	return outputs.length > MAX_IDS ? `${visible}, +${outputs.length - MAX_IDS} more` : visible;
+}
+
+function actionErrorLines(details: AgentTeamDetails, theme: Theme): string[] {
+	if (!details.error) return [];
+	return [`  ${theme.fg("warning", "!")} ${theme.fg("text", details.error.code)} ${theme.fg("dim", truncate(details.error.message, VALUE_CHARS))}`];
+}
+
+function formatNoRun(details: AgentTeamDetails, theme: Theme, includeAction: boolean): string[] {
+	const prefix = includeAction ? `${details.action} ` : "";
+	const status = details.ok ? theme.fg("success", `${prefix}ok`) : theme.fg("error", `${prefix}error`);
+	const reason = details.error ? ` ${details.error.code}` : " no run";
+	return [`${status}${theme.fg("dim", reason)}`];
+}
+
+function formatResultHeader(details: AgentTeamDetails, run: RunSnapshot, theme: Theme, includeAction: boolean): string {
+	const title = includeAction ? theme.fg("toolTitle", theme.bold("agent_team")) : theme.fg("toolTitle", "agent_team");
+	const state = humanResultState(details, run);
+	const runLabel = shortRunId(run.runId);
+	const subject = state === "stop requested" || state === "message queued" || state === "message denied" ? runLabel : objectiveTitle(run.objective, OBJECTIVE_CHARS) || runLabel;
+	return `${title} ${theme.fg(statusColor(run.status), state)} ${theme.fg("dim", subject)}`;
+}
+
+function humanResultState(details: AgentTeamDetails, run: RunSnapshot): string {
+	if (details.action === "cancel") return run.terminal ? humanRunStatus(run.status) : "stop requested";
+	if (details.action === "message") return details.message?.accepted === false ? "message denied" : "message queued";
+	if (details.action === "cleanup") return "evidence cleaned";
+	if (run.terminal) return humanRunStatus(run.status);
+	if (details.action === "start") return "started";
+	if (details.action === "peek") return "step snapshot";
+	return humanRunStatus(run.status);
+}
+
+function formatResultTail(details: AgentTeamDetails, theme: Theme): string {
+	if (details.message) return `${theme.fg("muted", "message")} ${details.message.stepId} ${details.message.accepted ? theme.fg("success", "queued") : theme.fg("error", details.message.undeliveredReason ?? "denied")}`;
+	if (details.cleanup) return `${theme.fg("muted", "evidence cleaned")} ${theme.fg("dim", `${details.cleanup.deletedPaths.length} retained path(s) deleted`)}`;
+	if (details.notice) return `${theme.fg("muted", details.notice.terminal ? "terminal notice" : "milestone notice")} ${theme.fg("accent", summarizeNotice(details))}${details.outputs.length > 0 ? ` ${theme.fg("dim", summarizeArtifacts(details.outputs))}` : ""}`;
+	if (details.outputs.length === 1) {
+		const output = details.outputs[0];
+		if (output) return `${theme.fg("muted", output.status === "running" || output.status === "pending" ? "live output" : "final output")} ${theme.fg(statusColor(output.status), `${output.stepId} ${humanStepStatus(output.status)}`)} ${theme.fg("dim", artifactName(output.filePath))}`;
 	}
+	if (details.outputs.length > 1) return `${theme.fg("muted", "final outputs")} ${theme.fg("accent", `${details.outputs.length}`)} ${theme.fg("dim", summarizeOutputIds(details.outputs))}`;
+	return `${theme.fg("muted", "last update")} ${theme.fg("dim", truncate(humanActivity(details.run?.lastEvent ?? "none"), VALUE_CHARS))}`;
 }
 
-function primaryText(result: AgentToolResult<AgentTeamDetails>): string {
-	for (const item of result.content) {
-		if (item.type === "text") return item.text;
-	}
-	return "(no output)";
+function formatExpanded(details: AgentTeamDetails, theme: Theme): string {
+	const artifacts = details.outputs.map((output) => output.filePath).filter((path): path is string => path !== undefined);
+	if (artifacts.length > 0) return `${theme.fg("muted", "artifacts")} ${theme.fg("dim", artifacts.join(", "))}`;
+	const errors = details.diagnostics.filter((diagnostic) => diagnostic.severity === "error").map((diagnostic) => diagnostic.code);
+	if (errors.length > 0) return `${theme.fg("muted", "diagnostics")} ${theme.fg("error", errors.join(", "))}`;
+	return "";
 }
 
-function shorten(value: string, maxLength: number): string {
-	return value.length <= maxLength ? value : `${value.slice(0, maxLength)}...`;
+function summarizeOutputIds(outputs: AgentTeamDetails["outputs"]): string {
+	const visible = outputs.slice(0, MAX_IDS).map((output) => `${output.stepId} ${humanStepStatus(output.status)}`).join(", ");
+	return outputs.length > MAX_IDS ? `${visible}, +${outputs.length - MAX_IDS} more` : visible;
+}
+
+function summarizeNotice(details: AgentTeamDetails): string {
+	const reasons = details.notice?.reasons.slice(0, MAX_IDS).join(",") || details.run?.lastEvent || "state changed";
+	return truncate(reasons, VALUE_CHARS);
+}
+
+function startTarget(args: AgentTeamInput): string {
+	const graphFile = stringProperty(args, "graphFile");
+	if (graphFile) return graphFile;
+	const graph = recordProperty(args, "graph");
+	const steps = graph ? graph["steps"] : undefined;
+	return `${Array.isArray(steps) ? steps.length : 0} step(s)`;
+}
+
+function catalogQuery(args: AgentTeamInput): string | undefined {
+	const library = recordProperty(args, "library");
+	return library ? stringProperty(library, "query") : undefined;
+}
+
+function recordProperty(value: unknown, key: string): Record<string, unknown> | undefined {
+	if (!isRecord(value)) return undefined;
+	const child = value[key];
+	return isRecord(child) ? child : undefined;
+}
+
+function stringProperty(value: unknown, key: string): string | undefined {
+	if (!isRecord(value)) return undefined;
+	const child = value[key];
+	return typeof child === "string" ? child : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function summarizeArtifacts(outputs: AgentTeamDetails["outputs"]): string {
+	const visible = outputs.slice(0, MAX_IDS).map((output) => artifactName(output.filePath)).join(",");
+	return outputs.length > MAX_IDS ? `artifacts=${visible},+${outputs.length - MAX_IDS}` : `artifacts=${visible}`;
+}
+
+function artifactName(path: string | undefined): string {
+	return path ? basename(path) : "no artifact";
+}
+
+function reuseText(component: Component | undefined): Text {
+	return component instanceof Text ? component : new Text("", 0, 0);
 }

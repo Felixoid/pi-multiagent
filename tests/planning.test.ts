@@ -1,606 +1,526 @@
 import assert from "node:assert/strict";
-import { link, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
-import { resolveRunPlan, validateActionShape, validatePreflightShape } from "../extensions/multiagent/src/planning.ts";
-import type { AgentConfig, AgentDiagnostic, ExtensionSourceScope, ParentSkillInventory, ParentToolInventory } from "../extensions/multiagent/src/types.ts";
+import type { AgentConfig, ParentSkillInventory, ParentToolInfo, ParentToolInventory } from "../extensions/multiagent/src/types.ts";
+import { findProjectSettingsFile, resolveDetachedGraph, validatePreflightShape } from "../extensions/multiagent/src/planning.ts";
+import { BUILTIN_CHILD_TOOL_NAMES, READONLY_CHILD_TOOL_NAMES } from "../extensions/multiagent/src/types.ts";
 
-const noDiagnostics: AgentDiagnostic[] = [];
-const extensionToolPolicy = { projectExtensions: "deny", localExtensions: "deny" } as const;
-const emptyParentTools: ParentToolInventory = { apiAvailable: true, errorMessage: undefined, tools: [] };
+const parentTools: ParentToolInventory = { apiAvailable: true, errorMessage: undefined, tools: activeBuiltinTools() };
+const parentSkills: ParentSkillInventory = { apiAvailable: true, readActive: true, errorMessage: undefined, skills: [] };
 
-async function makeSkillInventory(skills: { name: string; hidden?: boolean; content?: string }[] = [{ name: "pi-multiagent" }]) {
-	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-skills-"));
-	const skillsDir = join(root, "skills");
-	await mkdir(skillsDir, { recursive: true });
-	const entries = [];
-	for (const skill of skills) {
-		const dir = join(skillsDir, skill.name);
-		await mkdir(dir, { recursive: true });
-		const path = join(dir, "SKILL.md");
-		const hidden = skill.hidden ? "disable-model-invocation: true\n" : "";
-		const content = skill.content ?? `---\nname: ${skill.name}\ndescription: ${skill.name} skill\n${hidden}---\n# ${skill.name}\n`;
-		await writeFile(path, content, "utf8");
-		entries.push({ name: skill.name, description: `${skill.name} skill`, sourceInfo: { path, source: "local", scope: "user" as const, origin: "top-level" as const, baseDir: dir } });
-	}
-	const inventory: ParentSkillInventory = { apiAvailable: true, readActive: true, errorMessage: undefined, skills: entries };
-	return { root, inventory };
+function activeBuiltinTools(): ParentToolInfo[] {
+	return BUILTIN_CHILD_TOOL_NAMES.map((name) => ({ name, description: `${name} tool`, sourceInfo: { path: `<builtin:${name}>`, source: "builtin", scope: "temporary", origin: "top-level", baseDir: undefined }, active: true }));
 }
 
-async function makeToolInventory(scope: ExtensionSourceScope = "user", options: { source?: string; active?: boolean; cwdInside?: boolean; extraReserved?: string[] } = {}) {
-	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-tools-"));
-	const cwd = join(root, "workspace");
-	const extensionDir = options.cwdInside === true ? cwd : join(root, "cache");
-	await mkdir(extensionDir, { recursive: true });
-	const extensionPath = join(extensionDir, "exa-extension.ts");
-	await writeFile(extensionPath, "export default function extension() {}\n", "utf8");
-	const source = options.source ?? "npm:pi-exa-tools";
-	const inventory: ParentToolInventory = {
+function packageAgent(name = "reviewer", tools: string[] | undefined = ["read"]): AgentConfig {
+	return { name, ref: `package:${name}`, description: `${name} agent`, tags: [], tools, model: undefined, thinking: undefined, systemPrompt: "Review.", source: "package", filePath: `/tmp/${name}.md`, sha256: "abc" };
+}
+
+function userAgent(name = "reviewer", tools: string[] | undefined = ["read"]): AgentConfig {
+	return { name, ref: `user:${name}`, description: `${name} agent`, tags: [], tools, model: undefined, thinking: undefined, systemPrompt: "Review.", source: "user", filePath: `/tmp/${name}.md`, sha256: "abc" };
+}
+
+function graphInput(): object {
+	return { objective: "x", steps: [{ id: "one", agent: { system: "x" }, task: "x" }] };
+}
+
+test("validatePreflightShape enforces detached action fields", () => {
+	assert.deepEqual(validatePreflightShape({ action: "start", graph: { objective: "x", steps: [] } }).map((item) => item.code), []);
+	assert.equal(validatePreflightShape({ action: "run" }).some((item) => item.code === "action-invalid"), true);
+	const catalogMaxBytes = validatePreflightShape({ action: "catalog", maxBytes: 100 });
+	assert.equal(catalogMaxBytes.some((item) => item.code === "catalog-control-fields-denied"), true);
+	assert.deepEqual(catalogMaxBytes.find((item) => item.code === "catalog-control-fields-denied")?.fields, ["maxBytes"]);
+	assert.match(catalogMaxBytes.find((item) => item.code === "catalog-control-fields-denied")?.repair ?? "", /library\.query/);
+	assert.equal(validatePreflightShape({ action: "catalog", graph: {} }).some((item) => item.code === "catalog-control-fields-denied"), true);
+	const oldStartShape = validatePreflightShape({ action: "start", objective: "old", steps: [] });
+	assert.equal(oldStartShape.some((item) => item.code === "start-control-fields-denied"), true);
+	assert.match(oldStartShape.find((item) => item.code === "start-control-fields-denied")?.repair ?? "", /under graph/);
+	const oldStartWithPreview = validatePreflightShape({ action: "start", objective: "old", steps: [], preview: true });
+	assert.match(oldStartWithPreview.find((item) => item.code === "start-control-fields-denied")?.repair ?? "", /Move graph body fields under graph/);
+	assert.equal(validatePreflightShape({ action: "start", graph: graphInput(), cursor: "1" }).some((item) => item.code === "start-control-fields-denied"), true);
+	assert.equal(validatePreflightShape({ action: "retrieve", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", graph: graphInput() }).some((item) => item.code === "retrieve-control-fields-denied"), true);
+	assert.equal(validatePreflightShape({ action: "cancel", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", maxBytes: 1 }).some((item) => item.code === "cancel-control-fields-denied"), true);
+	assert.equal(validatePreflightShape({ action: "cleanup", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", reason: "x" }).some((item) => item.code === "cleanup-control-fields-denied"), true);
+	assert.equal(validatePreflightShape({ action: "retrieve", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", debugEvents: true }).length, 0);
+	assert.equal(validatePreflightShape({ action: "retrieve", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", waitSeconds: 1 }).length, 0);
+	const missingPeekStep = validatePreflightShape({ action: "peek", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" });
+	assert.equal(missingPeekStep.some((item) => item.code === "peek-step-required"), true);
+	assert.match(missingPeekStep.find((item) => item.code === "peek-step-required")?.repair ?? "", /one concrete step id/);
+	assert.match(missingPeekStep.find((item) => item.code === "peek-step-required")?.repair ?? "", /retrieve for run-level/);
+	assert.equal(validatePreflightShape({ action: "peek", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", maxBytes: 100 }).length, 0);
+	assert.equal(validatePreflightShape({ action: "peek", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", debugEvents: true }).some((item) => item.code === "peek-control-fields-denied"), true);
+	assert.equal(validatePreflightShape({ action: "message", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", text: "x", channel: "steer" }).some((item) => item.code === "message-step-required"), true);
+	const staleKind = validatePreflightShape({ action: "message", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", text: "x", stepId: "one", kind: "steer" });
+	assert.equal(staleKind.some((item) => item.code === "message-control-fields-denied"), true);
+	assert.equal(staleKind.some((item) => item.code === "message-channel-required"), true);
+	assert.equal(validatePreflightShape({ action: "peek", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", waitSeconds: 1 }).some((item) => item.code === "peek-control-fields-denied"), true);
+});
+
+test("resolveDetachedGraph rejects blank-after-trim graph objective and inline system prompts", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-blank-${Date.now()}`), { recursive: true });
+	const blank = resolveDetachedGraph({ objective: "   \n\t", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { system: "  \n" }, task: "x" }] }, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills }, undefined);
+	assert.equal(blank.diagnostics.some((item) => item.code === "graph-objective-required" && item.path === "/graph/objective"), true);
+	assert.equal(blank.diagnostics.some((item) => item.code === "inline-system-required" && item.path === "/graph/steps/0/agent/system"), true);
+	assert.deepEqual(blank.steps, []);
+});
+
+test("resolveDetachedGraph rejects missing or mixed step agent binding", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-agent-binding-${Date.now()}`), { recursive: true });
+	const missing = resolveDetachedGraph({ objective: "missing", steps: [{ id: "one", agent: {}, task: "x" }] }, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills }, undefined);
+	assert.equal(missing.diagnostics.some((item) => item.code === "step-agent-invalid"), true);
+	assert.deepEqual(missing.steps, []);
+	const mixed = resolveDetachedGraph({ objective: "mixed", steps: [{ id: "one", agent: { system: "x", ref: "package:reviewer" }, task: "x" }] }, [packageAgent()], [], { cwd, invocationCwd: cwd, parentTools, parentSkills }, undefined);
+	assert.equal(mixed.diagnostics.some((item) => item.code === "step-agent-binding-exclusive"), true);
+	assert.deepEqual(mixed.steps, []);
+});
+
+test("resolveDetachedGraph inherits library defaults and caps them by authority", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-${Date.now()}`), { recursive: true });
+	const graph = resolveDetachedGraph(
+		{
+			objective: "plan",
+			authority: { allowFilesystemRead: true },
+			steps: [
+				{ id: "inspect", agent: { ref: "package:reviewer" }, task: "Inspect." },
+				{ id: "summarize", agent: { system: "Summarize." }, task: "Summarize.", needs: ["inspect"] },
+			],
+			limits: { concurrency: 1, timeoutSecondsPerStep: 10 },
+		},
+		[packageAgent("reviewer", ["read", "bash"])],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(graph.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(graph.steps.map((step) => step.id), ["inspect", "summarize"]);
+	assert.equal(graph.steps[0].agent.ref, "package:reviewer");
+	assert.deepEqual(graph.steps[1].after, []);
+	assert.deepEqual(graph.steps[0].agent.tools, READONLY_CHILD_TOOL_NAMES);
+	assert.equal(graph.diagnostics.some((item) => item.code === "catalog-default-tools-capped" && item.severity === "warning" && item.message.includes("denied=bash")), true);
+	assert.deepEqual(graph.steps[1].agent.tools, READONLY_CHILD_TOOL_NAMES);
+	assert.equal(graph.limits.concurrency, 1);
+});
+
+test("resolveDetachedGraph rejects inherited catalog defaults capped to no tools", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-capped-${Date.now()}`), { recursive: true });
+	const graph = resolveDetachedGraph(
+		{ objective: "capped", steps: [{ id: "one", agent: { ref: "package:reviewer" }, task: "x" }] },
+		[packageAgent("reviewer", ["read"])],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(graph.diagnostics.some((item) => item.code === "catalog-default-tools-denied" && item.severity === "error"), true);
+	assert.deepEqual(graph.steps, []);
+
+	const explicitEmptyTools = resolveDetachedGraph(
+		{ objective: "explicit empty tools", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { ref: "package:reviewer", tools: [] }, task: "x" }] },
+		[packageAgent("reviewer", ["read"])],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(explicitEmptyTools.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(explicitEmptyTools.steps[0]?.agent.tools, READONLY_CHILD_TOOL_NAMES);
+});
+
+test("findProjectSettingsFile ignores the user-global Pi settings file", async () => {
+	const home = await mkdir(join(tmpdir(), `pi-multiagent-plan-global-pi-${Date.now()}`), { recursive: true });
+	const globalPi = join(home, ".pi");
+	const project = join(home, "Code", "repo");
+	await mkdir(globalPi, { recursive: true });
+	await mkdir(project, { recursive: true });
+	await writeFile(join(globalPi, "settings.json"), "{}");
+	assert.equal(findProjectSettingsFile(project, globalPi), undefined);
+	await mkdir(join(project, ".pi"), { recursive: true });
+	await writeFile(join(project, ".pi", "settings.json"), "{}");
+	assert.equal(findProjectSettingsFile(project, globalPi), join(project, ".pi", "settings.json"));
+});
+
+test("resolveDetachedGraph refuses bash steps inside project Pi settings at planning time", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-bash-settings-${Date.now()}`), { recursive: true });
+	await mkdir(join(cwd, ".pi"), { recursive: true });
+	await writeFile(join(cwd, ".pi", "settings.json"), "{}");
+	const denied = resolveDetachedGraph(
+		{ objective: "settings", authority: { allowFilesystemRead: true, allowShellTools: true }, steps: [{ id: "one", agent: { system: "x", tools: ["bash"] }, task: "x" }] },
+		[],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(denied.diagnostics.some((item) => item.code === "bash-project-settings-denied"), true);
+	assert.deepEqual(denied.steps, []);
+	const readOnly = resolveDetachedGraph(
+		{ objective: "settings", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { system: "x", tools: ["read"] }, task: "x" }] },
+		[],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(readOnly.diagnostics.some((item) => item.severity === "error"), false);
+});
+
+test("resolveDetachedGraph rejects inherited shell defaults when mandatory read is not authorized", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-shell-no-read-${Date.now()}`), { recursive: true });
+	const graph = resolveDetachedGraph(
+		{ objective: "shell", authority: { allowShellTools: true }, steps: [{ id: "one", agent: { ref: "package:reviewer" }, task: "x" }] },
+		[packageAgent("reviewer", ["read", "bash"])],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(graph.diagnostics.some((item) => item.code === "filesystem-read-authority-required"), true);
+	assert.deepEqual(graph.steps, []);
+});
+
+test("resolveDetachedGraph grants inherited shell defaults only when shell authority is set", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-shell-${Date.now()}`), { recursive: true });
+	const graph = resolveDetachedGraph(
+		{ objective: "shell", authority: { allowFilesystemRead: true, allowShellTools: true }, steps: [{ id: "one", agent: { ref: "package:reviewer" }, task: "x" }] },
+		[packageAgent("reviewer", ["read", "bash"])],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(graph.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(graph.steps[0]?.agent.tools, [...READONLY_CHILD_TOOL_NAMES, "bash"]);
+});
+
+test("resolveDetachedGraph treats explicit tools as strict overrides", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-explicit-${Date.now()}`), { recursive: true });
+	const allowed = resolveDetachedGraph(
+		{ objective: "explicit", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { ref: "package:reviewer", tools: ["read"] }, task: "x" }] },
+		[packageAgent("reviewer", ["read", "bash"])],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.deepEqual(allowed.steps[0]?.agent.tools, READONLY_CHILD_TOOL_NAMES);
+	const denied = resolveDetachedGraph(
+		{ objective: "explicit", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { ref: "package:reviewer", tools: ["bash", "edit"] }, task: "x" }] },
+		[packageAgent("reviewer", ["read", "bash"])],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	const codes = denied.diagnostics.map((item) => item.code);
+	assert.equal(codes.includes("shell-authority-required"), true);
+	assert.equal(codes.includes("mutation-authority-required"), true);
+	assert.deepEqual(denied.steps, []);
+});
+
+test("resolveDetachedGraph requires first-class mutationScope for mutation-capable steps", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-worker-scope-${Date.now()}`), { recursive: true });
+	const worker = packageAgent("worker", ["read", "bash", "edit", "write"]);
+	const baseGraph = { objective: "worker", authority: { allowFilesystemRead: true, allowShellTools: true, allowMutationTools: true } };
+	const missing = resolveDetachedGraph(
+		{ ...baseGraph, steps: [{ id: "one", agent: { ref: "package:worker" }, task: "Implement the change." }] },
+		[worker],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(missing.diagnostics.some((item) => item.code === "mutation-scope-required"), true);
+	assert.deepEqual(missing.steps, []);
+	const placeholder = resolveDetachedGraph(
+		{ ...baseGraph, steps: [{ id: "one", agent: { ref: "package:worker" }, mutationScope: "REPLACE with exact files", task: "Do not edit if unresolved." }] },
+		[worker],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(placeholder.diagnostics.some((item) => item.code === "mutation-scope-invalid"), true);
+	assert.deepEqual(placeholder.steps, []);
+	const underscorePlaceholder = resolveDetachedGraph(
+		{ ...baseGraph, steps: [{ id: "one", agent: { ref: "package:worker" }, mutationScope: "REPLACE_ME", task: "Do not edit if unresolved." }] },
+		[worker],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(underscorePlaceholder.diagnostics.some((item) => item.code === "mutation-scope-invalid"), true);
+	assert.deepEqual(underscorePlaceholder.steps, []);
+	const concrete = resolveDetachedGraph(
+		{ ...baseGraph, steps: [{ id: "one", agent: { ref: "package:worker" }, mutationScope: "README.md and tests/planning.test.ts only", task: "Implement the approved change." }] },
+		[worker],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(concrete.diagnostics.some((item) => item.severity === "error"), false);
+	assert.equal(concrete.steps[0]?.mutationScope, "README.md and tests/planning.test.ts only");
+	assert.deepEqual(concrete.steps[0]?.agent.tools, [...READONLY_CHILD_TOOL_NAMES, "bash", "edit", "write"]);
+	const shellOnlyWorker = resolveDetachedGraph(
+		{ objective: "worker", authority: { allowFilesystemRead: true, allowShellTools: true }, steps: [{ id: "one", agent: { ref: "package:worker", tools: ["bash"] }, task: "Run the validation command." }] },
+		[worker],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(shellOnlyWorker.diagnostics.some((item) => item.code === "mutation-scope-required"), true);
+	assert.deepEqual(shellOnlyWorker.steps, []);
+	const inlineWrite = resolveDetachedGraph(
+		{ objective: "inline", authority: { allowFilesystemRead: true, allowMutationTools: true }, steps: [{ id: "one", agent: { system: "x", tools: ["edit"] }, task: "Edit." }] },
+		[],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(inlineWrite.diagnostics.some((item) => item.code === "mutation-scope-required"), true);
+	assert.deepEqual(inlineWrite.steps, []);
+	const readOnlyWorker = resolveDetachedGraph(
+		{ objective: "worker", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { ref: "package:worker", tools: ["read"] }, task: "Plan only; do not edit." }] },
+		[worker],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(readOnlyWorker.diagnostics.some((item) => item.code === "mutation-scope-required"), false);
+	assert.deepEqual(readOnlyWorker.steps[0]?.agent.tools, READONLY_CHILD_TOOL_NAMES);
+});
+
+test("resolveDetachedGraph grants source-verified extension tools only with extension authority", async () => {
+	const parent = await mkdir(join(tmpdir(), `pi-multiagent-plan-extension-${Date.now()}`), { recursive: true });
+	const cwd = await mkdir(join(parent, "workspace"), { recursive: true });
+	const extensionPath = join(parent, "trusted-extension.ts");
+	await writeFile(extensionPath, "export default function extension() {}\n");
+	const extensionTool: ParentToolInfo = { name: "exa_search", description: "Search", active: true, sourceInfo: { path: extensionPath, source: "user:exa", scope: "user", origin: "package", baseDir: parent } };
+	const tools: ParentToolInventory = { apiAvailable: true, errorMessage: undefined, tools: [...activeBuiltinTools(), extensionTool] };
+	const graph = { objective: "extension", authority: { allowFilesystemRead: true, allowExtensionCode: true }, steps: [{ id: "one", agent: { system: "x", extensionTools: [{ name: "exa_search", from: { source: "user:exa", scope: "user", origin: "package" } }] }, task: "x" }] };
+	const allowed = resolveDetachedGraph(graph, [], [], { cwd, invocationCwd: cwd, parentTools: tools, parentSkills }, undefined);
+	assert.equal(allowed.diagnostics.some((item) => item.severity === "error"), false);
+	assert.equal(allowed.steps[0]?.agent.extensionTools[0]?.name, "exa_search");
+	assert.equal(allowed.steps[0]?.agent.extensionTools[0]?.source.realpath, await realpath(extensionPath));
+	assert.deepEqual(allowed.steps[0]?.agent.tools, READONLY_CHILD_TOOL_NAMES);
+	const denied = resolveDetachedGraph({ ...graph, authority: {} }, [], [], { cwd, invocationCwd: cwd, parentTools: tools, parentSkills }, undefined);
+	assert.equal(denied.diagnostics.some((item) => item.code === "extension-code-authority-required"), true);
+	assert.deepEqual(denied.steps, []);
+});
+
+test("resolveDetachedGraph gates project and workspace-local caller skills on allowProjectCode", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-skills-${Date.now()}`), { recursive: true });
+	const skillPath = join(cwd, "project-skill.md");
+	const userLink = join(cwd, "user-link.md");
+	await writeFile(skillPath, "# Project skill\n");
+	await symlink(skillPath, userLink);
+	const projectSkills: ParentSkillInventory = {
 		apiAvailable: true,
+		readActive: true,
 		errorMessage: undefined,
-		tools: [
+		skills: [
 			{
-				name: "exa_search",
-				description: "Search the web",
-				active: options.active ?? true,
-				sourceInfo: { path: extensionPath, source, scope, origin: "package", baseDir: undefined },
+				name: "project-skill",
+				description: "Project skill",
+				sourceInfo: { path: skillPath, source: "project:project-skill", scope: "project", origin: "top-level", baseDir: cwd },
 			},
-			...(options.extraReserved ?? []).map((name) => ({
-				name,
-				description: "reserved",
-				active: true,
-				sourceInfo: { path: extensionPath, source, scope, origin: "package" as const, baseDir: undefined },
-			})),
+			{
+				name: "user-link",
+				description: "User skill symlinked into workspace",
+				sourceInfo: { path: userLink, source: "user:user-link", scope: "user", origin: "top-level", baseDir: dirname(cwd) },
+			},
 		],
 	};
-	return { root, cwd, extensionPath, inventory, source };
-}
+	const graph = {
+		objective: "skills",
+		authority: { allowFilesystemRead: true },
+		steps: [{ id: "one", agent: { system: "x", tools: ["read"], skills: ["project-skill", "user-link"] }, task: "x" }],
+	};
+	const denied = resolveDetachedGraph(graph, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills: projectSkills }, undefined);
+	assert.equal(denied.diagnostics.filter((item) => item.code === "caller-skills-project-code-authority-required").length, 2);
+	assert.deepEqual(denied.steps, []);
+	const allowed = resolveDetachedGraph({ ...graph, authority: { allowFilesystemRead: true, allowProjectCode: true } }, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills: projectSkills }, undefined);
+	assert.equal(allowed.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(allowed.steps[0]?.agent.callerSkills.map((skill) => skill.name), ["project-skill", "user-link"]);
 
-const reviewer: AgentConfig = {
-	name: "reviewer",
-	ref: "package:reviewer",
-	description: "Reviews code",
-	tools: ["read", "grep"],
-	model: undefined,
-	thinking: undefined,
-	systemPrompt: "Review carefully.",
-	source: "package",
-	filePath: "/pkg/reviewer.md",
-	sha256: "a".repeat(64),
-};
-
-const userReviewer: AgentConfig = {
-	...reviewer,
-	ref: "user:reviewer",
-	description: "User reviewer",
-	systemPrompt: "User review carefully.",
-	source: "user",
-	filePath: "/user/reviewer.md",
-	sha256: "b".repeat(64),
-};
-
-test("validateActionShape rejects catalog calls carrying run payload", () => {
-	const diagnostics = validateActionShape({
-		action: "catalog",
-		objective: "should not be here",
-		agents: [{ id: "critic", kind: "inline", system: "x" }],
-		steps: [{ id: "s", agent: "critic", task: "x" }],
-	});
-	assert.equal(diagnostics.length, 1);
-	assert.equal(diagnostics[0].code, "catalog-run-fields-denied");
-});
-
-test("validatePreflightShape rejects missing action", () => {
-	const diagnostics = validatePreflightShape({ agents: [{ id: "worker", kind: "inline", system: "x" }], steps: [{ id: "s", agent: "worker", task: "x" }] });
-	assert.equal(diagnostics.some((item) => item.code === "action-required" && item.path === "/action"), true);
-});
-
-test("validatePreflightShape rejects invalid run shapes before confirmation", () => {
-	const diagnostics = validatePreflightShape({ action: "run", library: { sources: ["project"], query: "review", projectAgents: "confirm" } });
-	assert.equal(diagnostics.some((item) => item.code === "objective-required" && item.path === "/objective"), true);
-	assert.equal(diagnostics.some((item) => item.code === "steps-required" && item.path === "/steps"), true);
-	assert.equal(diagnostics.some((item) => item.code === "run-library-query-denied" && item.path === "/library/query"), true);
-});
-
-test("validatePreflightShape treats graphFile as a complete run graph wrapper", () => {
-	const wrapper = validatePreflightShape({ action: "run", graphFile: "research-to-change-gated-loop.json" });
-	assert.equal(wrapper.some((item) => item.code === "objective-required"), false);
-	assert.equal(wrapper.some((item) => item.code === "steps-required"), false);
-
-	const mixed = validatePreflightShape({ action: "run", graphFile: "graph.json", objective: "inline", steps: [{ id: "one", agent: "package:reviewer", task: "review" }] });
-	assert.equal(mixed.some((item) => item.code === "graph-file-inline-fields-denied"), true);
-});
-
-test("resolveRunPlan supports inline agents and dependency synthesis", () => {
-	const plan = resolveRunPlan(
-		{
-			action: "run",
-			objective: "Audit model-native surface",
-			agents: [
-				{
-					id: "critic",
-					kind: "inline",
-					description: "Critiques API",
-					system: "You critique APIs.",
-					tools: ["read"],
-				},
-			],
-			steps: [{ id: "critique", agent: "critic", task: "Critique the surface." }],
-			synthesis: { task: "Summarize critique." },
-		},
-		[],
-		noDiagnostics,
-	);
-	assert.equal(plan.diagnostics.filter((item) => item.severity === "error").length, 0);
-	assert.equal(plan.agents.some((agent) => agent.id === "critic"), true);
-	assert.equal(plan.agents.find((agent) => agent.id === "critic")?.tools.join(","), "read");
-	assert.equal(plan.agents.some((agent) => agent.id === "agent-team-synthesizer"), true);
-	assert.deepEqual(plan.steps.map((step) => step.id), ["critique", "synthesis"]);
-	assert.deepEqual(plan.steps[1].needs, ["critique"]);
-});
-
-test("resolveRunPlan defaults inline agents without tools to no tools", () => {
-	const plan = resolveRunPlan(
-		{
-			action: "run",
-			objective: "No tools",
-			agents: [{ id: "quiet", kind: "inline", system: "Answer directly." }],
-			steps: [{ id: "answer", agent: "quiet", task: "Answer." }],
-		},
-		[],
-		noDiagnostics,
-	);
-	assert.deepEqual(plan.agents.find((agent) => agent.id === "quiet")?.tools, []);
-});
-
-test("resolveRunPlan inherits caller-visible skills for read-enabled agents", async () => {
-	const fixture = await makeSkillInventory([{ name: "pi-multiagent" }, { name: "voices-local-studio" }]);
-	try {
-		const plan = resolveRunPlan(
+	const repoRoot = await mkdir(join(tmpdir(), `pi-multiagent-plan-skills-repo-root-${Date.now()}`), { recursive: true });
+	await mkdir(join(repoRoot, ".git"));
+	const subdir = join(repoRoot, "src");
+	await mkdir(subdir);
+	const repoSkillPath = join(repoRoot, "repo-skill.md");
+	await writeFile(repoSkillPath, "# Repo skill\n");
+	const repoSkills: ParentSkillInventory = {
+		apiAvailable: true,
+		readActive: true,
+		errorMessage: undefined,
+		skills: [
 			{
-				action: "run",
-				objective: "skills",
-				agents: [{ id: "reader", kind: "inline", system: "Use skills when relevant.", tools: ["read"] }],
-				steps: [{ id: "one", agent: "reader", task: "x" }],
+				name: "repo-skill",
+				description: "Repo skill reported as user-scoped",
+				sourceInfo: { path: repoSkillPath, source: "user:repo-skill", scope: "user", origin: "top-level", baseDir: dirname(repoRoot) },
 			},
-			[],
-			noDiagnostics,
-			{ parentTools: emptyParentTools, parentSkills: fixture.inventory, extensionToolPolicy, cwd: fixture.root },
-		);
-		assert.equal(plan.diagnostics.some((item) => item.severity === "error"), false);
-		assert.deepEqual(plan.agents.find((agent) => agent.id === "reader")?.callerSkills.map((skill) => skill.name), ["pi-multiagent", "voices-local-studio"]);
-	} finally {
-		await rm(fixture.root, { recursive: true, force: true });
-	}
+		],
+	};
+	const subdirGraph = { objective: "subdir skills", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { system: "x", tools: ["read"], skills: ["repo-skill"] }, task: "x" }] };
+	const subdirDenied = resolveDetachedGraph(subdirGraph, [], [], { cwd: subdir, invocationCwd: subdir, parentTools, parentSkills: repoSkills }, undefined);
+	assert.equal(subdirDenied.diagnostics.some((item) => item.code === "caller-skills-project-code-authority-required"), true);
+	assert.deepEqual(subdirDenied.steps, []);
+	const subdirAllowed = resolveDetachedGraph({ ...subdirGraph, authority: { allowFilesystemRead: true, allowProjectCode: true } }, [], [], { cwd: subdir, invocationCwd: subdir, parentTools, parentSkills: repoSkills }, undefined);
+	assert.equal(subdirAllowed.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(subdirAllowed.steps[0]?.agent.callerSkills.map((skill) => skill.name), ["repo-skill"]);
 });
 
-test("resolveRunPlan curates caller skills with include, exclude, and none", async () => {
-	const fixture = await makeSkillInventory([{ name: "pi-multiagent" }, { name: "voices-local-studio" }]);
-	try {
-		const include = resolveRunPlan(
-			{ action: "run", objective: "include", callerSkills: { include: ["voices-local-studio"] }, agents: [{ id: "reader", kind: "inline", system: "x", tools: ["read"] }], steps: [{ id: "one", agent: "reader", task: "x" }] },
-			[],
-			noDiagnostics,
-			{ parentTools: emptyParentTools, parentSkills: fixture.inventory, extensionToolPolicy, cwd: fixture.root },
-		);
-		const exclude = resolveRunPlan(
-			{ action: "run", objective: "exclude", callerSkills: { exclude: ["voices-local-studio"] }, agents: [{ id: "reader", kind: "inline", system: "x", tools: ["read"] }], steps: [{ id: "one", agent: "reader", task: "x" }] },
-			[],
-			noDiagnostics,
-			{ parentTools: emptyParentTools, parentSkills: fixture.inventory, extensionToolPolicy, cwd: fixture.root },
-		);
-		const none = resolveRunPlan(
-			{ action: "run", objective: "none", callerSkills: "inherit", agents: [{ id: "reader", kind: "inline", system: "x", tools: ["read"], callerSkills: "none" }], steps: [{ id: "one", agent: "reader", task: "x" }] },
-			[],
-			noDiagnostics,
-			{ parentTools: emptyParentTools, parentSkills: fixture.inventory, extensionToolPolicy, cwd: fixture.root },
-		);
-		assert.deepEqual(include.agents.find((agent) => agent.id === "reader")?.callerSkills.map((skill) => skill.name), ["voices-local-studio"]);
-		assert.deepEqual(exclude.agents.find((agent) => agent.id === "reader")?.callerSkills.map((skill) => skill.name), ["pi-multiagent"]);
-		assert.deepEqual(none.agents.find((agent) => agent.id === "reader")?.callerSkills.map((skill) => skill.name), []);
-	} finally {
-		await rm(fixture.root, { recursive: true, force: true });
-	}
-});
-
-test("resolveRunPlan applies caller skill curation before the inheritance cap", async () => {
-	const skillNames = ["target-skill", ...Array.from({ length: 130 }, (_, index) => `skill-${index}`)];
-	const fixture = await makeSkillInventory(skillNames.map((name) => ({ name })));
-	try {
-		const include = resolveRunPlan(
-			{ action: "run", objective: "include many", callerSkills: { include: ["target-skill"] }, agents: [{ id: "reader", kind: "inline", system: "x", tools: ["read"] }], steps: [{ id: "one", agent: "reader", task: "x" }] },
-			[],
-			noDiagnostics,
-			{ parentTools: emptyParentTools, parentSkills: fixture.inventory, extensionToolPolicy, cwd: fixture.root },
-		);
-		const exclude = resolveRunPlan(
-			{ action: "run", objective: "exclude many", callerSkills: { exclude: ["skill-0", "skill-1", "skill-2"] }, agents: [{ id: "reader", kind: "inline", system: "x", tools: ["read"] }], steps: [{ id: "one", agent: "reader", task: "x" }] },
-			[],
-			noDiagnostics,
-			{ parentTools: emptyParentTools, parentSkills: fixture.inventory, extensionToolPolicy, cwd: fixture.root },
-		);
-		assert.equal(include.diagnostics.some((item) => item.code === "caller-skills-too-many"), false);
-		assert.deepEqual(include.agents.find((agent) => agent.id === "reader")?.callerSkills.map((skill) => skill.name), ["target-skill"]);
-		assert.equal(exclude.diagnostics.some((item) => item.code === "caller-skills-too-many"), false);
-		assert.equal(exclude.agents.find((agent) => agent.id === "reader")?.callerSkills.length, 128);
-		assert.equal(exclude.agents.find((agent) => agent.id === "reader")?.callerSkills.some((skill) => skill.name === "skill-0"), false);
-	} finally {
-		await rm(fixture.root, { recursive: true, force: true });
-	}
-});
-
-test("resolveRunPlan filters hidden caller skills with Pi frontmatter semantics", async () => {
-	const hiddenContent = "---\r\nname: hidden-skill\r\ndescription: hidden skill\r\ndisable-model-invocation: true # parent-only\r\n---\r\n# hidden\r\n";
-	const fixture = await makeSkillInventory([{ name: "visible-skill" }, { name: "hidden-skill", content: hiddenContent }]);
-	try {
-		const inherit = resolveRunPlan(
-			{ action: "run", objective: "hidden", agents: [{ id: "reader", kind: "inline", system: "x", tools: ["read"] }], steps: [{ id: "one", agent: "reader", task: "x" }] },
-			[],
-			noDiagnostics,
-			{ parentTools: emptyParentTools, parentSkills: fixture.inventory, extensionToolPolicy, cwd: fixture.root },
-		);
-		const includeHidden = resolveRunPlan(
-			{ action: "run", objective: "hidden include", agents: [{ id: "reader", kind: "inline", system: "x", tools: ["read"], callerSkills: { include: ["hidden-skill"] } }], steps: [{ id: "one", agent: "reader", task: "x" }] },
-			[],
-			noDiagnostics,
-			{ parentTools: emptyParentTools, parentSkills: fixture.inventory, extensionToolPolicy, cwd: fixture.root },
-		);
-		assert.deepEqual(inherit.agents.find((agent) => agent.id === "reader")?.callerSkills.map((skill) => skill.name), ["visible-skill"]);
-		assert.equal(includeHidden.diagnostics.some((item) => item.code === "caller-skills-unknown"), true);
-	} finally {
-		await rm(fixture.root, { recursive: true, force: true });
-	}
-});
-
-test("resolveRunPlan ignores caller skills for no-read defaults and unused library agents", async () => {
-	const fixture = await makeSkillInventory([{ name: "pi-multiagent" }]);
-	const quietLibrary: AgentConfig = { ...reviewer, name: "quiet", ref: "user:quiet", tools: [], source: "user", filePath: "/user/quiet.md" };
-	try {
-		const rootInherit = resolveRunPlan(
-			{ action: "run", objective: "no read inherit", callerSkills: "inherit", agents: [{ id: "quiet", kind: "inline", system: "x" }], steps: [{ id: "one", agent: "quiet", task: "x" }] },
-			[quietLibrary],
-			noDiagnostics,
-			{ parentTools: emptyParentTools, parentSkills: fixture.inventory, extensionToolPolicy, cwd: fixture.root },
-		);
-		const rootInclude = resolveRunPlan(
-			{ action: "run", objective: "unused library", callerSkills: { include: ["pi-multiagent"] }, agents: [{ id: "reader", kind: "inline", system: "x", tools: ["read"] }], steps: [{ id: "one", agent: "reader", task: "x" }] },
-			[quietLibrary],
-			noDiagnostics,
-			{ parentTools: emptyParentTools, parentSkills: fixture.inventory, extensionToolPolicy, cwd: fixture.root },
-		);
-		assert.equal(rootInherit.diagnostics.some((item) => item.code === "caller-skills-read-required"), false);
-		assert.deepEqual(rootInherit.agents.find((agent) => agent.id === "quiet")?.callerSkills, []);
-		assert.equal(rootInclude.diagnostics.some((item) => item.code === "caller-skills-read-required"), false);
-		assert.equal(rootInclude.agents.some((agent) => agent.id === "user:quiet"), false);
-		assert.deepEqual(rootInclude.agents.find((agent) => agent.id === "reader")?.callerSkills.map((skill) => skill.name), ["pi-multiagent"]);
-	} finally {
-		await rm(fixture.root, { recursive: true, force: true });
-	}
-});
-
-test("resolveRunPlan fails closed for explicit callerSkills without read or visible names", async () => {
-	const fixture = await makeSkillInventory([{ name: "pi-multiagent" }, { name: "hidden-skill", hidden: true }]);
-	try {
-		const noRead = resolveRunPlan(
-			{ action: "run", objective: "no read", agents: [{ id: "quiet", kind: "inline", system: "x", callerSkills: { include: ["pi-multiagent"] } }], steps: [{ id: "one", agent: "quiet", task: "x" }] },
-			[],
-			noDiagnostics,
-			{ parentTools: emptyParentTools, parentSkills: fixture.inventory, extensionToolPolicy, cwd: fixture.root },
-		);
-		const unknown = resolveRunPlan(
-			{ action: "run", objective: "unknown", agents: [{ id: "reader", kind: "inline", system: "x", tools: ["read"], callerSkills: { include: ["missing-skill"] } }], steps: [{ id: "one", agent: "reader", task: "x" }] },
-			[],
-			noDiagnostics,
-			{ parentTools: emptyParentTools, parentSkills: fixture.inventory, extensionToolPolicy, cwd: fixture.root },
-		);
-		const hidden = resolveRunPlan(
-			{ action: "run", objective: "hidden", agents: [{ id: "reader", kind: "inline", system: "x", tools: ["read"], callerSkills: { include: ["hidden-skill"] } }], steps: [{ id: "one", agent: "reader", task: "x" }] },
-			[],
-			noDiagnostics,
-			{ parentTools: emptyParentTools, parentSkills: fixture.inventory, extensionToolPolicy, cwd: fixture.root },
-		);
-		assert.equal(noRead.diagnostics.some((item) => item.code === "caller-skills-read-required"), true);
-		assert.equal(unknown.diagnostics.some((item) => item.code === "caller-skills-unknown"), true);
-		assert.equal(hidden.diagnostics.some((item) => item.code === "caller-skills-unknown"), true);
-	} finally {
-		await rm(fixture.root, { recursive: true, force: true });
-	}
-});
-
-test("resolveRunPlan binds source-qualified library agents without adding built-in synthesizer", () => {
-	const plan = resolveRunPlan(
-		{
-			action: "run",
-			objective: "Review",
-			agents: [{ id: "review", kind: "library", ref: "package:reviewer", outputContract: "Findings first." }],
-			steps: [{ id: "r", agent: "review", task: "Review current diff." }],
-		},
-		[reviewer, userReviewer],
-		noDiagnostics,
-	);
-	const resolved = plan.agents.find((agent) => agent.id === "review");
-	assert.equal(resolved?.name, "reviewer");
-	assert.equal(resolved?.ref, "package:reviewer");
-	assert.equal(resolved?.outputContract, "Findings first.");
-	assert.equal(plan.agents.some((agent) => agent.id === "agent-team-synthesizer"), false);
-});
-
-test("resolveRunPlan supports direct source-qualified step refs and rejects bare library names", () => {
-	const plan = resolveRunPlan(
-		{
-			action: "run",
-			objective: "Review",
-			steps: [
-				{ id: "package-step", agent: "package:reviewer", task: "Use package reviewer." },
-				{ id: "bare-step", agent: "reviewer", task: "Use bare library name." },
-			],
-		},
-		[reviewer, userReviewer],
-		noDiagnostics,
-	);
-	assert.equal(plan.diagnostics.some((item) => item.code === "step-agent-unknown" && item.path === "/steps/1/agent"), true);
-	assert.equal(plan.agents.find((agent) => agent.id === "package:reviewer")?.ref, "package:reviewer");
-	assert.equal(plan.agents.some((agent) => agent.id === "reviewer"), false);
-});
-
-test("resolveRunPlan rejects invalid inline and library tool names", () => {
-	const plan = resolveRunPlan(
-		{
-			action: "run",
-			objective: "bad tools",
-			agents: [
-				{ id: "inline", kind: "inline", system: "x", tools: ["bad/tool"] },
-				{ id: "review", kind: "library", ref: "package:reviewer", tools: ["also.bad"] },
-			],
-			steps: [
-				{ id: "one", agent: "inline", task: "x" },
-				{ id: "two", agent: "review", task: "x" },
-			],
-		},
-		[reviewer],
-		noDiagnostics,
-	);
-	assert.equal(plan.diagnostics.filter((item) => item.code === "agent-tool-invalid").length, 2);
-	assert.equal(plan.diagnostics.some((item) => item.code === "agent-tool-invalid" && item.path === "/agents/0/tools"), true);
-	assert.equal(plan.diagnostics.some((item) => item.code === "agent-tool-invalid" && item.path === "/agents/1/tools"), true);
-	assert.equal(plan.diagnostics.some((item) => item.code === "step-agent-unknown" && item.path === "/steps/0/agent"), true);
-});
-
-test("resolveRunPlan rejects syntactically valid unavailable tools", () => {
-	const plan = resolveRunPlan(
-		{
-			action: "run",
-			objective: "bad tool",
-			agents: [{ id: "inline", kind: "inline", system: "x", tools: ["webFetch"] }],
-			steps: [{ id: "one", agent: "inline", task: "x" }],
-		},
-		[],
-		noDiagnostics,
-	);
-	assert.equal(plan.diagnostics.some((item) => item.code === "agent-tool-invalid" && item.message.includes("Extension tools such as exa_search must use extensionTools[]")), true);
-});
-
-test("resolveRunPlan accepts source-qualified active extension tools", async () => {
-	const fixture = await makeToolInventory();
-	try {
-		const plan = resolveRunPlan(
+test("resolveDetachedGraph does not inherit parent skills when agent.skills is omitted", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-skills-none-${Date.now()}`), { recursive: true });
+	const skillPath = join(cwd, "visible-skill.md");
+	await writeFile(skillPath, "# Visible skill\n");
+	const visibleSkills: ParentSkillInventory = {
+		apiAvailable: true,
+		readActive: true,
+		errorMessage: undefined,
+		skills: [
 			{
-				action: "run",
-				objective: "web research",
-				agents: [{ id: "searcher", kind: "inline", system: "Search.", extensionTools: [{ name: "exa_search", from: { source: fixture.source, scope: "user", origin: "package" } }] }],
-				steps: [{ id: "search", agent: "searcher", task: "Search." }],
+				name: "visible-skill",
+				description: "Visible skill",
+				sourceInfo: { path: skillPath, source: "user:visible-skill", scope: "user", origin: "top-level", baseDir: dirname(cwd) },
 			},
-			[],
-			noDiagnostics,
-			{ parentTools: fixture.inventory, extensionToolPolicy, cwd: fixture.cwd },
-		);
-		assert.equal(plan.diagnostics.some((item) => item.severity === "error"), false);
-		const agent = plan.agents.find((candidate) => candidate.id === "searcher");
-		assert.deepEqual(agent?.tools, []);
-		assert.equal(agent?.extensionTools[0]?.name, "exa_search");
-		assert.equal(agent?.extensionTools[0]?.source.source, fixture.source);
-	} finally {
-		await rm(fixture.root, { recursive: true, force: true });
-	}
+		],
+	};
+	const graph = resolveDetachedGraph(
+		{ objective: "skills omitted", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { system: "x", tools: ["read"] }, task: "x" }] },
+		[],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills: visibleSkills },
+		undefined,
+	);
+	assert.equal(graph.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(graph.steps[0]?.agent.callerSkills, []);
 });
 
-test("resolveRunPlan denies unsafe extension tool grants", async () => {
-	const active = await makeToolInventory();
-	const inactive = await makeToolInventory("user", { active: false });
-	const project = await makeToolInventory("project");
-	const local = await makeToolInventory("user", { cwdInside: true });
-	const sdk = await makeToolInventory("user", { source: "sdk" });
-	const collision = await makeToolInventory("user", { extraReserved: ["read"] });
-	const duplicate = await makeToolInventory();
-	const hardlink = await makeToolInventory();
-	const large = await makeToolInventory();
-	const hardlinkPath = join(hardlink.root, "cache", "agent-team-hardlink.ts");
-	await link(hardlink.extensionPath, hardlinkPath);
-	await writeFile(large.extensionPath, Buffer.alloc(4 * 1024 * 1024 + 1));
-	try {
-		const duplicateInventory = { ...active.inventory, tools: [...active.inventory.tools, ...duplicate.inventory.tools] };
-		const hardlinkInventory = {
-			...hardlink.inventory,
-			tools: [
-				...hardlink.inventory.tools,
-				{ name: "agent_team", description: "recursive", active: true, sourceInfo: { path: hardlinkPath, source: "local-hardlink", scope: "user" as const, origin: "top-level" as const, baseDir: undefined } },
-			],
-		};
-		const cases = [
-			{ name: "missing", fixture: active, grant: { name: "exa_fetch", from: { source: active.source, scope: "user", origin: "package" } }, code: "extension-tool-unavailable" },
-			{ name: "inactive", fixture: inactive, grant: { name: "exa_search", from: { source: inactive.source, scope: "user", origin: "package" } }, code: "extension-tool-inactive" },
-			{ name: "mismatch", fixture: active, grant: { name: "exa_search", from: { source: "npm:other", scope: "user", origin: "package" } }, code: "extension-tool-source-mismatch" },
-			{ name: "project", fixture: project, grant: { name: "exa_search", from: { source: project.source, scope: "project", origin: "package" } }, code: "extension-tool-project-denied" },
-			{ name: "local", fixture: local, grant: { name: "exa_search", from: { source: local.source, scope: "user", origin: "package" } }, code: "extension-tool-local-denied" },
-			{ name: "sdk", fixture: sdk, grant: { name: "exa_search", from: { source: sdk.source, scope: "user", origin: "package" } }, code: "extension-tool-sdk-unloadable" },
-			{ name: "collision", fixture: collision, grant: { name: "exa_search", from: { source: collision.source, scope: "user", origin: "package" } }, code: "extension-tool-builtin-collision" },
-			{ name: "hardlink", fixture: { ...hardlink, inventory: hardlinkInventory }, grant: { name: "exa_search", from: { source: hardlink.source, scope: "user", origin: "package" } }, code: "extension-tool-recursion-denied" },
-			{ name: "large", fixture: large, grant: { name: "exa_search", from: { source: large.source, scope: "user", origin: "package" } }, code: "extension-tool-source-unloadable" },
-			{ name: "ambiguous", fixture: { ...active, inventory: duplicateInventory }, grant: { name: "exa_search", from: { source: active.source, scope: "user", origin: "package" } }, code: "extension-tool-active-ambiguous" },
-			{ name: "reserved-builtin", fixture: active, grant: { name: "read", from: { source: active.source, scope: "user", origin: "package" } }, code: "extension-tool-reserved" },
-			{ name: "reserved", fixture: active, grant: { name: "agent_team", from: { source: active.source, scope: "user", origin: "package" } }, code: "extension-tool-reserved" },
-		];
-		for (const item of cases) {
-			const plan = resolveRunPlan(
-				{
-					action: "run",
-					objective: item.name,
-					agents: [{ id: "searcher", kind: "inline", system: "Search.", extensionTools: [item.grant] }],
-					steps: [{ id: "search", agent: "searcher", task: "Search." }],
-				},
-				[],
-				noDiagnostics,
-				{ parentTools: item.fixture.inventory, extensionToolPolicy, cwd: item.fixture.cwd },
-			);
-			assert.equal(plan.diagnostics.some((diagnostic) => diagnostic.code === item.code), true, item.name);
-		}
-	} finally {
-		await Promise.all([active, inactive, project, local, sdk, collision, duplicate, hardlink, large].map((fixture) => rm(fixture.root, { recursive: true, force: true })));
-	}
+test("resolveDetachedGraph gates project and local extension sources on allowProjectCode", async () => {
+	const parent = await mkdir(join(tmpdir(), `pi-multiagent-plan-extension-project-${Date.now()}`), { recursive: true });
+	const cwd = await mkdir(join(parent, "workspace"), { recursive: true });
+	const projectPath = join(parent, "project-extension.ts");
+	const localPath = join(parent, "local-extension.ts");
+	await writeFile(projectPath, "export default function extension() {}\n");
+	await writeFile(localPath, "export default function extension() {}\n");
+	const projectTool: ParentToolInfo = { name: "project_search", description: "Project search", active: true, sourceInfo: { path: projectPath, source: "project:search", scope: "project", origin: "top-level", baseDir: parent } };
+	const localTool: ParentToolInfo = { name: "local_search", description: "Local search", active: true, sourceInfo: { path: localPath, source: "user:local", scope: "temporary", origin: "top-level", baseDir: parent } };
+	const tools: ParentToolInventory = { apiAvailable: true, errorMessage: undefined, tools: [...activeBuiltinTools(), projectTool, localTool] };
+	const projectGraph = { objective: "project extension", authority: { allowFilesystemRead: true, allowExtensionCode: true }, steps: [{ id: "one", agent: { system: "x", extensionTools: [{ name: "project_search", from: { source: "project:search", scope: "project", origin: "top-level" } }] }, task: "x" }] };
+	const projectDenied = resolveDetachedGraph(projectGraph, [], [], { cwd, invocationCwd: cwd, parentTools: tools, parentSkills }, undefined);
+	assert.equal(projectDenied.diagnostics.some((item) => item.code === "extension-tool-project-denied"), true);
+	assert.deepEqual(projectDenied.steps, []);
+	const projectAllowed = resolveDetachedGraph({ ...projectGraph, authority: { allowFilesystemRead: true, allowExtensionCode: true, allowProjectCode: true } }, [], [], { cwd, invocationCwd: cwd, parentTools: tools, parentSkills }, undefined);
+	assert.equal(projectAllowed.diagnostics.some((item) => item.severity === "error"), false);
+	assert.equal(projectAllowed.steps[0]?.agent.extensionTools[0]?.name, "project_search");
+
+	const localGraph = { objective: "local extension", authority: { allowFilesystemRead: true, allowExtensionCode: true }, steps: [{ id: "one", agent: { system: "x", extensionTools: [{ name: "local_search", from: { source: "user:local", scope: "temporary", origin: "top-level" } }] }, task: "x" }] };
+	const localDenied = resolveDetachedGraph(localGraph, [], [], { cwd, invocationCwd: cwd, parentTools: tools, parentSkills }, undefined);
+	assert.equal(localDenied.diagnostics.some((item) => item.code === "extension-tool-local-denied"), true);
+	assert.deepEqual(localDenied.steps, []);
+	const localAllowed = resolveDetachedGraph({ ...localGraph, authority: { allowFilesystemRead: true, allowExtensionCode: true, allowProjectCode: true } }, [], [], { cwd, invocationCwd: cwd, parentTools: tools, parentSkills }, undefined);
+	assert.equal(localAllowed.diagnostics.some((item) => item.severity === "error"), false);
+	assert.equal(localAllowed.steps[0]?.agent.extensionTools[0]?.name, "local_search");
 });
 
-test("resolveRunPlan rejects malformed invocation-local agent bindings", () => {
-	const plan = resolveRunPlan(
+test("resolveDetachedGraph enforces graph library sources", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-library-${Date.now()}`), { recursive: true });
+	const defaultDenied = resolveDetachedGraph(
+		{ objective: "library", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { ref: "user:reviewer" }, task: "x" }] },
+		[packageAgent(), userAgent()],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(defaultDenied.diagnostics.some((item) => item.code === "library-source-not-enabled"), true);
+	assert.deepEqual(defaultDenied.steps, []);
+	const allowed = resolveDetachedGraph(
+		{ objective: "library", library: { sources: ["user"] }, authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { ref: "user:reviewer" }, task: "x" }] },
+		[packageAgent(), userAgent()],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(allowed.diagnostics.some((item) => item.severity === "error"), false);
+	assert.equal(allowed.steps[0]?.agent.ref, "user:reviewer");
+});
+
+test("resolveDetachedGraph materializes terminal after dependencies", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-after-${Date.now()}`), { recursive: true });
+	const graph = resolveDetachedGraph(
 		{
-			action: "run",
-			objective: "bad bindings",
-			agents: [
-				{ id: "inline", kind: "inline", ref: "package:reviewer", system: "x" },
-				{ id: "missing-ref", kind: "library" },
-				{ id: "bare-ref", kind: "library", ref: "reviewer" },
-			],
+			objective: "after deps",
+			authority: { allowFilesystemRead: true },
 			steps: [
-				{ id: "one", agent: "inline", task: "x" },
-				{ id: "two", agent: "missing-ref", task: "x" },
-				{ id: "three", agent: "bare-ref", task: "x" },
+				{ id: "probe", agent: { system: "x" }, task: "x" },
+				{ id: "synthesis", agent: { system: "x" }, task: "x", after: ["probe"] },
 			],
 		},
-		[reviewer],
-		noDiagnostics,
+		[],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
 	);
-	assert.equal(plan.diagnostics.some((item) => item.code === "inline-agent-ref-denied" && item.path === "/agents/0/ref"), true);
-	assert.equal(plan.diagnostics.some((item) => item.code === "library-agent-ref-required" && item.path === "/agents/1/ref"), true);
-	assert.equal(plan.diagnostics.some((item) => item.code === "library-agent-ref-invalid" && item.path === "/agents/2/ref"), true);
-});
-
-test("resolveRunPlan rejects library binding system override", () => {
-	const plan = resolveRunPlan(
+	assert.equal(graph.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(graph.steps[1]?.needs, []);
+	assert.deepEqual(graph.steps[1]?.after, ["probe"]);
+	const cycle = resolveDetachedGraph(
 		{
-			action: "run",
-			objective: "deny library system",
-			agents: [{ id: "review", kind: "library", ref: "package:reviewer", system: "Override package prompt." }],
-			steps: [{ id: "review-step", agent: "review", task: "Review." }],
-		},
-		[reviewer],
-		noDiagnostics,
-	);
-	assert.equal(plan.diagnostics.some((item) => item.code === "library-agent-system-denied" && item.path === "/agents/0/system"), true);
-	assert.equal(plan.diagnostics.some((item) => item.code === "step-agent-unknown" && item.path === "/steps/0/agent"), true);
-});
-
-test("resolveRunPlan de-duplicates upstream refs preserving order", () => {
-	const plan = resolveRunPlan(
-		{
-			action: "run",
-			objective: "dedupe upstream",
-			agents: [{ id: "worker", kind: "inline", system: "Work." }],
+			objective: "after cycle",
+			authority: { allowFilesystemRead: true },
 			steps: [
-				{ id: "one", agent: "worker", task: "One." },
-				{ id: "two", agent: "worker", task: "Two.", needs: ["one", "one"] },
+				{ id: "one", agent: { system: "x" }, task: "x", after: ["two"] },
+				{ id: "two", agent: { system: "x" }, task: "x", needs: ["one"] },
 			],
-			synthesis: { task: "Summarize.", from: ["one", "one", "two"] },
 		},
 		[],
-		noDiagnostics,
-	);
-	assert.deepEqual(plan.steps.find((step) => step.id === "two")?.needs, ["one"]);
-	assert.deepEqual(plan.steps.find((step) => step.synthesis)?.needs, ["one", "two"]);
-});
-
-test("resolveRunPlan rejects invalid ids, empty tasks, and reserved public refs", () => {
-	const plan = resolveRunPlan(
-		{
-			action: "run",
-			objective: "bad graph",
-			agents: [{ id: "../escape", kind: "inline", system: "sys" }],
-			steps: [{ id: "", agent: "../escape", task: "" }],
-			synthesis: { id: "__synthesizer", task: "sum", from: [""] },
-		},
 		[],
-		noDiagnostics,
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
 	);
-	assert.equal(plan.diagnostics.some((item) => item.code === "public-id-invalid" && item.path === "/agents/0/id"), true);
-	assert.equal(plan.diagnostics.some((item) => item.code === "public-id-invalid" && item.path === "/steps/0/id"), true);
-	assert.equal(plan.diagnostics.some((item) => item.code === "step-task-required" && item.path === "/steps/0/task"), true);
+	assert.equal(cycle.diagnostics.some((item) => item.code === "dependency-cycle"), true);
 });
 
-test("resolveRunPlan rejects whitespace-only synthesis task", () => {
-	const plan = resolveRunPlan(
-		{
-			action: "run",
-			objective: "blank synthesis",
-			agents: [{ id: "worker", kind: "inline", system: "x" }],
-			steps: [{ id: "one", agent: "worker", task: "x" }],
-			synthesis: { task: "   " },
-		},
-		[],
-		noDiagnostics,
-	);
-	assert.equal(plan.diagnostics.some((item) => item.code === "synthesis-task-required" && item.path === "/synthesis/task"), true);
+test("resolveDetachedGraph resolves built-in tools independent of parent active built-ins", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-parent-tools-${Date.now()}`), { recursive: true });
+	const graph = { objective: "parent tools", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { system: "x", tools: ["read"] }, task: "x" }] };
+	const inventoryUnavailable = resolveDetachedGraph(graph, [], [], { cwd, invocationCwd: cwd, parentTools: { apiAvailable: false, errorMessage: "disabled", tools: [] }, parentSkills }, undefined);
+	assert.equal(inventoryUnavailable.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(inventoryUnavailable.steps[0]?.agent.tools, READONLY_CHILD_TOOL_NAMES);
+	const inactive = resolveDetachedGraph(graph, [], [], { cwd, invocationCwd: cwd, parentTools: { apiAvailable: true, errorMessage: undefined, tools: activeBuiltinTools().map((tool) => ({ ...tool, active: false })) }, parentSkills }, undefined);
+	assert.equal(inactive.diagnostics.some((item) => item.code.startsWith("builtin-tool-")), false);
+	assert.deepEqual(inactive.steps[0]?.agent.tools, READONLY_CHILD_TOOL_NAMES);
 });
 
-test("resolveRunPlan rejects normal steps depending on synthesis", () => {
-	const plan = resolveRunPlan(
+test("resolveDetachedGraph denies lexical step cwd escapes before outside type probing", async () => {
+	const parent = await mkdir(join(tmpdir(), `pi-multiagent-plan-cwd-escape-${Date.now()}`), { recursive: true });
+	const cwd = await mkdir(join(parent, "workspace"), { recursive: true });
+	const outside = await mkdir(join(parent, "outside"), { recursive: true });
+	await writeFile(join(outside, "file.txt"), "x");
+	const outsideFile = resolveDetachedGraph({ objective: "cwd", steps: [{ id: "one", agent: { system: "x" }, task: "x", cwd: "../outside/file.txt" }] }, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills }, undefined);
+	assert.equal(outsideFile.diagnostics.some((item) => item.code === "cwd-path-escape-denied"), true);
+	assert.equal(outsideFile.diagnostics.some((item) => item.code === "cwd-not-directory"), false);
+	const outsideDir = resolveDetachedGraph({ objective: "cwd", steps: [{ id: "one", agent: { system: "x" }, task: "x", cwd: "../outside" }] }, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills }, undefined);
+	assert.equal(outsideDir.diagnostics.some((item) => item.code === "cwd-path-escape-denied"), true);
+	assert.equal(outsideDir.diagnostics.some((item) => item.code === "cwd-not-directory"), false);
+	await symlink(outside, join(cwd, "link"));
+	const linked = resolveDetachedGraph({ objective: "cwd", steps: [{ id: "one", agent: { system: "x" }, task: "x", cwd: "link" }] }, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills }, undefined);
+	assert.equal(linked.diagnostics.some((item) => item.code === "cwd-symlink-denied"), true);
+});
+
+test("resolveDetachedGraph fails closed for authority and dependency violations", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-deny-${Date.now()}`), { recursive: true });
+	await writeFile(join(cwd, "file.txt"), "x");
+	const graph = resolveDetachedGraph(
 		{
-			action: "run",
-			objective: "synthesis is terminal",
-			agents: [{ id: "worker", kind: "inline", system: "x" }],
+			objective: "deny",
+			library: { sources: ["package", "project"] },
 			steps: [
-				{ id: "one", agent: "worker", task: "x" },
-				{ id: "after", agent: "worker", task: "must not run after synthesis", needs: ["final"] },
-			],
-			synthesis: { id: "final", task: "summarize", from: ["one"] },
-		},
-		[],
-		noDiagnostics,
-	);
-	const diagnostic = plan.diagnostics.find((item) => item.code === "synthesis-must-be-terminal" && item.path === "/steps/1/needs");
-	assert.equal(diagnostic?.severity, "error");
-	assert.equal(diagnostic?.message.includes("cannot be used as an intermediate dependency"), true);
-});
-
-test("resolveRunPlan reserves the public default synthesizer id", () => {
-	const plan = resolveRunPlan(
-		{
-			action: "run",
-			objective: "reserved id",
-			agents: [{ id: "agent-team-synthesizer", kind: "inline", system: "x" }],
-			steps: [{ id: "one", agent: "agent-team-synthesizer", task: "Use explicit." }],
-		},
-		[],
-		noDiagnostics,
-	);
-	assert.equal(plan.diagnostics.some((item) => item.code === "agent-id-reserved" && item.path === "/agents/0/id"), true);
-});
-
-test("resolveRunPlan reports cycles and unknown agents", () => {
-	const plan = resolveRunPlan(
-		{
-			action: "run",
-			objective: "bad graph",
-			steps: [
-				{ id: "a", agent: "missing", task: "A", needs: ["b"] },
-				{ id: "b", agent: "missing", task: "B", needs: ["a"] },
+				{ id: "one", agent: { ref: "package:reviewer", tools: ["read"] }, task: "x", needs: ["missing"] },
+				{ id: "two", agent: { system: "x", tools: ["bash"] }, task: "x", after: ["one", "missing-after"] },
 			],
 		},
+		[packageAgent()],
 		[],
-		noDiagnostics,
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
 	);
-	const unknown = plan.diagnostics.find((item) => item.code === "step-agent-unknown" && item.path === "/steps/0/agent");
-	assert.equal(unknown?.message.includes("source-qualified library ref"), true);
-	assert.equal(unknown?.message.includes("catalog"), true);
-	const cycle = plan.diagnostics.find((item) => item.code === "step-cycle");
-	assert.equal(cycle?.message, "Dependency cycle: a -> b -> a.");
-	assert.equal(cycle?.path, "/steps");
+	const codes = graph.diagnostics.map((item) => item.code);
+	assert.equal(codes.includes("project-code-authority-required"), true);
+	assert.equal(codes.includes("filesystem-read-authority-required"), true);
+	assert.equal(codes.includes("shell-authority-required"), true);
+	assert.equal(codes.includes("dependency-unknown"), false);
+	assert.deepEqual(graph.steps, []);
 });

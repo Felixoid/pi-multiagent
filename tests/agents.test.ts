@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { catalogAgents, discoverAgents, findNearestProjectAgentsDir, normalizeLibraryOptions } from "../extensions/multiagent/src/agents.ts";
+import { readAgentFileContent } from "../extensions/multiagent/src/agent-file-content.ts";
+import { MAX_AGENT_FILE_BYTES } from "../extensions/multiagent/src/types.ts";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -40,6 +42,51 @@ test("discoverAgents parses CRLF frontmatter", async () => {
 	await rm(root, { recursive: true, force: true });
 });
 
+test("discoverAgents rejects oversized agent files", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-agent-large-"));
+	const packageDir = join(root, "package-agents");
+	await makeAgent(packageDir, "large.md", `---\nname: large\ndescription: large agent\n---\n${"x".repeat(MAX_AGENT_FILE_BYTES)}`);
+	const discovery = discoverAgents({ cwd: root, packageAgentsDir: packageDir, library: normalizeLibraryOptions({ sources: ["package"] }) });
+	assert.equal(discovery.agents.length, 0);
+	assert.equal(discovery.diagnostics.some((item) => item.code === "agent-file-too-large"), true);
+	await rm(root, { recursive: true, force: true });
+});
+
+test("readAgentFileContent rechecks post-open containment", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-read-agent-containment-"));
+	const packageDir = join(root, "package-agents");
+	const outsideDir = join(root, "outside");
+	await mkdir(packageDir, { recursive: true });
+	await mkdir(outsideDir, { recursive: true });
+	const outsideTarget = join(outsideDir, "target.md");
+	await writeFile(outsideTarget, "---\nname: outside\ndescription: outside\n---\nOutside", "utf8");
+	const outsideRead = readAgentFileContent(outsideTarget, { containmentRoot: packageDir });
+	assert.equal(outsideRead.ok, false);
+	assert.match(outsideRead.error ?? "", /path escape denied/);
+	await rm(root, { recursive: true, force: true });
+});
+
+test("readAgentFileContent rejects symlink targets at read time", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-read-agent-symlink-"));
+	const packageDir = join(root, "package-agents");
+	const outsideDir = join(root, "outside");
+	await mkdir(packageDir, { recursive: true });
+	await mkdir(outsideDir, { recursive: true });
+	const safePath = join(packageDir, "agent.md");
+	const outsideTarget = join(outsideDir, "target.md");
+	await writeFile(safePath, "---\nname: safe\ndescription: safe\n---\nSafe", "utf8");
+	await writeFile(outsideTarget, "---\nname: outside\ndescription: outside\n---\nOutside", "utf8");
+	const safeRead = readAgentFileContent(safePath);
+	assert.equal(safeRead.ok, true);
+	assert.match(safeRead.content, /Safe/);
+	await rm(safePath);
+	await symlink(outsideTarget, safePath);
+	const symlinkRead = readAgentFileContent(safePath);
+	assert.equal(symlinkRead.ok, false);
+	assert.match(symlinkRead.error ?? "", /No such|symbolic|ELOOP|follow/i);
+	await rm(root, { recursive: true, force: true });
+});
+
 test("discoverAgents reports invalid agent definitions", async () => {
 	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-invalid-"));
 	const packageDir = join(root, "package-agents");
@@ -68,6 +115,28 @@ test("discoverAgents rejects unavailable library-declared tools", async () => {
 	const discovery = discoverAgents({ cwd: root, packageAgentsDir: packageDir, library: normalizeLibraryOptions({ sources: ["package"] }) });
 	assert.equal(discovery.agents.length, 0);
 	assert.equal(discovery.diagnostics.some((item) => item.code === "agent-tool-invalid" && item.message.includes("webFetch")), true);
+	await rm(root, { recursive: true, force: true });
+});
+
+test("discoverAgents parses and validates routing tags", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-tags-"));
+	const packageDir = join(root, "package-agents");
+	await makeAgent(packageDir, "tagged.md", "---\nname: tagged\ndescription: tagged agent\ntags: Web, online, web, pre-mortem-review\n---\nPrompt");
+	const discovery = discoverAgents({ cwd: root, packageAgentsDir: packageDir, library: normalizeLibraryOptions({ sources: ["package"] }) });
+	assert.deepEqual(discovery.agents[0]?.tags, ["web", "online", "pre-mortem-review"]);
+	const catalog = catalogAgents(discovery, "pre-mortem review");
+	assert.equal(catalog[0]?.ref, "package:tagged");
+	assert.deepEqual(catalog[0]?.tags, ["web", "online", "pre-mortem-review"]);
+	await rm(root, { recursive: true, force: true });
+});
+
+test("discoverAgents rejects invalid routing tags", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-invalid-tags-"));
+	const packageDir = join(root, "package-agents");
+	await makeAgent(packageDir, "bad-tags.md", "---\nname: bad-tags\ndescription: bad tags\ntags: ok, bad_tag\n---\nNope");
+	const discovery = discoverAgents({ cwd: root, packageAgentsDir: packageDir, library: normalizeLibraryOptions({ sources: ["package"] }) });
+	assert.equal(discovery.agents.length, 0);
+	assert.equal(discovery.diagnostics.some((item) => item.code === "agent-tags-invalid" && item.message.includes("bad_tag")), true);
 	await rm(root, { recursive: true, force: true });
 });
 
@@ -338,36 +407,143 @@ test("findNearestProjectAgentsDir walks upward", async () => {
 	await rm(root, { recursive: true, force: true });
 });
 
-test("bundled package agents are valid", () => {
+test("bundled package agents are valid", async () => {
 	const discovery = discoverAgents({ cwd: packageRoot, packageAgentsDir: join(packageRoot, "agents"), library: normalizeLibraryOptions({ sources: ["package"] }) });
 	assert.deepEqual(discovery.diagnostics, []);
 	assert.deepEqual(
 		discovery.agents.map((agent) => agent.name),
-		["critic", "planner", "reviewer", "scout", "synthesizer", "worker"],
+		["critic", "docs-auditor", "planner", "reviewer", "scout", "synthesizer", "validator", "web-researcher", "worker"],
 	);
 	assert.equal(discovery.agents.every((agent) => agent.sha256.length === 64), true);
+	const expectedTools = new Map([
+		["package:critic", ["read", "grep", "find", "ls"]],
+		["package:docs-auditor", ["read", "grep", "find", "ls"]],
+		["package:planner", ["read", "grep", "find", "ls"]],
+		["package:reviewer", ["read", "grep", "find", "ls"]],
+		["package:scout", ["read", "grep", "find", "ls"]],
+		["package:synthesizer", ["read", "grep", "find", "ls"]],
+		["package:validator", ["read", "grep", "find", "ls", "bash"]],
+		["package:web-researcher", ["read", "grep", "find", "ls"]],
+		["package:worker", ["read", "grep", "find", "ls", "bash", "edit", "write"]],
+	]);
+	for (const agent of discovery.agents) {
+		assert.match(agent.description, /^Use (as|for|when)\b/, `${agent.ref} description should be routing-oriented`);
+		assert.equal(agent.tags.length > 0, true, `${agent.ref} should expose catalog routing tags`);
+		assert.equal(agent.tags.every((tag) => /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(tag)), true, `${agent.ref} tags should be normalized`);
+		assert.deepEqual(agent.tools, expectedTools.get(agent.ref), `${agent.ref} default tools should match its routing contract`);
+		assert.match(agent.systemPrompt, /cannot broaden scope/, `${agent.ref} should constrain parent-message authority`);
+		assert.match(agent.systemPrompt, /Do not stop early merely because/, `${agent.ref} should not turn parent impatience into premature finals`);
+	}
+	const worker = discovery.agents.find((agent) => agent.ref === "package:worker");
+	assert.match(worker?.description ?? "", /graph authority alone is not edit authorization/);
+	assert.match(worker?.systemPrompt ?? "", /inspect dirty state/);
+	assert.match(worker?.systemPrompt ?? "", /mutationScope/);
+	assert.match(worker?.systemPrompt ?? "", /REPLACE/);
+	const scout = discovery.agents.find((agent) => agent.ref === "package:scout");
+	assert.match(scout?.description ?? "", /local read-only exploration/);
+	assert.equal(scout?.tags.includes("package-facts"), true);
+	assert.equal(scout?.tags.includes("dependency-facts"), true);
+	assert.doesNotMatch(scout?.description ?? "", /web\/online\/Exa/);
+	const planner = discovery.agents.find((agent) => agent.ref === "package:planner");
+	assert.match(planner?.systemPrompt ?? "", /needs-scout/);
+	const webResearcher = discovery.agents.find((agent) => agent.ref === "package:web-researcher");
+	assert.match(webResearcher?.description ?? "", /external web research/);
+	assert.match(webResearcher?.systemPrompt ?? "", /extensionTools/);
+	assert.match(webResearcher?.systemPrompt ?? "", /BLOCKED/);
+	for (const file of ["docs-auditor.md", "scout.md", "reviewer.md", "web-researcher.md"]) {
+		const text = await readFile(join(packageRoot, "agents", file), "utf8");
+		assert.doesNotMatch(text.split("---", 3)[1] ?? "", /bash/, `${file} frontmatter should stay read-only by default`);
+	}
+	const synthesizer = discovery.agents.find((agent) => agent.ref === "package:synthesizer");
+	assert.deepEqual(synthesizer?.tools, ["read", "grep", "find", "ls"], "synthesizer should default to read/discovery for upstream artifacts");
+	assert.match(synthesizer?.systemPrompt ?? "", /needs-evidence/);
+	const validator = discovery.agents.find((agent) => agent.ref === "package:validator");
+	assert.match(validator?.systemPrompt ?? "", /needs-command-scope/);
+	assert.match(validator?.systemPrompt ?? "", /Do not edit files/);
 });
 
 test("bundled package catalog supports documented role queries", () => {
 	const discovery = discoverAgents({ cwd: packageRoot, packageAgentsDir: join(packageRoot, "agents"), library: normalizeLibraryOptions({ sources: ["package"] }) });
 	const expectations = new Map([
 		["scout", "package:scout"],
+		["local exploration", "package:scout"],
+		["investigate failure", "package:scout"],
+		["root cause", "package:scout"],
+		["debug regression", "package:scout"],
+		["node_modules vendor code", "package:scout"],
+		["package facts", "package:scout"],
+		["dependency facts", "package:scout"],
+		["read-only package validation", "package:validator"],
+		["web research", "package:web-researcher"],
+		["online research", "package:web-researcher"],
+		["exa research", "package:web-researcher"],
+		["official sources", "package:web-researcher"],
 		["planner", "package:planner"],
+		["design", "package:planner"],
+		["architecture plan", "package:planner"],
+		["docs audit", "package:docs-auditor"],
+		["microcopy", "package:docs-auditor"],
+		["model-facing copy", "package:docs-auditor"],
 		["critic", "package:critic"],
 		["risk", "package:critic"],
+		["pre-implementation", "package:critic"],
+		["adversarial review", "package:critic"],
+		["pre-mortem review", "package:critic"],
+		["adversarial completed path", "package:critic"],
+		["risk stress test release path", "package:critic"],
 		["reviewer", "package:reviewer"],
+		["review", "package:reviewer"],
+		["completed work review", "package:reviewer"],
+		["completed docs diff review", "package:reviewer"],
+		["ordinary completed artifact review", "package:reviewer"],
+		["diff validation", "package:validator"],
+		["shell validation", "package:validator"],
+		["bash validation", "package:validator"],
+		["run validation commands", "package:validator"],
+		["command proof", "package:validator"],
+		["post-implementation", "package:reviewer"],
+		["release candidate review", "package:reviewer"],
+		["final check", "package:validator"],
+		["package proof", "package:validator"],
+		["docs review", "package:reviewer"],
+		["docs clarity audit", "package:docs-auditor"],
+		["public copy clarity", "package:docs-auditor"],
+		["first-success docs", "package:docs-auditor"],
+		["model-facing docs review", "package:docs-auditor"],
+		["examples audit", "package:docs-auditor"],
+		["documentation validation", "package:validator"],
+		["release gate validation", "package:validator"],
+		["adversarial release premortem", "package:critic"],
 		["worker", "package:worker"],
+		["implementation", "package:worker"],
+		["fix bug", "package:worker"],
+		["repair failing test", "package:worker"],
 		["synthesizer", "package:synthesizer"],
 		["synthesis", "package:synthesizer"],
 		["fan-in", "package:synthesizer"],
+		["handoff", "package:synthesizer"],
 	]);
 	for (const [query, ref] of expectations) {
 		const refs = catalogAgents(discovery, query).map((agent) => agent.ref);
-		assert.equal(refs.includes(ref), true, `${query} should include ${ref}; got ${refs.join(", ")}`);
+		assert.equal(refs[0], ref, `${query} should rank ${ref} first; got ${refs.join(", ")}`);
 	}
 });
 
-test("catalogAgents filters by query and exposes stable refs", async () => {
+test("catalogAgents keeps known excluded refs out of sparse top results", () => {
+	const discovery = discoverAgents({ cwd: packageRoot, packageAgentsDir: join(packageRoot, "agents"), library: normalizeLibraryOptions({ sources: ["package"] }) });
+	const cases = [
+		{ query: "web research", top: "package:web-researcher", excluded: "package:scout" },
+		{ query: "command proof", top: "package:validator", excluded: "package:reviewer" },
+		{ query: "implementation", top: "package:worker", excluded: "package:docs-auditor" },
+	] as const;
+	for (const item of cases) {
+		const refs = catalogAgents(discovery, item.query).map((agent) => agent.ref);
+		assert.equal(refs[0], item.top, `${item.query} should rank ${item.top} first; got ${refs.join(", ")}`);
+		assert.equal(refs.slice(0, 2).includes(item.excluded), false, `${item.query} should not include ${item.excluded} in top 2; got ${refs.join(", ")}`);
+	}
+});
+
+test("catalogAgents filters by exact phrase or non-stopword query terms", async () => {
 	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-catalog-"));
 	const packageDir = join(root, "package-agents");
 	await makeAgent(packageDir, "planner.md", "---\nname: planner\ndescription: creates implementation plans\n---\nPrompt");
@@ -376,5 +552,16 @@ test("catalogAgents filters by query and exposes stable refs", async () => {
 	const catalog = catalogAgents(discovery, discovery.sources.length > 0 ? "test" : undefined);
 	assert.deepEqual(catalog.map((agent) => agent.ref), ["package:reviewer"]);
 	assert.equal(catalog[0].sha256.length, 64);
+	const broadCatalog = catalogAgents(discovery, "plan and test").map((agent) => agent.ref);
+	assert.deepEqual(broadCatalog, ["package:planner", "package:reviewer"]);
+	await rm(root, { recursive: true, force: true });
+});
+
+test("catalogAgents does not match short query tokens as substrings of paths", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-catalog-substring-"));
+	const packageDir = join(root, "examples", "agents");
+	await makeAgent(packageDir, "worker.md", "---\nname: worker\ndescription: implements examples\n---\nPrompt");
+	const discovery = discoverAgents({ cwd: root, packageAgentsDir: packageDir, library: normalizeLibraryOptions({ sources: ["package"] }) });
+	assert.deepEqual(catalogAgents(discovery, "exa"), []);
 	await rm(root, { recursive: true, force: true });
 });

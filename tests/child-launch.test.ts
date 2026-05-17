@@ -3,7 +3,49 @@ import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import test from "node:test";
-import { getPiInvocation, resolvePiCommandFromPath } from "../extensions/multiagent/src/child-launch.ts";
+import { buildPiArgs, getPiInvocation, resolvePiCommandFromPath } from "../extensions/multiagent/src/child-launch.ts";
+import type { ResolvedAgent } from "../extensions/multiagent/src/types.ts";
+
+test("buildPiArgs prefers library agent model and thinking metadata over parent defaults", () => {
+	const args = buildPiArgs({ ...resolvedAgent(), model: "provider/model", thinking: "high" }, { model: "parent/model", thinking: "off" }, "/tmp/prompt.md");
+	assert.equal(args.includes("--model"), true);
+	assert.equal(args[args.indexOf("--model") + 1], "provider/model");
+	assert.equal(args.includes("--thinking"), true);
+	assert.equal(args[args.indexOf("--thinking") + 1], "high");
+});
+
+test("buildPiArgs uses parent defaults when agent has no model metadata", () => {
+	const args = buildPiArgs(resolvedAgent(), { model: "parent/model", thinking: "medium" }, "/tmp/prompt.md");
+	assert.equal(args[args.indexOf("--model") + 1], "parent/model");
+	assert.equal(args[args.indexOf("--thinking") + 1], "medium");
+});
+
+test("buildPiArgs rejects resolved agents missing mandatory read/discovery", () => {
+	const agent = { ...resolvedAgent(), tools: [] };
+	assert.throws(() => buildPiArgs(agent, { model: undefined, thinking: undefined }, "/tmp/prompt.md"), /mandatory read\/discovery/);
+});
+
+test("buildPiArgs loads explicit extension grants without ambient extension discovery", () => {
+	const agent = { ...resolvedAgent(), extensionTools: [{ name: "exa_search", description: "Search", source: { path: "/tmp/extension.ts", realpath: "/tmp/extension.ts", source: "user:exa", scope: "user", origin: "package", baseDir: undefined, dev: 1, ino: 2, size: 3, mtimeMs: 4, sha256: "abc" } }] };
+	const args = buildPiArgs(agent, { model: undefined, thinking: undefined }, "/tmp/prompt.md");
+	assert.equal(args.includes("--no-extensions"), true);
+	assert.equal(args[args.indexOf("--extension") + 1], "/tmp/extension.ts");
+	assert.equal(args[args.indexOf("--tools") + 1], "read,grep,find,ls,exa_search");
+});
+
+test("buildPiArgs launches only explicitly selected caller skills", () => {
+	const agent = { ...resolvedAgent(), callerSkills: [
+		{ name: "one", description: "One", source: { path: "/tmp/one/SKILL.md", realpath: "/tmp/one/SKILL.md", source: "user:one", scope: "user", origin: "top-level", baseDir: "/tmp", dev: 1, ino: 2, size: 3, mtimeMs: 4, sha256: "one" } },
+		{ name: "one-copy", description: "One copy", source: { path: "/tmp/one/SKILL.md", realpath: "/tmp/one/SKILL.md", source: "user:one-copy", scope: "user", origin: "top-level", baseDir: "/tmp", dev: 1, ino: 2, size: 3, mtimeMs: 4, sha256: "one" } },
+		{ name: "two", description: "Two", source: { path: "/tmp/two/SKILL.md", realpath: "/tmp/two/SKILL.md", source: "user:two", scope: "user", origin: "top-level", baseDir: "/tmp", dev: 5, ino: 6, size: 7, mtimeMs: 8, sha256: "two" } },
+	] };
+	const args = buildPiArgs(agent, { model: undefined, thinking: undefined }, "/tmp/prompt.md");
+	assert.equal(args.includes("--no-skills"), true);
+	assert.deepEqual(args.filter((value) => value === "--skill"), ["--skill", "--skill"]);
+	assert.equal(args[args.indexOf("--skill") + 1], "/tmp/one/SKILL.md");
+	assert.equal(args[args.lastIndexOf("--skill") + 1], "/tmp/two/SKILL.md");
+	assert.equal(args[args.indexOf("--tools") + 1], "read,grep,find,ls");
+});
 
 test("resolvePiCommandFromPath ignores empty and relative PATH entries", async () => {
 	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-launch-"));
@@ -127,6 +169,44 @@ test("getPiInvocation refuses current script or executable inside delegated proj
 		await rm(root, { recursive: true, force: true });
 	}
 });
+
+test("getPiInvocation falls back to PATH when current execPath disappeared", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-launch-missing-exec-"));
+	const project = join(root, "project");
+	const trustedBin = join(root, "trusted");
+	const scriptRoot = join(root, "script-root");
+	await mkdir(project);
+	await mkdir(trustedBin);
+	await mkdir(scriptRoot);
+	const launcherName = process.platform === "win32" ? "pi.cmd" : "pi";
+	const trustedLauncher = join(trustedBin, launcherName);
+	const currentScript = join(scriptRoot, "pi-entry.js");
+	const missingNode = join(root, "missing-node");
+	await writeFile(trustedLauncher, "#!/bin/sh\nexit 0\n", "utf8");
+	await writeFile(currentScript, "", "utf8");
+	await chmod(trustedLauncher, 0o755);
+	const originalPath = process.env.PATH;
+	const originalScript = process.argv[1];
+	const originalExecPath = Object.getOwnPropertyDescriptor(process, "execPath");
+	try {
+		process.env.PATH = trustedBin;
+		process.argv[1] = currentScript;
+		Object.defineProperty(process, "execPath", { value: missingNode, configurable: true, enumerable: true, writable: true });
+		const invocation = getPiInvocation(["--mode", "json"], project);
+		assert.equal(invocation.command, trustedLauncher);
+		assert.deepEqual(invocation.args, ["--mode", "json"]);
+	} finally {
+		if (originalPath === undefined) delete process.env.PATH;
+		else process.env.PATH = originalPath;
+		process.argv[1] = originalScript;
+		if (originalExecPath) Object.defineProperty(process, "execPath", originalExecPath);
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+function resolvedAgent(): ResolvedAgent {
+	return { id: "one", ref: "package:critic", name: "critic", kind: "library", description: "Critic", tools: ["read", "grep", "find", "ls"], extensionTools: [], callerSkills: [], systemPrompt: "Review.", model: undefined, thinking: undefined, source: "package", filePath: "/tmp/critic.md", sha256: "abc" };
+}
 
 test("getPiInvocation resolves relative current script before delegated cwd spawn", async () => {
 	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-launch-script-cwd-"));

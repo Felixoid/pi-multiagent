@@ -1,9 +1,8 @@
 /** Agent library discovery for pi-multiagent. */
 
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
+import { existsSync, lstatSync, readdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import type {
 	AgentConfig,
 	AgentDiagnostic,
@@ -13,55 +12,25 @@ import type {
 	LibrarySource,
 	ProjectAgentsPolicy,
 } from "./types.ts";
+import { readAgentFileContent } from "./agent-file-content.ts";
+import { parseAgentTags, parseMarkdownFrontmatter, splitFrontmatterList } from "./agent-frontmatter.ts";
 import { DEFAULT_LIBRARY_SOURCES, DEFAULT_PROJECT_AGENTS_POLICY, LIBRARY_SOURCE_VALUES, TOOL_NAME_PATTERN } from "./types.ts";
 import { validateToolNames } from "./tool-policy.ts";
+import { findNearestProjectDir, findNearestProjectMarker, getGlobalPiDir, isContainedPath, safeRealpath } from "./project-root.ts";
 
 const AGENT_NAME_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
 const TOOL_NAME_REGEX = new RegExp(TOOL_NAME_PATTERN);
 const VALID_THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 const SOURCE_PRECEDENCE: LibrarySource[] = ["package", "user", "project"];
+const CATALOG_QUERY_STOP_WORDS = new Set(["a", "an", "and", "as", "for", "in", "of", "or", "the", "to", "use", "with"]);
 
-interface ParsedMarkdown {
-	frontmatter: Record<string, string>;
-	body: string;
-}
-
-function parseMarkdownFrontmatter(content: string): ParsedMarkdown {
-	const normalized = content.replace(/\r\n/g, "\n");
-	if (!normalized.startsWith("---\n")) return { frontmatter: {}, body: normalized };
-	const end = normalized.indexOf("\n---", 4);
-	if (end === -1) return { frontmatter: {}, body: normalized };
-	const raw = normalized.slice(4, end);
-	const body = normalized.slice(end + 5).replace(/^\n/, "");
-	const frontmatter: Record<string, string> = {};
-	for (const line of raw.split("\n")) {
-		const index = line.indexOf(":");
-		if (index <= 0) continue;
-		const key = line.slice(0, index).trim();
-		const value = line.slice(index + 1).trim().replace(/^[\'"]|[\'"]$/g, "");
-		if (key.length > 0) frontmatter[key] = value;
-	}
-	return { frontmatter, body };
-}
-
-function splitTools(value: string | undefined): string[] | undefined {
-	if (!value) return undefined;
-	const tools = value
-		.split(/[\s,]+/)
-		.map((tool) => tool.trim())
-		.filter((tool) => tool.length > 0);
-	return tools.length > 0 ? tools : undefined;
-}
-
-function readAgentFile(filePath: string, source: Exclude<LibrarySource, never>, diagnostics: AgentDiagnostic[]): AgentConfig | undefined {
-	let content: string;
-	try {
-		content = readFileSync(filePath, "utf8");
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		diagnostics.push({ code: "agent-read-failed", path: filePath, message, severity: "warning" });
+function readAgentFile(filePath: string, source: Exclude<LibrarySource, never>, diagnostics: AgentDiagnostic[], containmentRoot: string | undefined): AgentConfig | undefined {
+	const loaded = readAgentFileContent(filePath, containmentRoot ? { containmentRoot } : undefined);
+	if (!loaded.ok) {
+		diagnostics.push({ code: loaded.error.includes("exceeds") ? "agent-file-too-large" : "agent-read-failed", path: filePath, message: loaded.error, severity: "warning" });
 		return undefined;
 	}
+	const content = loaded.content;
 	const parsed = parseMarkdownFrontmatter(content);
 	const name = parsed.frontmatter.name;
 	const description = parsed.frontmatter.description;
@@ -69,7 +38,7 @@ function readAgentFile(filePath: string, source: Exclude<LibrarySource, never>, 
 		diagnostics.push({
 			code: "agent-frontmatter-invalid",
 			path: filePath,
-			message: "Agent files require name and description frontmatter.",
+			message: "Agents require name and description.",
 			severity: "warning",
 		});
 		return undefined;
@@ -82,7 +51,7 @@ function readAgentFile(filePath: string, source: Exclude<LibrarySource, never>, 
 		diagnostics.push({
 			code: "agent-extension-tools-denied",
 			path: filePath,
-			message: `Library agent ${source}:${name} cannot self-declare extensionTools; bind extension grants in the agent_team invocation.`,
+			message: `Library agent ${source}:${name} cannot self-declare extensionTools; bind grants in the agent_team invocation.`,
 			severity: "warning",
 		});
 		return undefined;
@@ -91,7 +60,7 @@ function readAgentFile(filePath: string, source: Exclude<LibrarySource, never>, 
 		diagnostics.push({
 			code: "agent-caller-skills-denied",
 			path: filePath,
-			message: `Library agent ${source}:${name} cannot self-declare callerSkills; inherit or curate caller skills in the agent_team invocation.`,
+			message: `Library agent ${source}:${name} cannot self-declare caller skill grants; bind explicit step skills in the agent_team graph.`,
 			severity: "warning",
 		});
 		return undefined;
@@ -106,7 +75,7 @@ function readAgentFile(filePath: string, source: Exclude<LibrarySource, never>, 
 		});
 		return undefined;
 	}
-	const tools = splitTools(parsed.frontmatter.tools);
+	const tools = splitFrontmatterList(parsed.frontmatter.tools);
 	const invalidTools = tools?.filter((tool) => !TOOL_NAME_REGEX.test(tool)) ?? [];
 	if (invalidTools.length > 0) {
 		diagnostics.push({
@@ -117,11 +86,23 @@ function readAgentFile(filePath: string, source: Exclude<LibrarySource, never>, 
 		});
 		return undefined;
 	}
+	const parsedTags = parseAgentTags(parsed.frontmatter.tags);
+	if (parsedTags.invalidTags.length > 0 || parsedTags.tooMany) {
+		const reason = parsedTags.invalidTags.length > 0 ? `invalid tags: ${parsedTags.invalidTags.join(", ")}` : "too many tags; maximum is 32";
+		diagnostics.push({
+			code: "agent-tags-invalid",
+			path: filePath,
+			message: `Invalid tags for ${name}: ${reason}`,
+			severity: "warning",
+		});
+		return undefined;
+	}
 	if (!validateToolNames(tools, `library agent ${source}:${name}`, diagnostics, filePath, "warning")) return undefined;
 	return {
 		name,
 		ref: `${source}:${name}`,
 		description,
+		tags: parsedTags.tags,
 		tools,
 		model: parsed.frontmatter.model || undefined,
 		thinking: thinking as AgentConfig["thinking"],
@@ -179,18 +160,10 @@ function loadAgentsFromDir(dir: string, source: LibrarySource, diagnostics: Agen
 				continue;
 			}
 		}
-		const agent = readAgentFile(filePath, source, diagnostics);
+		const agent = readAgentFile(filePath, source, diagnostics, source === "project" ? realProjectDir : undefined);
 		if (agent) agents.push(agent);
 	}
 	return agents.sort((left, right) => left.name.localeCompare(right.name));
-}
-
-function safeRealpath(path: string): string | undefined {
-	try {
-		return realpathSync(path);
-	} catch {
-		return undefined;
-	}
 }
 
 function safeLstat(path: string): ReturnType<typeof lstatSync> | undefined {
@@ -227,12 +200,6 @@ function validateProjectAgentsDir(dir: string, diagnostics: AgentDiagnostic[]): 
 	return realProjectDir;
 }
 
-function isContainedPath(parent: string, child: string): boolean {
-	const normalizedParent = resolve(parent);
-	const normalizedChild = resolve(child);
-	return normalizedChild === normalizedParent || normalizedChild.startsWith(`${normalizedParent}${sep}`);
-}
-
 function isProjectScopedUserAgentsDir(userAgentsDir: string, projectAgentsDir: string | undefined, cwd: string, globalPiDir: string): boolean {
 	const userDir = resolve(userAgentsDir);
 	const userRealDir = safeRealpath(userDir);
@@ -251,9 +218,9 @@ function projectRootCandidates(cwd: string, projectAgentsDir: string | undefined
 }
 
 function addNearestProjectRoots(candidates: Set<string>, cwd: string, globalPiDir: string): void {
-	const nearestPi = findNearestProjectPiMarker(cwd, globalPiDir);
+	const nearestPi = findNearestProjectMarker(cwd, ".pi", globalPiDir);
 	if (nearestPi) addPathAndRealpath(candidates, dirname(nearestPi));
-	const nearestGit = findNearestProjectGitDir(cwd);
+	const nearestGit = findNearestProjectMarker(cwd, ".git");
 	if (nearestGit) addPathAndRealpath(candidates, dirname(nearestGit));
 }
 
@@ -263,63 +230,14 @@ function addPathAndRealpath(paths: Set<string>, path: string): void {
 	if (real) paths.add(resolve(real));
 }
 
-function isDirectory(path: string): boolean {
-	try {
-		return statSync(path).isDirectory();
-	} catch {
-		return false;
-	}
-}
-
 export function findNearestProjectAgentsDir(cwd: string, globalPiDir = getGlobalPiDir()): string | undefined {
-	const projectPiDir = findNearestProjectPiDir(cwd, globalPiDir);
+	const projectPiDir = findNearestProjectDir(cwd, ".pi", globalPiDir);
 	if (!projectPiDir) return undefined;
 	const candidate = join(projectPiDir, "agents");
-	return isDirectory(candidate) ? candidate : undefined;
+	const stats = safeLstat(candidate);
+	return stats?.isDirectory() || stats?.isSymbolicLink() ? candidate : undefined;
 }
 
-function findNearestProjectPiDir(cwd: string, globalPiDir: string): string | undefined {
-	return findNearestProjectDir(cwd, ".pi", globalPiDir);
-}
-
-function findNearestProjectPiMarker(cwd: string, globalPiDir: string): string | undefined {
-	return findNearestProjectMarker(cwd, ".pi", globalPiDir);
-}
-
-function findNearestProjectGitDir(cwd: string): string | undefined {
-	return findNearestProjectMarker(cwd, ".git");
-}
-
-function findNearestProjectMarker(cwd: string, name: string, ignoredPath?: string): string | undefined {
-	let current = resolve(cwd);
-	while (true) {
-		const candidate = join(current, name);
-		const stats = safeLstat(candidate);
-		if ((stats?.isDirectory() || stats?.isFile() || stats?.isSymbolicLink()) && !isIgnoredProjectMarker(candidate, ignoredPath)) return candidate;
-		const parent = dirname(current);
-		if (parent === current) return undefined;
-		current = parent;
-	}
-}
-
-function findNearestProjectDir(cwd: string, name: string, ignoredPath?: string): string | undefined {
-	let current = resolve(cwd);
-	while (true) {
-		const candidate = join(current, name);
-		if (safeLstat(candidate)?.isDirectory() && !isIgnoredProjectMarker(candidate, ignoredPath)) return candidate;
-		const parent = dirname(current);
-		if (parent === current) return undefined;
-		current = parent;
-	}
-}
-
-function isIgnoredProjectMarker(candidate: string, ignoredPath: string | undefined): boolean {
-	return ignoredPath !== undefined && resolve(candidate) === resolve(ignoredPath);
-}
-
-function getGlobalPiDir(): string {
-	return join(homedir(), ".pi");
-}
 
 export function getDefaultUserAgentsDir(env: NodeJS.ProcessEnv = process.env): string {
 	return join(env.PI_CODING_AGENT_DIR ?? join(getGlobalPiDir(), "agent"), "agents");
@@ -400,26 +318,85 @@ export function discoverAgents(options: {
 }
 
 export function catalogAgents(discovery: AgentDiscoveryResult, query: string | undefined): CatalogAgentSummary[] {
-	const normalizedQuery = query?.toLowerCase();
+	const normalizedQuery = query?.toLowerCase().trim();
+	const tokens = catalogQueryTokens(normalizedQuery);
 	return discovery.agents
-		.filter((agent) => {
-			if (!normalizedQuery) return true;
-			return [agent.name, agent.ref, agent.description, agent.source, agent.tools?.join(" ") ?? "", agent.model ?? "", agent.filePath]
-				.join(" ")
-				.toLowerCase()
-				.includes(normalizedQuery);
-		})
-		.map((agent) => ({
+		.map((agent) => ({ agent, score: scoreCatalogAgent(agent, normalizedQuery, tokens) }))
+		.filter((entry) => !normalizedQuery || entry.score > 0)
+		.sort((left, right) => right.score - left.score || compareAgents(left.agent, right.agent))
+		.map(({ agent }) => ({
 			name: agent.name,
 			ref: agent.ref,
 			source: agent.source,
 			description: agent.description,
+			tags: agent.tags,
 			tools: agent.tools,
 			model: agent.model,
 			thinking: agent.thinking,
 			filePath: agent.filePath,
 			sha256: agent.sha256,
 		}));
+}
+
+function scoreCatalogAgent(agent: AgentConfig, query: string | undefined, tokens: string[]): number {
+	if (!query) return 1;
+	const text = catalogAgentSearchText(agent);
+	const nameAndRefTokens = searchableTokens([agent.name, agent.ref]);
+	const exactTags = new Set(agent.tags);
+	const tagTokens = searchableTokens(agent.tags);
+	let score = tokens.length > 1 && text.includes(query) ? 100 : 0;
+	for (const token of tokens) {
+		if (nameAndRefTokens.has(token)) score += 40 + token.length;
+		else if (exactTags.has(token)) score += 50 + token.length;
+		else if (tagTokens.has(token)) score += 25 + token.length;
+		else if (textSearchTokens(agent).has(token)) score += token.length;
+	}
+	return score;
+}
+
+function catalogAgentSearchText(agent: AgentConfig): string {
+	return searchFields(agent).join(" ").toLowerCase();
+}
+
+function textSearchTokens(agent: AgentConfig): Set<string> {
+	return searchableTokens(searchFields(agent));
+}
+
+function searchFields(agent: AgentConfig): string[] {
+	return [agent.name, agent.ref, agent.description, agent.source, agent.tags.join(" "), agent.tools?.join(" ") ?? "", agent.model ?? "", agent.filePath ?? ""];
+}
+
+function searchableTokens(fields: string[]): Set<string> {
+	const tokens = new Set<string>();
+	for (const field of fields) for (const token of field.toLowerCase().split(/[^a-z0-9-]+/)) addSearchToken(tokens, token);
+	return tokens;
+}
+
+function catalogQueryTokens(query: string | undefined): string[] {
+	if (!query) return [];
+	const seen = new Set<string>();
+	const tokens: string[] = [];
+	for (const rawToken of query.split(/[^a-z0-9-]+/)) {
+		for (const token of expandedSearchTokens(rawToken)) {
+			if (token.length < 2 || CATALOG_QUERY_STOP_WORDS.has(token) || seen.has(token)) continue;
+			seen.add(token);
+			tokens.push(token);
+		}
+	}
+	return tokens;
+}
+
+function addSearchToken(tokens: Set<string>, rawToken: string): void {
+	for (const token of expandedSearchTokens(rawToken)) if (token.length >= 2 && !CATALOG_QUERY_STOP_WORDS.has(token)) tokens.add(token);
+}
+
+function expandedSearchTokens(rawToken: string): string[] {
+	const token = rawToken.trim();
+	if (token.length === 0) return [];
+	const parts = token.split("-").filter((part) => part.length > 0);
+	const expanded = parts.length > 1 ? [token, ...parts] : [token];
+	const singulars = expanded.filter((part) => part.length > 3 && part.endsWith("s")).map((part) => part.slice(0, -1));
+	return [...expanded, ...singulars];
 }
 
 function dedupeSources(sources: LibrarySource[]): LibrarySource[] {

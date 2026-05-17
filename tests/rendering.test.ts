@@ -1,64 +1,199 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderAgentTeamCall, renderAgentTeamResult } from "../extensions/multiagent/src/rendering.ts";
+import { visibleWidth } from "@earendil-works/pi-tui";
+import { formatAgentTeamLiveStatus, formatAgentTeamNoticeText, renderAgentTeamCall, renderAgentTeamLiveRunsWidget, renderAgentTeamNoticeMessage, renderAgentTeamResult } from "../extensions/multiagent/src/rendering.ts";
+import type { AgentTeamDetails, RunSnapshot, StepSnapshot, StepStatus } from "../extensions/multiagent/src/types.ts";
 
-const plainTheme = {
-	fg(_color: string, text: string) {
-		return text;
-	},
-	bold(text: string) {
-		return text;
-	},
+const theme = {
+	fg: (_color: string, text: string) => text,
+	bold: (text: string) => text,
 };
 
-function renderedText(component: { render(width: number): string[] }): string {
-	return component.render(240).join("\n");
+test("renderAgentTeamCall summarizes detached actions", () => {
+	assert.match(renderAgentTeamCall({ action: "start", graph: { objective: "x", steps: [{ id: "one", agent: { system: "x" }, task: "x" }] } }, theme, undefined).render(120).join("\n"), /launch 1 step/);
+	assert.match(renderAgentTeamCall({ action: "retrieve", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" }, theme, undefined).render(120).join("\n"), /status/);
+	assert.match(renderAgentTeamCall({ action: "cancel", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" }, theme, undefined).render(120).join("\n"), /stop run/);
+});
+
+test("renderAgentTeamResult reports catalog and run state", () => {
+	const catalog = details("catalog", { catalog: [{ name: "reviewer", ref: "package:reviewer", source: "package", description: "Review", tags: ["review"], tools: undefined, model: undefined, thinking: undefined, filePath: "/tmp/reviewer.md", sha256: "abc" }] });
+	assert.match(renderAgentTeamResult({ content: [], details: catalog }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n"), /1 agent/);
+	const started = details("start", { run: run({ objective: "detached", liveStepIds: ["one"], sinkStepIds: ["one"], lastEvent: "one: start", counts: counts({ running: 1 }) }) });
+	const rendered = renderAgentTeamResult({ content: [], details: started }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
+	assert.match(rendered, /agent_team started detached/);
+	assert.match(rendered, /0\/1 complete  1 working/);
+	assert.match(rendered, /last update one: start/);
+	assert.doesNotMatch(rendered, /objective|active=|sinks=|Can:|cursor|cleanup=true|updated|Artifact:/i);
+});
+
+test("renderAgentTeamResult renders cancel as a human stop receipt", () => {
+	const canceling = details("cancel", {
+		run: run({ objective: "Adversarial read-only review of the entire pending pi-multiagent working-tree changeset", status: "canceling", liveStepIds: ["runtime-safety", "docs-contracts", "tests-packaging", "tui-human"], sinkStepIds: ["runtime-safety", "docs-contracts", "tests-packaging", "tui-human"], lastEvent: "tui-human: terminalizing [canceled]", counts: counts({ running: 4 }) }),
+		steps: [
+			step({ id: "runtime-safety", agentRef: "inline:runtime-safety", status: "running", lastActivity: "child prompt sent" }),
+			step({ id: "docs-contracts", agentRef: "inline:docs-contracts", status: "running", lastActivity: "child prompt sent" }),
+			step({ id: "tests-packaging", agentRef: "inline:tests-packaging", status: "running", lastActivity: "child prompt sent" }),
+			step({ id: "tui-human", agentRef: "inline:tui-human", status: "running", lastActivity: "terminalizing [canceled]" }),
+		],
+	});
+	const rendered = renderAgentTeamResult({ content: [], details: canceling }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
+	assert.match(rendered, /agent_team stop requested agt_/);
+	assert.match(rendered, /0\/4 complete  4 working/);
+	assert.match(rendered, /working now runtime-safety prompt sent; \+3 more lanes/);
+	assert.match(rendered, /last update tui-human: terminalizing \[canceled\]/);
+	assert.doesNotMatch(rendered, /cancel canceling|objective|active=|sinks=/i);
+});
+
+test("renderAgentTeamLiveRunsWidget renders a readable live operator panel", () => {
+	const started = details("start", {
+		run: run({ objective: "TUI rewrite", liveStepIds: ["audit"], sinkStepIds: ["audit"], counts: counts({ running: 1 }) }),
+		steps: [step({ id: "audit", agentRef: "package:scout", status: "running", lastActivity: "assistant writing" })],
+	});
+	const lines = renderAgentTeamLiveRunsWidget([started], theme).render(120);
+	assert.deepEqual(lines, ["agent_team running TUI rewrite", "[--------------] 0/1 complete  1 working", "working now", "  > scout writing"]);
+	assert.doesNotMatch(lines.join("\n"), /objective|active=|sinks=|retrieve|peek|cleanup|cursor|debugEvents|Artifact:|\/tmp\//i);
+});
+
+test("renderAgentTeamLiveRunsWidget surfaces active roles and queued work without control vocabulary", () => {
+	const live = details("retrieve", {
+		run: run({ objective: "Human TUI operator HUD", liveStepIds: ["audit", "docs"], sinkStepIds: ["final"], counts: counts({ pending: 1, running: 2, succeeded: 1 }) }),
+		steps: [
+			step({ id: "audit", agentRef: "package:scout", status: "running", lastActivity: "assistant writing" }),
+			step({ id: "docs", agentRef: "package:docs-auditor", status: "running", lastActivity: "tool rg running" }),
+			step({ id: "final", agentRef: "package:synthesizer", status: "pending" }),
+		],
+	});
+	const rendered = renderAgentTeamLiveRunsWidget([live], theme).render(120).join("\n");
+	assert.match(rendered, /1\/4 complete  2 working  1 queued/);
+	assert.match(rendered, /working now\n  > scout writing\n  > docs-auditor rg running/);
+	assert.match(rendered, /queued next synthesizer/);
+	assert.doesNotMatch(rendered, /retrieve|peek|cleanup|cursor|debugEvents|Artifact:/i);
+});
+
+test("renderAgentTeamLiveRunsWidget lets attention outrank objective text", () => {
+	const problem = details("retrieve", {
+		run: run({ objective: "This long objective should not outrank the failure because the human needs the issue first", liveStepIds: ["worker"], sinkStepIds: ["worker"], counts: counts({ running: 1, failed: 1, succeeded: 3 }) }),
+		steps: [
+			step({ id: "validator", agentRef: "package:validator", status: "failed", errorMessage: "typecheck failed" }),
+			step({ id: "worker", agentRef: "package:worker", status: "running", lastActivity: "assistant writing" }),
+		],
+	});
+	const rendered = renderAgentTeamLiveRunsWidget([problem], theme).render(120).join("\n");
+	assert.match(rendered, /agent_team attention/);
+	assert.match(rendered, /4\/5 complete  1 failed  1 working/);
+	assert.match(rendered, /needs attention\n  ! validator typecheck failed/);
+	assert.doesNotMatch(rendered, /long objective/i);
+});
+
+test("renderAgentTeamLiveRunsWidget distinguishes multiple live runs", () => {
+	const first = details("retrieve", {
+		run: run({ runId: "agt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", objective: "TUI rewrite", liveStepIds: ["review"], counts: counts({ running: 1, succeeded: 2 }) }),
+		steps: [step({ id: "review", agentRef: "package:reviewer", status: "running", lastActivity: "assistant writing" })],
+	});
+	const second = details("retrieve", {
+		run: run({ runId: "agt_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", objective: "Release proof", liveStepIds: ["fix"], counts: counts({ running: 1, failed: 1 }) }),
+		steps: [step({ id: "validator", agentRef: "package:validator", status: "failed", errorMessage: "gate failed" }), step({ id: "fix", agentRef: "package:worker", status: "running", lastActivity: "tool read running" })],
+	});
+	const third = details("retrieve", {
+		run: run({ runId: "agt_cccccccccccccccccccccccccccccccc", objective: "Docs audit", liveStepIds: ["docs"], counts: counts({ running: 1 }) }),
+		steps: [step({ id: "docs", agentRef: "package:docs-auditor", status: "running", lastActivity: "assistant writing" })],
+	});
+	const rendered = renderAgentTeamLiveRunsWidget([first, second, third], theme).render(120).join("\n");
+	assert.match(rendered, /agent_team 3 runs  1 need attention/);
+	assert.match(rendered, /! Release proof 1\/2 complete  1 failed  1 working validator failed: gate failed/);
+	assert.match(rendered, /> TUI rewrite 2\/3 complete  1 working reviewer writing/);
+	assert.match(rendered, /> Docs audit 0\/1 complete  1 working docs-auditor writing/);
+	assert.equal(formatAgentTeamLiveStatus([first, second, third]), "3 runs, 1 issue");
+});
+
+test("renderAgentTeamLiveRunsWidget fits narrow widths", () => {
+	const live = details("retrieve", {
+		run: run({ objective: "Very long objective that should never force lines wider than the terminal width", liveStepIds: ["audit", "docs", "review"], counts: counts({ pending: 1, running: 3, succeeded: 2 }) }),
+		steps: [
+			step({ id: "audit", agentRef: "package:scout", status: "running", lastActivity: "assistant writing with a long note" }),
+			step({ id: "docs", agentRef: "package:docs-auditor", status: "running", lastActivity: "tool grep running" }),
+			step({ id: "review", agentRef: "package:reviewer", status: "running", lastActivity: "model turn active (no output yet)" }),
+		],
+	});
+	for (const width of [40, 60, 80, 120]) {
+		const lines = renderAgentTeamLiveRunsWidget([live], theme).render(width);
+		for (const line of lines) assert.equal(visibleWidth(line) <= width, true, `${visibleWidth(line)} > ${width}: ${line}`);
+	}
+});
+
+test("renderAgentTeamResult keeps run context for run-backed errors", () => {
+	const denied = details("message", {
+		ok: false,
+		error: { code: "message-not-delivered", message: "Step is not live or messageable." },
+		run: run({ objective: "detached", liveStepIds: [], sinkStepIds: ["one"], lastEvent: "one: finish", counts: counts({ succeeded: 1 }) }),
+		message: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", channel: "steer", clientMessageId: "m", accepted: false, undeliveredReason: "Step is not live or messageable." },
+	});
+	const rendered = renderAgentTeamResult({ content: [], details: denied }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
+	assert.match(rendered, /agent_team message denied agt_/);
+	assert.match(rendered, /needs attention/);
+	assert.match(rendered, /message-not-delivered/);
+	assert.match(rendered, /message one Step is not live or messageable/);
+	assert.doesNotMatch(rendered, /^message error message-not-delivered$/m);
+});
+
+test("renderAgentTeamResult labels running peek output as live", () => {
+	const live = details("peek", {
+		run: run({ objective: "detached", liveStepIds: ["one"], sinkStepIds: ["one"], lastEvent: "one: text", counts: counts({ running: 1 }) }),
+		outputs: [{ stepId: "one", status: "running", text: "partial", filePath: undefined, chars: 7 }],
+	});
+	const rendered = renderAgentTeamResult({ content: [], details: live }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
+	assert.match(rendered, /live output one running/);
+	assert.doesNotMatch(rendered, /final output one running/);
+});
+
+test("renderAgentTeamResult summarizes pushed notices with visible artifacts", () => {
+	const notice = details("retrieve", {
+		run: run({ objective: "detached", status: "succeeded", terminal: true, liveStepIds: [], sinkStepIds: ["one"], lastEvent: "terminal: succeeded", canMessage: false, canCancel: false, canCleanup: true, counts: counts({ succeeded: 1 }) }),
+		outputs: [{ stepId: "one", status: "succeeded", text: undefined, filePath: "/tmp/one-final.md", chars: 100 }],
+		notice: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", mode: "milestones", terminal: true, reasons: ["terminal:succeeded"], noticeCount: 1, noticeLimitReached: false },
+	});
+	const rendered = renderAgentTeamResult({ content: [], details: notice }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
+	assert.match(rendered, /terminal notice terminal:succeeded/);
+	assert.match(rendered, /artifacts=one-final.md/);
+	const fallback = formatAgentTeamNoticeText(notice);
+	assert.match(fallback, /agent_team succeeded detached/);
+	assert.match(fallback, /runId=agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_/);
+	assert.match(fallback, /final evidence one succeeded one-final.md/);
+	assert.match(fallback, /untrusted status evidence; retrieve\/peek for artifacts/);
+	assert.doesNotMatch(fallback, /# agent_team|Objective:|Run:|Status:|Exceptional controls|Next:|artifact=|\/tmp\/|cleanup|cursor|debugEvents|Artifact:/i);
+	const noticeCard = renderAgentTeamNoticeMessage(notice, fallback, { expanded: false }, theme).render(120).join("\n");
+	assert.match(noticeCard, /agent_team succeeded detached/);
+	assert.doesNotMatch(noticeCard, /Objective:|Run:|Exceptional controls|\/tmp\/|retrieve|peek|cleanup|cursor|debugEvents/i);
+	const missingDetailsCard = renderAgentTeamNoticeMessage(undefined, fallback, { expanded: false }, theme).render(120).join("\n");
+	assert.match(missingDetailsCard, /agent_team succeeded detached/);
+	assert.match(missingDetailsCard, /untrusted status evidence; retrieve\/peek for artifacts/);
+});
+
+test("renderAgentTeamResult summarizes multiple sink finals", () => {
+	const terminal = details("retrieve", {
+		run: run({ objective: "detached", status: "succeeded", terminal: true, liveStepIds: [], sinkStepIds: ["one", "two"], lastEvent: "terminal: succeeded", canMessage: false, canCancel: false, canCleanup: true, counts: counts({ succeeded: 2 }) }),
+		outputs: [
+			{ stepId: "one", status: "succeeded", text: "one", filePath: "/tmp/one.md", chars: 3 },
+			{ stepId: "two", status: "failed", text: "two", filePath: "/tmp/two.md", chars: 3 },
+		],
+	});
+	const rendered = renderAgentTeamResult({ content: [], details: terminal }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
+	assert.match(rendered, /final outputs 2/);
+	assert.match(rendered, /one succeeded, two failed/);
+});
+
+function details(action: AgentTeamDetails["action"], fields: Partial<AgentTeamDetails>): AgentTeamDetails {
+	return { kind: "agent_team", action, ok: true, diagnostics: [], error: undefined, library: undefined, catalog: [], extensionTools: [], run: undefined, cursor: undefined, events: [], steps: [], outputs: [], message: undefined, cleanup: undefined, notice: undefined, ...fields };
 }
 
-test("renderAgentTeamResult shows validation errors instead of ok run", () => {
-	const rendered = renderedText(
-		renderAgentTeamResult(
-			{
-				content: [{ type: "text", text: "# agent_team error\nAction: missing/invalid" }],
-				details: {
-					kind: "agent_team",
-					action: "missing/invalid",
-					objective: undefined,
-					library: { sources: ["package"], query: undefined, projectAgents: "deny" },
-					catalog: [],
-					agents: [],
-					steps: [],
-					diagnostics: [{ code: "action-required", message: "action is required", path: "/action", severity: "error" }],
-					fullOutputPath: undefined,
-				},
-			},
-			{ expanded: false, isPartial: false },
-			plainTheme,
-		),
-	);
-	assert.equal(rendered.includes("# agent_team error"), true);
-	assert.equal(rendered.includes("[ok] agent_team run"), false);
-});
+function run(fields: Partial<RunSnapshot>): RunSnapshot {
+	return { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", objective: "detached", status: "running", terminal: false, createdAt: "now", updatedAt: "now", expiresAt: undefined, liveStepIds: [], sinkStepIds: [], lastEvent: undefined, canMessage: true, canCancel: true, canCleanup: false, counts: counts({}), ...fields };
+}
 
-test("renderAgentTeamCall shows raw catalog query and objective", () => {
-	const catalog = renderedText(
-		renderAgentTeamCall(
-			{ action: "catalog", library: { query: "OPENAI_API_KEY=sk-query-evidence-abcdefghijklmnopqrstuvwxyz" } },
-			plainTheme,
-		),
-	);
-	assert.equal(catalog.includes("sk-query-evidence"), true);
+function step(fields: Partial<StepSnapshot> & { id: string; agentRef: string; status: StepStatus }): StepSnapshot {
+	return { needs: [], after: [], startedAt: undefined, endedAt: undefined, lastActivity: undefined, errorMessage: undefined, outputFilePath: undefined, outputChars: undefined, ...fields };
+}
 
-	const run = renderedText(
-		renderAgentTeamCall(
-			{
-				action: "run",
-				objective: "Handle OPENAI_API_KEY=sk-objective-evidence-abcdefghijklmnopqrstuvwxyz as raw evidence.",
-				agents: [{ id: "worker", kind: "inline", system: "x" }],
-				steps: [{ id: "one", agent: "worker", task: "x" }],
-			},
-			plainTheme,
-		),
-	);
-	assert.equal(run.includes("sk-objective-evidence"), true);
-});
+function counts(fields: Partial<Record<StepStatus, number>>): Record<StepStatus, number> {
+	return { pending: 0, running: 0, succeeded: 0, failed: 0, blocked: 0, timed_out: 0, canceled: 0, ...fields };
+}

@@ -1,7 +1,5 @@
 /** Child tool and extension grant policy for isolated subagents. */
 
-import { lstatSync, realpathSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
 import type {
 	AgentDiagnostic,
 	CatalogExtensionToolSummary,
@@ -15,6 +13,7 @@ import type {
 } from "./types.ts";
 import { BUILTIN_CHILD_TOOL_NAMES, TOOL_NAME_PATTERN } from "./types.ts";
 import { readExtensionSource, sameResolvedExtensionSource, sameSourceState } from "./extension-source.ts";
+import { findNearestWorkspaceRoot, isContainedPath, safeRealpath } from "./project-root.ts";
 
 const TOOL_NAME_REGEX = new RegExp(TOOL_NAME_PATTERN);
 const CHILD_TOOL_NAMES = new Set<string>(BUILTIN_CHILD_TOOL_NAMES);
@@ -30,17 +29,6 @@ export interface ToolResolutionContext {
 export interface ResolvedAgentToolAccess {
 	tools: string[];
 	extensionTools: ResolvedExtensionToolGrant[];
-}
-
-export function normalizeExtensionToolPolicy(input: Partial<ExtensionToolPolicy> | undefined): ExtensionToolPolicy {
-	return {
-		projectExtensions: input?.projectExtensions ?? "deny",
-		localExtensions: input?.localExtensions ?? "deny",
-	};
-}
-
-export function hasExtensionToolGrants(input: { agents?: { extensionTools?: ExtensionToolGrantSpec[] }[] } | undefined): boolean {
-	return input?.agents?.some((agent) => (agent.extensionTools?.length ?? 0) > 0) ?? false;
 }
 
 export function hasReadTool(tools: string[]): boolean {
@@ -63,6 +51,20 @@ export function catalogParentExtensionTools(inventory: ParentToolInventory | und
 			active: tool.active,
 		}))
 		.sort((left, right) => left.name.localeCompare(right.name) || left.from.source.localeCompare(right.from.source));
+}
+
+export function catalogParentExtensionToolDiagnostics(inventory: ParentToolInventory | undefined): AgentDiagnostic[] {
+	if (!inventory?.apiAvailable) return [];
+	const diagnostics: AgentDiagnostic[] = [];
+	const activeNameCounts = countActiveToolNames(inventory.tools);
+	for (const name of [...activeNameCounts.keys()].sort()) {
+		const count = activeNameCounts.get(name) ?? 0;
+		if (count > 1 && !RESERVED_EXTENSION_TOOL_NAMES.has(name)) diagnostics.push({ code: "extension-tool-active-ambiguous", message: `Parent extension tool ${name} has ${count} active registrations and is omitted from catalog; disable duplicate tool names before delegating it.`, path: undefined, severity: "warning" });
+	}
+	for (const tool of inventory.tools.filter((candidate) => candidate.active && candidate.sourceInfo.source === "sdk" && !RESERVED_EXTENSION_TOOL_NAMES.has(candidate.name)).sort((left, right) => left.name.localeCompare(right.name))) {
+		diagnostics.push({ code: "extension-tool-sdk-unloadable", message: `Parent tool ${tool.name} is SDK-provided and cannot be reloaded into isolated child Pi processes through extensionTools[].`, path: undefined, severity: "info" });
+	}
+	return diagnostics;
 }
 
 function countActiveToolNames(tools: ParentToolInfo[]): Map<string, number> {
@@ -103,8 +105,8 @@ export function resolveAgentToolAccess(input: {
 	diagnostics: AgentDiagnostic[];
 	context: ToolResolutionContext | undefined;
 }): ResolvedAgentToolAccess | undefined {
-	const tools = input.tools ?? [];
-	if (!validateBuiltinToolNames(input.tools, input.label, input.diagnostics, input.toolsPath)) return undefined;
+	const tools = dedupeStrings(input.tools ?? []);
+	if (!validateBuiltinToolNames(tools, input.label, input.diagnostics, input.toolsPath)) return undefined;
 	const extensionTools = resolveExtensionToolGrants(input.extensionTools, input.label, input.diagnostics, input.extensionToolsPath, input.context);
 	if (!extensionTools) return undefined;
 	const childTools = childToolNames({ tools, extensionTools });
@@ -245,9 +247,7 @@ function validateSourcePolicy(source: ResolvedExtensionSource, sourceInfo: Paren
 
 function policyDiagnostic(policy: ExtensionToolPolicy["projectExtensions"], codePrefix: string, name: string, path: string, reason: string): AgentDiagnostic | undefined {
 	if (policy === "allow") return undefined;
-	const code = policy === "confirm" ? `${codePrefix}-confirm-unprepared` : `${codePrefix}-denied`;
-	const action = policy === "confirm" ? "requires UI confirmation before planning" : "is denied by default";
-	return { code, message: `Extension tool ${name} ${action}; ${reason}.`, path, severity: "error" };
+	return { code: `${codePrefix}-denied`, message: `Extension tool ${name} is denied by default; ${reason}.`, path, severity: "error" };
 }
 
 function findReservedSourceCollision(tools: ParentToolInfo[], selected: ParentToolSourceInfo, selectedSource: ResolvedExtensionSource): ParentToolInfo | undefined {
@@ -271,37 +271,7 @@ function isWorkspaceLocalSource(realpath: string, cwd: string): boolean {
 }
 
 function findWorkspaceRoot(cwd: string): string {
-	let current = resolve(cwd);
-	while (true) {
-		if (pathExists(join(current, ".git")) || pathExists(join(current, ".pi"))) return current;
-		const parent = dirname(current);
-		if (parent === current) return resolve(cwd);
-		current = parent;
-	}
-}
-
-function pathExists(path: string): boolean {
-	try {
-		lstatSync(path);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-function safeRealpath(path: string): string | undefined {
-	try {
-		return realpathSync(path);
-	} catch {
-		return undefined;
-	}
-}
-
-function isContainedPath(parent: string, child: string): boolean {
-	const normalizedParent = resolve(parent);
-	const normalizedChild = resolve(child);
-	const prefix = normalizedParent.endsWith(sep) ? normalizedParent : `${normalizedParent}${sep}`;
-	return normalizedChild === normalizedParent || normalizedChild.startsWith(prefix);
+	return findNearestWorkspaceRoot(cwd);
 }
 
 function dedupeStrings(values: string[]): string[] {

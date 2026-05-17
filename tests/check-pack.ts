@@ -18,6 +18,8 @@ const manifest = parsed[0];
 assert.equal(typeof manifest === "object" && manifest !== null && "files" in manifest, true, "npm pack JSON should include files");
 const rawFiles = manifest.files;
 assert.equal(Array.isArray(rawFiles), true, "npm pack files should be an array");
+const rawUnpackedSize = "unpackedSize" in manifest ? manifest.unpackedSize : undefined;
+assert.equal(typeof rawUnpackedSize === "number" && rawUnpackedSize < 750000, true, "packed artifact should stay below the package surface budget");
 
 const paths = new Set<string>();
 for (const rawFile of rawFiles) {
@@ -29,6 +31,7 @@ for (const rawFile of rawFiles) {
 for (const required of requiredPackedFiles()) {
 	assert.equal(paths.has(required), true, `packed artifact is missing ${required}`);
 }
+assert.equal(paths.has("agents/web-researcher.md"), true, "packed artifact is missing the bundled web researcher agent");
 for (const forbidden of [
 	".gitignore",
 	".npmignore",
@@ -38,7 +41,7 @@ for (const forbidden of [
 	"HANDOFF.md",
 	"package-lock.json",
 	"pnpm-lock.yaml",
-	"tests/smoke-pi.ts",
+	"tests/smoke-fake-pi.ts",
 	"tests/check-pack.ts",
 	"VISION.md",
 	"ARCH.md",
@@ -46,9 +49,15 @@ for (const forbidden of [
 ]) {
 	assert.equal(paths.has(forbidden), false, `packed artifact should not include ${forbidden}`);
 }
+assert.equal(paths.size < 120, true, "packed artifact should stay within the expected file-count budget");
 for (const path of paths) {
+	assert.equal(isAllowedPackedPath(path), true, `packed artifact includes an unexpected package surface: ${path}`);
 	assert.equal(path.startsWith("tests/"), false, `packed artifact should not include tests: ${path}`);
 	assert.equal(path.startsWith(".pi/"), false, `packed artifact should not include runtime state: ${path}`);
+}
+
+function isAllowedPackedPath(path: string): boolean {
+	return path === "package.json" || path === "README.md" || path === "CHANGELOG.md" || path === "LICENSE" || path.startsWith("agents/") || path.startsWith("assets/") || path.startsWith("examples/") || path.startsWith("skills/") || path.startsWith("extensions/");
 }
 
 function requiredPackedFiles(): string[] {

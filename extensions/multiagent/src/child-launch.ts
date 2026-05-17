@@ -1,15 +1,18 @@
-/** Child Pi launch argument construction for delegated subagents. */
+/** Child Pi RPC launch argument construction for detached subagents. */
 
 import { type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
-import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { basename, delimiter, isAbsolute, join, resolve } from "node:path";
 import type { AgentInvocationDefaults, ResolvedAgent } from "./types.ts";
+import { READONLY_CHILD_TOOL_NAMES } from "./types.ts";
 import { childToolNames } from "./tool-policy.ts";
+import { findNearestWorkspaceRoot, isContainedPath, safeRealpath } from "./project-root.ts";
 
 export interface SpawnOptions {
 	cwd: string;
 	shell: false;
 	stdio: ["pipe", "pipe", "pipe"];
+	detached: boolean;
 }
 
 export type SpawnProcess = (command: string, args: string[], options: SpawnOptions) => ChildProcessWithoutNullStreams;
@@ -17,8 +20,7 @@ export type SpawnProcess = (command: string, args: string[], options: SpawnOptio
 export function buildPiArgs(agent: ResolvedAgent, defaults: AgentInvocationDefaults, promptPath: string): string[] {
 	const args = [
 		"--mode",
-		"json",
-		"-p",
+		"rpc",
 		"--no-session",
 		"--no-extensions",
 		...extensionArgs(agent),
@@ -33,13 +35,17 @@ export function buildPiArgs(agent: ResolvedAgent, defaults: AgentInvocationDefau
 		promptPath,
 	];
 	const model = agent.model ?? defaults.model;
-	const thinking = agent.thinking === "inherit" || agent.thinking === undefined ? defaults.thinking : agent.thinking;
+	const thinking = agent.thinking ?? defaults.thinking;
 	if (model) args.push("--model", model);
 	if (thinking) args.push("--thinking", thinking);
+	if (!hasMandatoryReadSuite(agent.tools)) throw new Error(`Resolved agent ${agent.ref} is missing mandatory read/discovery tools.`);
 	const tools = childToolNames(agent);
-	if (tools.length === 0) args.push("--no-tools");
-	else args.push("--tools", tools.join(","));
+	args.push("--tools", tools.join(","));
 	return args;
+}
+
+function hasMandatoryReadSuite(tools: string[]): boolean {
+	return READONLY_CHILD_TOOL_NAMES.every((tool) => tools.includes(tool));
 }
 
 function extensionArgs(agent: ResolvedAgent): string[] {
@@ -69,9 +75,9 @@ export function getPiInvocation(args: string[], cwd: string): { command: string;
 	const currentScript = process.argv[1];
 	const isBunVirtualScript = currentScript?.startsWith("/$bunfs/root/") ?? false;
 	const currentScriptPath = currentScript && !isBunVirtualScript ? resolve(currentScript) : undefined;
-	if (currentScriptPath && existsSync(currentScriptPath) && isTrustedLaunchPath(deniedRoots, process.execPath) && isTrustedLaunchPath(deniedRoots, currentScriptPath)) return { command: process.execPath, args: [currentScriptPath, ...args] };
+	if (currentScriptPath && existsSync(currentScriptPath) && isExecutableFile(process.execPath) && isTrustedLaunchPath(deniedRoots, process.execPath) && isTrustedLaunchPath(deniedRoots, currentScriptPath)) return { command: process.execPath, args: [currentScriptPath, ...args] };
 	const execName = basename(process.execPath).toLowerCase();
-	if (!/^(node|bun)(\.exe)?$/.test(execName) && isTrustedLaunchPath(deniedRoots, process.execPath)) return { command: process.execPath, args };
+	if (!/^(node|bun)(\.exe)?$/.test(execName) && isExecutableFile(process.execPath) && isTrustedLaunchPath(deniedRoots, process.execPath)) return { command: process.execPath, args };
 	const command = resolvePiCommandFromPath(process.env.PATH ?? "", cwd);
 	if (!command) throw new Error("Unable to resolve a trusted absolute pi launcher from PATH; refusing to spawn bare pi.");
 	return { command, args };
@@ -91,6 +97,18 @@ export function resolvePiCommandFromPath(pathEnv: string, cwd: string): string |
 	return undefined;
 }
 
+export function killProcessTree(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): boolean {
+	if (process.platform !== "win32" && child.pid !== undefined) {
+		try {
+			process.kill(-child.pid, signal);
+			return true;
+		} catch {
+			return child.kill(signal);
+		}
+	}
+	return child.kill(signal);
+}
+
 function findDeniedRoots(cwd: string): string[] {
 	const roots = new Set<string>();
 	addProjectRoot(roots, resolve(cwd));
@@ -100,30 +118,7 @@ function findDeniedRoots(cwd: string): string[] {
 }
 
 function addProjectRoot(roots: Set<string>, cwd: string): void {
-	roots.add(findProjectRoot(cwd));
-}
-
-function findProjectRoot(cwd: string): string {
-	let current = resolve(cwd);
-	while (true) {
-		if (hasProjectMarker(current)) return current;
-		const parent = dirname(current);
-		if (parent === current) return resolve(cwd);
-		current = parent;
-	}
-}
-
-function hasProjectMarker(path: string): boolean {
-	return pathExists(join(path, ".git")) || pathExists(join(path, ".pi"));
-}
-
-function pathExists(path: string): boolean {
-	try {
-		lstatSync(path);
-		return true;
-	} catch {
-		return false;
-	}
+	roots.add(findNearestWorkspaceRoot(cwd));
 }
 
 function isTrustedLaunchPath(deniedRoots: string[], path: string): boolean {
@@ -135,21 +130,6 @@ function isContainedInAnyRoot(roots: string[], child: string): boolean {
 	if (roots.some((root) => isContainedPath(root, lexicalChild))) return true;
 	const realChild = safeRealpath(lexicalChild);
 	return realChild ? roots.some((root) => isContainedPath(root, realChild)) : false;
-}
-
-function isContainedPath(parent: string, child: string): boolean {
-	const normalizedParent = resolve(parent);
-	const normalizedChild = resolve(child);
-	const parentPrefix = normalizedParent.endsWith(sep) ? normalizedParent : `${normalizedParent}${sep}`;
-	return normalizedChild === normalizedParent || normalizedChild.startsWith(parentPrefix);
-}
-
-function safeRealpath(path: string): string | undefined {
-	try {
-		return resolve(realpathSync(path));
-	} catch {
-		return undefined;
-	}
 }
 
 function isExecutableFile(path: string): boolean {
