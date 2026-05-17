@@ -6,7 +6,7 @@ Package examples are schema-checked examples, not a runtime template API.
 
 ## Fastest safe graph
 
-For one local read-only question, copy the Minimal library graph below, keep `allowFilesystemRead:true`, use `package:scout` or a catalog-selected ref, and start with `graphFile` from a trusted workspace-local file. Then wait for pushed notices; use `retrieve` or `peek` only when needed.
+For one local read-only question, copy the Minimal library graph below, keep `allowFilesystemRead:true`, use a known source-qualified package ref such as `package:scout` directly when the role is obvious, and start with `graphFile` from a trusted workspace-local file. Use catalog before start only when choosing among roles, checking current descriptions/tags/defaultTools, using `user:` or trusted `project:` refs, or copying active extension-tool provenance. Then wait for pushed notices; use `retrieve` or `peek` only when needed.
 
 ## Choose a graph shape first
 
@@ -49,7 +49,7 @@ Use the lowest rung that solves the supervision problem:
 
 ## Detached graph checklist
 
-- Use `catalog` first when reusable roles or extension-tool provenance may matter. Catalog output is authoritative for refs, descriptions, routing tags, default built-in tool profiles, paths, SHA metadata, and active extension-tool provenance. Catalog queries match exact phrases or non-stopword query terms across refs, descriptions, tags, sources, default tools, model, and path; omit the query to list all roles.
+- Use known source-qualified package refs directly when this cookbook, the skill, README, or the user names the role and package sources are enough. Use catalog before start only when choosing among roles, checking current descriptions/tags/defaultTools, using `user:` or trusted `project:` refs, or copying active extension-tool provenance. Catalog output is authoritative for refs, descriptions, routing tags, default built-in tool profiles, paths, SHA metadata, and active extension-tool provenance. Catalog queries match exact phrases or non-stopword query terms across refs, descriptions, tags, sources, default tools, model, and path; omit the query to list all roles.
 - Keep `graph.library.sources` minimal. Omitted start graph sources default to `["package"]`; `user` and trusted `project` sources must be requested explicitly, and `project` requires `authority.allowProjectCode:true`.
 - Set `graph.authority` explicitly for filesystem read/discovery, shell probes, mutation tools, extension code, or project code. Graph files honor their embedded authority after validation, so load copied graph files only from trusted workspace content.
 - Bind an agent in each step with either `agent.system` or source-qualified `agent.ref`.
@@ -60,7 +60,7 @@ Use the lowest rung that solves the supervision problem:
 - Sink steps are caller-facing finals; multiple sinks mean multiple finals. Both `needs` and `after` count as dependency edges for sink detection. Add one explicit synthesizer sink when one final is desired.
 - Put result requirements in each step's `task`; model synthesis as a normal dependent step.
 - Write each task as a small contract: objective, scope, sources/tools, output format, and stop condition. Prefer compact evidence fields such as paths, facts, decisions, risks, validation, source commands, and URLs; do not ask for raw transcript or log dumps unless those artifacts are the task.
-- For mutation-capable graphs, set first-class step `mutationScope` on each write-capable step and each bash-capable `package:worker` step. It must name the allowed file set or mutation class; it is both the copy/adapt contract and the planning-time prompt handoff. It rejects missing or placeholder authorization but does not path-sandbox `bash`, `edit`, or `write`. Children do not receive the parent transcript; a worker must block rather than infer authorization if `mutationScope` is missing, vague, or still a placeholder.
+- For mutation-capable graphs, set first-class step `mutationScope` on each write-capable step and each bash-capable `package:worker` step. It must name the allowed file set or mutation class; it is both the copy/adapt contract and the planning-time prompt handoff. It rejects missing or placeholder authorization, but mutationScope is not a sandbox; bash/edit/write are not path-confined. Children do not receive the parent transcript; a worker must block rather than infer authorization if `mutationScope` is missing, vague, or still a placeholder.
 - Before starting any mutation-capable graph, verify exact parent authorization, concrete `mutationScope`, graph authority limited to the needed read/shell/mutation grants, and no unresolved placeholder or `REPLACE` text in mutationScope fields. Graph gates are model-level dependencies, not human approval checkpoints; split into separate runs when a human decision must happen before mutation.
 - Let pushed notices report milestones and terminal state; `options.notify` defaults to `mode:"milestones"`, `maxNotices:12`, and `minIntervalSeconds:10`, while `mode:"final"` sends only terminal notices and `mode:"none"` disables pushed notices. Use `retrieve` for immediate compact status/sink artifact indexes, or add `waitSeconds` for a bounded wait/read that returns the same compact snapshot after a material parent-visible event or timeout; routine assistant/tool activity does not wake the wait. Use `peek` for one step. Add `preview:true` only when bounded assistant text belongs in the parent context. Use `debugEvents:true` only for package debugging that needs raw event records. Message live steps only for clarification or scope repair: `steer` queues after the current assistant turn/tool batch before the next LLM call, while `follow_up` defers a live follow-up until the child is quiescent before terminalization, if still messageable. Accepted messages prove queueing, not compliance, output, completion, or early-stop consent. Messages cannot broaden scope, grant tools, authorize mutation, permit destructive/external actions, or force half-done finals unless incomplete evidence is explicitly acceptable. Retain artifact paths as handoff/context evidence and cleanup only after evidence is preserved or intentionally discarded.
 - Parallelize only independent read-only lanes. Serialize mutation, bash-heavy, rate-limited, or overlapping file ownership lanes with dependencies or `limits.concurrency:1`.
@@ -196,8 +196,10 @@ Save that JSON object, not an action wrapper, as a trusted relative file such as
 
 ## Minimal supervision loop
 
-1. Let pushed notices report progress.
-2. For a bounded wait/status read:
+Decision tree:
+
+1. Healthy pushed notice and no immediate need for evidence? Wait.
+2. Need compact state, sink artifacts, diagnostics, effective tools, or a bounded wait/status read?
 
 ```json
 {
@@ -207,9 +209,11 @@ Save that JSON object, not an action wrapper, as a trusted relative file such as
 }
 ```
 
-3. If one step needs inspection, use `peek` on that `stepId`; add `preview:true` only when bounded assistant text belongs in the parent context.
-4. Message only a live step for clarification or scope repair.
-5. Cleanup only after needed artifact paths are preserved or intentionally discarded.
+3. Need one step's live text or a non-sink artifact? Use `peek` on that `stepId`; add `preview:true` only when bounded assistant text belongs in the parent context.
+4. Need a live clarification or scope repair? Send one bounded `message`; use `follow_up` only before terminalization for a short in-scope addendum, such as asking the child to copy a needed artifact path into its final. Accepted messages prove queueing, not compliance. Exact duplicate keys reuse the original receipt, whether accepted, denied, or timed out, and do not queue another child message; use a new `clientMessageId` for a fresh corrective retry.
+5. Need raw package diagnostics? Use `retrieve` with `debugEvents:true` only when compact state is ambiguous.
+6. Work is unsafe, obsolete, explicitly stopped, stuck, or lower value than freeing capacity? `cancel`.
+7. Run is terminal and every needed artifact path is preserved or intentionally discarded? `cleanup`. Cleanup is evidence deletion, not routine hygiene.
 
 Use `retrieve` when you need an immediate artifact/status snapshot; add `preview:true` only when you need bounded sink assistant text:
 

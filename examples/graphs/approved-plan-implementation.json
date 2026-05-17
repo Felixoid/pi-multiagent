@@ -26,7 +26,7 @@
       "needs": [
         "approval-check"
       ],
-      "mutationScope": "REPLACE before start. Allowed files/globs: <exact approved paths>. Allowed mutation class: <specific approved edit type>. Explicit exclusions: <paths/actions not allowed>. Validation commands authorized: <exact commands or none>. Stop if broader than current parent authorization.",
+      "mutationScope": "REPLACE before start. Allowed files/globs: <exact approved paths>. Allowed mutation class: <specific approved edit type>. Explicit exclusions: <paths/actions not allowed>. Validation commands authorized: <exact commands or none>. Stop if broader than current parent authorization. mutationScope is not a sandbox; bash/edit/write are not path-confined, so stop rather than touch anything outside this authorization.",
       "task": "If approval-check is not GO, or mutationScope is placeholder, missing, or broader than the exact human approval, vague, or inconsistent with approval, do not edit. Otherwise implement only the approved change. Return changed paths and validation commands run."
     },
     {

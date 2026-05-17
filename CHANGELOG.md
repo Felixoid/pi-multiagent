@@ -2,7 +2,11 @@
 
 ## Unreleased
 
+## 0.7.1 - 2026-05-17
+
+- Hardened `agent_team` usability surfaces by exposing effective child tools, reused `clientMessageId` receipts, cleanup-as-evidence-deletion copy, `follow_up` artifact-path guidance, and `mutationScope` non-sandbox warnings across runtime snapshots, model/TUI rendering, docs, examples, and tests.
 - Added GitHub Release creation and verification to the standard release choreography, package skill, cookbook, public-release foundry, and public-doc checks.
+- Split deterministic release validation from explicit-approval real Pi smoke guidance.
 
 ## 0.7.0 - 2026-05-17
 

@@ -40,7 +40,7 @@
       "needs": [
         "artifact-audit"
       ],
-      "mutationScope": "REPLACE before start. Allowed files/globs: <exact release-readiness paths>. Allowed mutation class: <specific release-readiness fix type>. Explicit exclusions: version bump, commit, tag, push, publish, GitHub Release creation, and <additional paths/actions not allowed>. Validation commands authorized: <exact commands or none>. Stop if broader than current parent authorization.",
+      "mutationScope": "REPLACE before start. Allowed files/globs: <exact release-readiness paths>. Allowed mutation class: <specific release-readiness fix type>. Explicit exclusions: version bump, commit, tag, push, publish, GitHub Release creation, and <additional paths/actions not allowed>. Validation commands authorized: <exact commands or none>. Stop if broader than current parent authorization. mutationScope is not a sandbox; bash/edit/write are not path-confined, so stop rather than touch anything outside this authorization.",
       "task": "Apply only that authorized release-readiness scope across docs, metadata, examples, and tests. If mutationScope is still a placeholder, missing, or broader than the parent authorization, return blocker evidence without editing. Do not version-bump, commit, tag, push, publish, or create GitHub Releases. Return changed paths and validation."
     },
     {

@@ -347,6 +347,9 @@ export interface StepSnapshot {
 	id: string;
 	status: StepStatus;
 	agentRef: string;
+	effectiveTools: string[];
+	extensionTools: string[];
+	callerSkills: string[];
 	needs: string[];
 	after: string[];
 	startedAt: string | undefined;
@@ -372,6 +375,7 @@ export interface MessageReceipt {
 	clientMessageId: string | undefined;
 	accepted: boolean;
 	undeliveredReason: string | undefined;
+	reused?: boolean;
 }
 
 export interface AgentTeamNotice {

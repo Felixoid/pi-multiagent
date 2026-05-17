@@ -55,6 +55,8 @@ test("mutation-capable graph examples repeat authorization and validation gates"
 	assert.match(stepMutationScope(implementation, "implementation-worker"), /Allowed files\/globs/);
 	assert.match(stepMutationScope(implementation, "implementation-worker"), /Allowed mutation class/);
 	assert.match(stepMutationScope(implementation, "implementation-worker"), /Explicit exclusions/);
+	assert.match(stepMutationScope(implementation, "implementation-worker"), /not a sandbox/);
+	assert.match(stepMutationScope(implementation, "implementation-worker"), /not path-confined/);
 	assert.match(stepTask(implementation, "implementation-worker"), /BLOCK, NO-GO/);
 	assert.match(stepTask(implementation, "implementation-worker"), /scope\/authority risk/);
 	assert.match(stepTask(implementation, "implementation-worker"), /placeholder, missing, or broader/);
@@ -65,6 +67,8 @@ test("mutation-capable graph examples repeat authorization and validation gates"
 	assert.match(stepMutationScope(docsAlignment, "docs-editor"), /Allowed files\/globs/);
 	assert.match(stepMutationScope(docsAlignment, "docs-editor"), /Allowed mutation class/);
 	assert.match(stepMutationScope(docsAlignment, "docs-editor"), /Explicit exclusions/);
+	assert.match(stepMutationScope(docsAlignment, "docs-editor"), /not a sandbox/);
+	assert.match(stepMutationScope(docsAlignment, "docs-editor"), /not path-confined/);
 	assert.match(stepTask(docsAlignment, "docs-editor"), /docs, examples, and directly affected docs\/example tests or fixtures/);
 	assert.match(stepTask(docsAlignment, "docs-editor"), /placeholder, missing, or broader/);
 	assert.match(stepTask(docsAlignment, "validation-review"), /tests\/examples\.test\.ts/);
@@ -74,6 +78,8 @@ test("mutation-capable graph examples repeat authorization and validation gates"
 	assert.match(stepMutationScope(releaseFoundry, "release-fix-worker"), /Allowed files\/globs/);
 	assert.match(stepMutationScope(releaseFoundry, "release-fix-worker"), /Allowed mutation class/);
 	assert.match(stepMutationScope(releaseFoundry, "release-fix-worker"), /Explicit exclusions/);
+	assert.match(stepMutationScope(releaseFoundry, "release-fix-worker"), /not a sandbox/);
+	assert.match(stepMutationScope(releaseFoundry, "release-fix-worker"), /not path-confined/);
 	for (const stepId of ["release-scope", "release-fix-worker"]) assert.match(stepTask(releaseFoundry, stepId), /Do not version-bump, commit, tag, push, publish, or create GitHub Releases/);
 });
 
@@ -93,6 +99,8 @@ test("mutation examples with authorization placeholders fail closed", async () =
 			assert.match(step.mutationScope, /Allowed files\/globs/, `${file}:${String(step.id)} must name allowed files/globs`);
 			assert.match(step.mutationScope, /Allowed mutation class/, `${file}:${String(step.id)} must name allowed mutation class`);
 			assert.match(step.mutationScope, /Explicit exclusions/, `${file}:${String(step.id)} must name explicit exclusions`);
+			assert.match(step.mutationScope, /not a sandbox/, `${file}:${String(step.id)} must warn mutationScope is not a sandbox`);
+			assert.match(step.mutationScope, /not path-confined/, `${file}:${String(step.id)} must warn tools are not path-confined`);
 			assert.match(stepTask(graph, String(step.id)), /placeholder, missing, or broader/, `${file}:${String(step.id)} must reject unresolved placeholder scope`);
 			assert.match(stepTask(graph, String(step.id)), /do not edit|without editing/i, `${file}:${String(step.id)} must fail closed before mutation`);
 		}

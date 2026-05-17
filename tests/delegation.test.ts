@@ -279,6 +279,11 @@ test("start returns a registered runId and retrieve exposes final output", async
 	const runId = started.details.run?.runId;
 	assert.match(runId ?? "", /^agt_/);
 	assert.equal(started.details.run?.terminal, false);
+	assert.deepEqual(started.details.steps[0]?.effectiveTools, ["read", "grep", "find", "ls"]);
+	assert.deepEqual(started.details.steps[0]?.extensionTools, []);
+	assert.deepEqual(started.details.steps[0]?.callerSkills, []);
+	assert.match(started.content[0].text, /## Effective step tools/);
+	assert.match(started.content[0].text, /effectiveTools=read,grep,find,ls/);
 	const compact = await waitTerminal(root, runId ?? "", options, 20, false);
 	assert.equal(compact.details.run?.status, "succeeded");
 	assert.equal(compact.details.events.length, 0);
@@ -902,16 +907,19 @@ test("message writes bounded live channel messages to a running step only", asyn
 	for (let attempt = 0; harness.children.length === 0 && attempt < 20; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5));
 	const receipt = await runAgentTeam({ action: "message", runId, stepId: "one", channel: "steer", text: "tighten scope", clientMessageId: "m1" }, options);
 	assert.equal(receipt.details.message?.accepted, true);
+	assert.equal(receipt.details.message?.reused, false);
 	const duplicate = await runAgentTeam({ action: "message", runId, stepId: "one", channel: "steer", text: "tighten scope", clientMessageId: "m1" }, options);
 	assert.equal(duplicate.details.message?.accepted, true);
+	assert.equal(duplicate.details.message?.reused, true);
+	assert.match(duplicate.content[0].text, /no additional child message was queued/);
 	const conflicting = await runAgentTeam({ action: "message", runId, stepId: "one", channel: "steer", text: "different scope", clientMessageId: "m1" }, options);
 	assert.equal(conflicting.details.ok, false);
 	assert.equal(conflicting.details.message?.accepted, false);
-	assert.match(conflicting.details.message?.undeliveredReason ?? "", /Conflicting clientMessageId reuse/);
+	assert.match(conflicting.details.message?.undeliveredReason ?? "", /Conflicting clientMessageId/);
 	const conflictingChannel = await runAgentTeam({ action: "message", runId, stepId: "one", channel: "follow_up", text: "tighten scope", clientMessageId: "m1" }, options);
 	assert.equal(conflictingChannel.details.ok, false);
 	assert.equal(conflictingChannel.details.message?.accepted, false);
-	assert.match(conflictingChannel.details.message?.undeliveredReason ?? "", /Conflicting clientMessageId reuse/);
+	assert.match(conflictingChannel.details.message?.undeliveredReason ?? "", /Conflicting clientMessageId/);
 	const followUp = await runAgentTeam({ action: "message", runId, stepId: "one", channel: "follow_up", text: "summarize after stop", clientMessageId: "m-follow" }, options);
 	assert.equal(followUp.details.message?.accepted, true);
 	assert.match(followUp.content[0].text, /quiescent before terminalization/);
@@ -964,6 +972,30 @@ test("step artifacts append every assistant final in chronological order", async
 	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
+test("follow_up before terminalization preserves chronological assistant finals", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-follow-up-finals-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("hold");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	await waitForChildren(harness, 1);
+	const child = harness.children[0];
+	assert.ok(child);
+	sendAssistantMessageEnd(child, "first final before follow_up");
+	const followUp = await runAgentTeam({ action: "message", runId, stepId: "one", channel: "follow_up", text: "add one in-scope final", clientMessageId: "follow-final" }, options);
+	assert.equal(followUp.details.message?.accepted, true);
+	assert.equal(followUp.details.message?.reused, false);
+	assert.equal(harness.messages.some((message) => message.type === "follow_up" && message.message.includes("add one in-scope final")), true);
+	sendAssistantFinal(child, "second final after follow_up");
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.outputs[0]?.text, "## Assistant final 1\n\nfirst final before follow_up\n\n## Assistant final 2\n\nsecond final after follow_up");
+	const artifactPath = terminal.details.outputs[0]?.filePath;
+	assert.ok(artifactPath);
+	const artifact = await readFile(artifactPath, "utf8");
+	assert.match(artifact, /## Assistant final 1\n\nfirst final before follow_up\n\n## Assistant final 2\n\nsecond final after follow_up/);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
 test("message clientMessageId is atomic for concurrent duplicate sends", async () => {
 	const root = await mkdir(join(tmpdir(), `pi-multiagent-message-concurrent-${Date.now()}`), { recursive: true });
 	const harness = rpcHarness("delay-message-ack");
@@ -976,6 +1008,8 @@ test("message clientMessageId is atomic for concurrent duplicate sends", async (
 	const [firstReceipt, secondReceipt] = await Promise.all([first, second]);
 	assert.equal(firstReceipt.details.message?.accepted, true);
 	assert.equal(secondReceipt.details.message?.accepted, true);
+	assert.equal(firstReceipt.details.message?.reused, false);
+	assert.equal(secondReceipt.details.message?.reused, true);
 	assert.equal(harness.messages.filter((message) => message.type === "steer" && message.message.includes("same")).length, 1);
 	harness.release("done");
 	const terminal = await waitTerminal(root, runId, options);
@@ -996,9 +1030,13 @@ test("denied message attempts cache by clientMessageId", async () => {
 	const secondFollowUp = await runAgentTeam({ action: "message", runId, stepId: "one", channel: "follow_up", text: "rejected follow-up", clientMessageId: "md2" }, options);
 	assert.equal(first.details.message?.accepted, false);
 	assert.equal(second.details.message?.accepted, false);
+	assert.equal(first.details.message?.reused, false);
+	assert.equal(second.details.message?.reused, true);
 	assert.equal(first.details.message?.undeliveredReason, second.details.message?.undeliveredReason);
 	assert.equal(firstFollowUp.details.message?.accepted, false);
 	assert.equal(secondFollowUp.details.message?.accepted, false);
+	assert.equal(firstFollowUp.details.message?.reused, false);
+	assert.equal(secondFollowUp.details.message?.reused, true);
 	assert.equal(firstFollowUp.details.message?.undeliveredReason, secondFollowUp.details.message?.undeliveredReason);
 	assert.equal(harness.messages.filter((message) => message.type === "steer" && message.message.includes("rejected")).length, 1);
 	assert.equal(harness.messages.filter((message) => message.type === "follow_up" && message.message.includes("rejected follow-up")).length, 1);
@@ -1021,10 +1059,14 @@ test("timed-out message ACK is memoized by clientMessageId", async () => {
 	const secondFollowUp = await runAgentTeam({ action: "message", runId, stepId: "one", channel: "follow_up", text: "timed out follow", clientMessageId: "mt2" }, options);
 	assert.equal(first.details.message?.accepted, false);
 	assert.equal(second.details.message?.accepted, false);
+	assert.equal(first.details.message?.reused, false);
+	assert.equal(second.details.message?.reused, true);
 	assert.match(first.details.message?.undeliveredReason ?? "", /RPC command steer timed out/);
 	assert.equal(first.details.message?.undeliveredReason, second.details.message?.undeliveredReason);
 	assert.equal(firstFollowUp.details.message?.accepted, false);
 	assert.equal(secondFollowUp.details.message?.accepted, false);
+	assert.equal(firstFollowUp.details.message?.reused, false);
+	assert.equal(secondFollowUp.details.message?.reused, true);
 	assert.match(firstFollowUp.details.message?.undeliveredReason ?? "", /RPC command follow_up timed out/);
 	assert.equal(firstFollowUp.details.message?.undeliveredReason, secondFollowUp.details.message?.undeliveredReason);
 	assert.equal(harness.messages.filter((message) => message.type === "steer" && message.message.includes("timed out")).length, 1);

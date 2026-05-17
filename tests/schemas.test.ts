@@ -47,6 +47,8 @@ test("AgentTeamSchema preserves public field bounds and defaults", () => {
 	assert.equal(stepSchema.task.maxLength, MAX_TEXT_FIELD_CHARS);
 	assert.equal(stepSchema.mutationScope.maxLength, MAX_TEXT_FIELD_CHARS);
 	assert.match(stepSchema.mutationScope.description, /First-class mutation authorization/);
+	assert.match(stepSchema.mutationScope.description, /not a sandbox/);
+	assert.match(stepSchema.mutationScope.description, /not path-confined/);
 	assert.equal(stepSchema.cwd.maxLength, MAX_PATH_FIELD_CHARS);
 	assert.equal(stepAgent.system.maxLength, MAX_TEXT_FIELD_CHARS);
 	assert.equal(stepAgent.ref.maxLength, 72);

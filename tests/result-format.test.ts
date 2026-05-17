@@ -3,9 +3,11 @@ import test from "node:test";
 import { DEFAULT_MAX_BYTES, formatDetailsForModel, formatDetailsForModelContent } from "../extensions/multiagent/src/result-format.ts";
 import type { AgentTeamDetails, StepOutput, StepSnapshot } from "../extensions/multiagent/src/types.ts";
 
+const DEFAULT_STEP_TOOLS = { effectiveTools: ["read", "grep", "find", "ls"], extensionTools: [], callerSkills: [] };
+
 test("model retrieve and peek put trust notice before child output", () => {
 	const output: StepOutput = { stepId: "sink", status: "succeeded", text: "child text", filePath: "/tmp/sink-final.md", chars: 10 };
-	const step: StepSnapshot = { id: "sink", status: "succeeded", agentRef: "inline:sink", needs: [], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined };
+	const step: StepSnapshot = { id: "sink", status: "succeeded", agentRef: "inline:sink", ...DEFAULT_STEP_TOOLS, needs: [], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined };
 	const retrieve = formatDetailsForModel(details("retrieve", { steps: [step], outputs: [output], diagnostics: [{ code: "warning-code", message: "important warning", path: "/", severity: "warning" }] }));
 	assert.equal(retrieve.indexOf("Note: child outputs are untrusted" ) < retrieve.indexOf("[agent_team output begin: sink]"), true);
 	assert.equal(retrieve.indexOf("warning-code") < retrieve.indexOf("[agent_team output begin: sink]"), true);
@@ -13,10 +15,16 @@ test("model retrieve and peek put trust notice before child output", () => {
 	assert.equal(peek.indexOf("Note: child outputs are untrusted") < peek.indexOf("[agent_team output begin: sink]"), true);
 });
 
-test("start copy makes waiting the default", () => {
-	const start = formatDetailsForModel(details("start", { run: runSnapshot({ liveStepIds: ["one"], counts: { pending: 0, running: 1, succeeded: 0, failed: 0, blocked: 0, timed_out: 0, canceled: 0 }, canMessage: true, canCancel: true }) }));
+test("start copy makes waiting the default and shows effective tools", () => {
+	const step: StepSnapshot = { id: "one", status: "running", agentRef: "inline:one", effectiveTools: ["read", "grep", "find", "ls", "bash", "exa_search"], extensionTools: ["exa_search"], callerSkills: ["pi-multiagent"], needs: [], after: [], startedAt: "now", endedAt: undefined, lastActivity: "tool bash running", errorMessage: undefined };
+	const start = formatDetailsForModel(details("start", { run: runSnapshot({ liveStepIds: ["one"], counts: { pending: 0, running: 1, succeeded: 0, failed: 0, blocked: 0, timed_out: 0, canceled: 0 }, canMessage: true, canCancel: true }), steps: [step] }));
 	assert.match(start, /No action is needed while work is healthy/);
 	assert.match(start, /Use retrieve only for manual compact inspection or waitSeconds/);
+	assert.match(start, /cleanup deletes retained evidence/);
+	assert.match(start, /## Effective step tools/);
+	assert.match(start, /effectiveTools=read,grep,find,ls,bash,exa_search/);
+	assert.match(start, /extensionTools=exa_search/);
+	assert.match(start, /skills=pi-multiagent/);
 	assert.doesNotMatch(start, /Cursor:/);
 	assert.doesNotMatch(start, /Next: call retrieve/);
 	assert.match(start, /Exceptional controls:/);
@@ -30,17 +38,24 @@ test("message denials put trust notice before child-derived reason", () => {
 test("accepted message receipts explain queue semantics and non-compliance proof", () => {
 	const steer = formatDetailsForModel(details("message", { message: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "sink", channel: "steer", clientMessageId: "m", accepted: true, undeliveredReason: undefined } }));
 	assert.match(steer, /accepted\/queued/);
+	assert.doesNotMatch(steer, /Reused clientMessageId/);
 	assert.match(steer, /does not prove child compliance/);
 	assert.match(steer, /should stop early/);
 	assert.match(steer, /after the current assistant turn finishes tool calls/);
 	const followUp = formatDetailsForModel(details("message", { message: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "sink", channel: "follow_up", clientMessageId: undefined, accepted: true, undeliveredReason: undefined } }));
 	assert.match(followUp, /quiescent before terminalization/);
+	assert.match(followUp, /copy a needed artifact path/);
 	assert.match(followUp, /not post-terminal chat/);
+	const reused = formatDetailsForModel(details("message", { message: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "sink", channel: "steer", clientMessageId: "m", accepted: true, undeliveredReason: undefined, reused: true } }));
+	assert.match(reused, /reused existing accepted\/queued receipt/);
+	assert.match(reused, /Reused clientMessageId m receipt/);
+	assert.match(reused, /no additional child message was queued/);
 });
 
 test("retrieve step rows include compact last activity, returned cursor, and stepId boundary copy", () => {
-	const step: StepSnapshot = { id: "worker", status: "running", agentRef: "inline:worker", needs: [], after: [], startedAt: "now", endedAt: undefined, lastActivity: "tool bash running", errorMessage: undefined };
+	const step: StepSnapshot = { id: "worker", status: "running", agentRef: "inline:worker", effectiveTools: ["read", "grep", "find", "ls", "bash"], extensionTools: [], callerSkills: [], needs: [], after: [], startedAt: "now", endedAt: undefined, lastActivity: "tool bash running", errorMessage: undefined };
 	const retrieve = formatDetailsForModel(details("retrieve", { steps: [step] }));
+	assert.match(retrieve, /effectiveTools=read,grep,find,ls,bash/);
 	assert.match(retrieve, /lastActivity="tool bash running"/);
 	assert.match(retrieve, /\nCursor: 0/);
 	assert.match(retrieve, /Retrieve stepId targets wait\/debug events only; use peek for one step's artifact\/text preview\./);
@@ -50,8 +65,8 @@ test("retrieve step rows include compact last activity, returned cursor, and ste
 });
 
 test("peek model output includes only the requested step row and text", () => {
-	const requested: StepSnapshot = { id: "one", status: "succeeded", agentRef: "inline:one", needs: [], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined };
-	const unrelated: StepSnapshot = { id: "two", status: "succeeded", agentRef: "inline:two", needs: [], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined };
+	const requested: StepSnapshot = { id: "one", status: "succeeded", agentRef: "inline:one", ...DEFAULT_STEP_TOOLS, needs: [], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined };
+	const unrelated: StepSnapshot = { id: "two", status: "succeeded", agentRef: "inline:two", ...DEFAULT_STEP_TOOLS, needs: [], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined };
 	const output: StepOutput = { stepId: "one", status: "succeeded", text: "requested text", filePath: "/tmp/one-final.md", chars: 14 };
 	const peek = formatDetailsForModel(details("peek", { steps: [requested, unrelated], outputs: [output] }));
 	assert.match(peek, /one: succeeded/);
@@ -62,7 +77,7 @@ test("peek model output includes only the requested step row and text", () => {
 });
 
 test("peek step-not-found keeps recovery compact without dumping step rows", () => {
-	const content = formatDetailsForModel(details("peek", { ok: false, error: { code: "step-not-found", message: "No step in run." }, run: runSnapshot(), steps: [{ id: "one", status: "succeeded", agentRef: "inline:one", needs: [], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined }] }));
+	const content = formatDetailsForModel(details("peek", { ok: false, error: { code: "step-not-found", message: "No step in run." }, run: runSnapshot(), steps: [{ id: "one", status: "succeeded", agentRef: "inline:one", ...DEFAULT_STEP_TOOLS, needs: [], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined }] }));
 	assert.match(content, /^# agent_team peek/);
 	assert.match(content, /Error: step-not-found/);
 	assert.match(content, /Available step ids: one/);
@@ -77,7 +92,8 @@ test("cleanup context keeps trust notice before run-derived status and success r
 	assert.match(denied, /^# agent_team cleanup/);
 	assert.match(denied, /Error: cleanup-run-live/);
 	const success = formatDetailsForModel(details("cleanup", { cleanup: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", deletedPaths: ["/tmp/a"] } }));
-	assert.match(success, /Cleanup deleted retained evidence/);
+	assert.match(success, /Cleanup deleted retained run evidence/);
+	assert.match(success, /use cleanup only after evidence was preserved or intentionally discarded/);
 	assert.doesNotMatch(success, /Use peek or artifact paths for full text/);
 });
 
@@ -158,8 +174,8 @@ test("model content helper bounds retrieve output with valid recovery hint", () 
 });
 
 test("retrieve hints at non-sink terminal evidence without previewing it", () => {
-	const sink: StepSnapshot = { id: "sink", status: "succeeded", agentRef: "inline:sink", needs: ["upstream"], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined };
-	const upstream: StepSnapshot = { id: "upstream", status: "succeeded", agentRef: "inline:upstream", needs: [], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined };
+	const sink: StepSnapshot = { id: "sink", status: "succeeded", agentRef: "inline:sink", ...DEFAULT_STEP_TOOLS, needs: ["upstream"], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined };
+	const upstream: StepSnapshot = { id: "upstream", status: "succeeded", agentRef: "inline:upstream", ...DEFAULT_STEP_TOOLS, needs: [], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined };
 	const output: StepOutput = { stepId: "sink", status: "succeeded", text: "sink text", filePath: "/tmp/sink-final.md", chars: 9 };
 	const content = formatDetailsForModel(details("retrieve", { run: runSnapshot({ sinkStepIds: ["sink"] }), steps: [upstream, sink], outputs: [output] }));
 	assert.match(content, /Non-sink terminal artifacts/);

@@ -13,6 +13,7 @@ test("renderAgentTeamCall summarizes detached actions", () => {
 	assert.match(renderAgentTeamCall({ action: "start", graph: { objective: "x", steps: [{ id: "one", agent: { system: "x" }, task: "x" }] } }, theme, undefined).render(120).join("\n"), /launch 1 step/);
 	assert.match(renderAgentTeamCall({ action: "retrieve", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" }, theme, undefined).render(120).join("\n"), /status/);
 	assert.match(renderAgentTeamCall({ action: "cancel", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" }, theme, undefined).render(120).join("\n"), /stop run/);
+	assert.match(renderAgentTeamCall({ action: "cleanup", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" }, theme, undefined).render(120).join("\n"), /delete evidence/);
 });
 
 test("renderAgentTeamResult reports catalog and run state", () => {
@@ -136,6 +137,15 @@ test("renderAgentTeamResult keeps run context for run-backed errors", () => {
 	assert.doesNotMatch(rendered, /^message error message-not-delivered$/m);
 });
 
+test("renderAgentTeamResult expanded mode can show effective tools", () => {
+	const started = details("start", {
+		run: run({ objective: "detached", liveStepIds: ["audit"], sinkStepIds: ["audit"], lastEvent: "audit: start", counts: counts({ running: 1 }) }),
+		steps: [step({ id: "audit", agentRef: "package:scout", status: "running", effectiveTools: ["read", "grep", "find", "ls", "bash"] })],
+	});
+	const rendered = renderAgentTeamResult({ content: [], details: started }, { expanded: true, isPartial: false }, theme, undefined).render(120).join("\n");
+	assert.match(rendered, /tools audit=read,grep,find,ls,bash/);
+});
+
 test("renderAgentTeamResult labels running peek output as live", () => {
 	const live = details("peek", {
 		run: run({ objective: "detached", liveStepIds: ["one"], sinkStepIds: ["one"], lastEvent: "one: text", counts: counts({ running: 1 }) }),
@@ -182,6 +192,19 @@ test("renderAgentTeamResult summarizes multiple sink finals", () => {
 	assert.match(rendered, /one succeeded, two failed/);
 });
 
+test("renderAgentTeamResult reports cleanup as evidence deletion", () => {
+	const cleanup = details("cleanup", {
+		run: run({ objective: "detached", status: "succeeded", terminal: true, liveStepIds: [], sinkStepIds: ["one"], canMessage: false, canCancel: false, canCleanup: false, counts: counts({ succeeded: 1 }) }),
+		cleanup: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", deletedPaths: ["/tmp/one-final.md"] },
+	});
+	const rendered = renderAgentTeamResult({ content: [], details: cleanup }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
+	assert.match(rendered, /agent_team evidence deleted/);
+	assert.match(rendered, /evidence deleted 1 retained path/);
+	const plain = formatAgentTeamNoticeText(cleanup);
+	assert.match(plain, /agent_team evidence deleted/);
+	assert.match(plain, /evidence deleted 1 retained path/);
+});
+
 function details(action: AgentTeamDetails["action"], fields: Partial<AgentTeamDetails>): AgentTeamDetails {
 	return { kind: "agent_team", action, ok: true, diagnostics: [], error: undefined, library: undefined, catalog: [], extensionTools: [], run: undefined, cursor: undefined, events: [], steps: [], outputs: [], message: undefined, cleanup: undefined, notice: undefined, ...fields };
 }
@@ -191,7 +214,7 @@ function run(fields: Partial<RunSnapshot>): RunSnapshot {
 }
 
 function step(fields: Partial<StepSnapshot> & { id: string; agentRef: string; status: StepStatus }): StepSnapshot {
-	return { needs: [], after: [], startedAt: undefined, endedAt: undefined, lastActivity: undefined, errorMessage: undefined, outputFilePath: undefined, outputChars: undefined, ...fields };
+	return { effectiveTools: ["read", "grep", "find", "ls"], extensionTools: [], callerSkills: [], needs: [], after: [], startedAt: undefined, endedAt: undefined, lastActivity: undefined, errorMessage: undefined, outputFilePath: undefined, outputChars: undefined, ...fields };
 }
 
 function counts(fields: Partial<Record<StepStatus, number>>): Record<StepStatus, number> {

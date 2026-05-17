@@ -46,7 +46,7 @@
       "needs": [
         "premortem"
       ],
-      "mutationScope": "REPLACE before start. Allowed files/globs: <exact package paths>. Allowed mutation class: <specific implementation edit type>. Explicit exclusions: <paths/actions not allowed>. Validation commands authorized: <exact commands or none>. Stop if broader than current parent authorization.",
+      "mutationScope": "REPLACE before start. Allowed files/globs: <exact package paths>. Allowed mutation class: <specific implementation edit type>. Explicit exclusions: <paths/actions not allowed>. Validation commands authorized: <exact commands or none>. Stop if broader than current parent authorization. mutationScope is not a sandbox; bash/edit/write are not path-confined, so stop rather than touch anything outside this authorization.",
       "task": "Use the premortem as evidence to verify before editing. If it reports BLOCK, NO-GO, an unresolved mandatory condition, a needed human approval checkpoint, or a scope/authority risk that this task and mutationScope do not explicitly resolve, do not edit; return the blocker and needed decision. If mutationScope is still a placeholder, missing, or broader than the parent authorization, do not edit. Otherwise implement only that authorized change across synchronized runtime, tests, docs, and examples. Keep ownership narrow and return changed paths plus validation commands run."
     },
     {

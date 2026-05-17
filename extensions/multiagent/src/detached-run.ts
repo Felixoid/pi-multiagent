@@ -74,7 +74,7 @@ export class DetachedRun {
 
 	async message(stepId: string, channel: MessageChannel, text: string, clientMessageId: string | undefined): Promise<MessageReceipt> {
 		const existing = this.messageReceipts.lookup(stepId, channel, text, clientMessageId);
-		if (existing === "conflict") return this.messageReceipt(stepId, channel, clientMessageId, false, "Conflicting clientMessageId reuse.");
+		if (existing === "conflict") return this.messageReceipt(stepId, channel, clientMessageId, false, "Conflicting clientMessageId");
 		if (existing) return existing;
 		const state = this.states.get(stepId);
 		if (!state || !state.controller || state.status !== "running" || this.status !== "running") return this.messageReceipt(stepId, channel, clientMessageId, false, "Step is not live or messageable.");
@@ -83,7 +83,7 @@ export class DetachedRun {
 			resolvePending = resolve;
 		});
 		const reserved = this.messageReceipts.reserve(stepId, channel, text, clientMessageId, pending);
-		if (reserved === "conflict") return this.messageReceipt(stepId, channel, clientMessageId, false, "Conflicting clientMessageId reuse.");
+		if (reserved === "conflict") return this.messageReceipt(stepId, channel, clientMessageId, false, "Conflicting clientMessageId");
 		if (reserved) return reserved;
 		let receipt: MessageReceipt;
 		try {
@@ -338,8 +338,9 @@ export class DetachedRun {
 		return countStepStatuses(this.states.values());
 	}
 
+
 	private messageReceipt(stepId: string, channel: MessageChannel, clientMessageId: string | undefined, accepted: boolean, undeliveredReason: string | undefined, recordEvent = true) {
-		const receipt = { runId: this.id, stepId, channel, clientMessageId, accepted, undeliveredReason };
+		const receipt = { runId: this.id, stepId, channel, clientMessageId, accepted, undeliveredReason, reused: false };
 		if (recordEvent) this.appendEvent({ stepId, type: "parent_message", label: channel, preview: accepted ? "accepted/queued" : undeliveredReason, status: accepted ? "done" : "error" });
 		return receipt;
 	}

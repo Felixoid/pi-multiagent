@@ -120,7 +120,7 @@ const StepSchema = Type.Object(
 		id: publicId("Unique step id."),
 		agent: StepAgentSchema,
 		task: nonEmptyText("Concrete delegated task. Upstream outputs are appended as untrusted evidence."),
-		mutationScope: Type.Optional(nonEmptyText("First-class mutation authorization for this step. Required when effective tools can mutate through edit/write or when package:worker receives bash. Must name the allowed file set or mutation class; placeholders are denied.")),
+		mutationScope: Type.Optional(nonEmptyText("First-class mutation authorization for this step. Required when effective tools can mutate through edit/write or when package:worker receives bash. Must name the allowed file set or mutation class; placeholders are denied. This is a planning/prompt handoff, not a sandbox: bash, edit, and write are not path-confined by mutationScope.")),
 		needs: Type.Optional(Type.Array(publicId("Strict dependency step id; every listed step must succeed before this step starts."), { description: "Step ids that must succeed before this step starts.", maxItems: MAX_DEPENDENCIES_PER_STEP })),
 		after: Type.Optional(Type.Array(publicId("Terminal dependency step id; listed steps may succeed or fail before this step starts."), { description: "Step ids that must terminalize before this step starts, regardless of success or failure.", maxItems: MAX_DEPENDENCIES_PER_STEP })),
 		cwd: Type.Optional(nonEmptyText("Existing working directory for this step, resolved inside the invocation cwd.", MAX_PATH_FIELD_CHARS)),

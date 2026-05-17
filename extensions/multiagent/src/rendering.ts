@@ -94,7 +94,7 @@ function formatCall(args: AgentTeamInput, theme: Theme): string {
 	if (action === "peek") return `${title} ${theme.fg("accent", "inspect step")} ${theme.fg("dim", `${shortRunId(runId)} ${stepId ?? ""}`.trim())}`;
 	if (action === "message") return `${title} ${theme.fg("accent", "send note")} ${theme.fg("dim", `${stepId ?? "step"} ${channel ?? ""}`.trim())}`;
 	if (action === "cancel") return `${title} ${theme.fg("accent", "stop run")} ${theme.fg("dim", shortRunId(runId))}`;
-	if (action === "cleanup") return `${title} ${theme.fg("accent", "clean evidence")} ${theme.fg("dim", shortRunId(runId))}`;
+	if (action === "cleanup") return `${title} ${theme.fg("accent", "delete evidence")} ${theme.fg("dim", shortRunId(runId))}`;
 	const query = catalogQuery(args);
 	return `${title} ${theme.fg("accent", "catalog")}${query ? ` ${theme.fg("dim", query)}` : ""}`;
 }
@@ -143,7 +143,7 @@ function plainProgressMeter(counts: RunSnapshot["counts"]): string {
 
 function formatPlainResultTail(details: AgentTeamDetails): string {
 	if (details.message) return `message ${details.message.stepId} ${details.message.accepted ? "queued" : details.message.undeliveredReason ?? "denied"}`;
-	if (details.cleanup) return `evidence cleaned ${details.cleanup.deletedPaths.length} retained path(s) deleted`;
+	if (details.cleanup) return `evidence deleted ${details.cleanup.deletedPaths.length} retained path(s)`;
 	if (details.outputs.length > 0) return `final evidence ${summarizePlainOutputs(details.outputs)}`;
 	return `last update ${truncate(humanActivity(details.run?.lastEvent ?? "state changed"), VALUE_CHARS)}`;
 }
@@ -176,7 +176,7 @@ function formatResultHeader(details: AgentTeamDetails, run: RunSnapshot, theme: 
 function humanResultState(details: AgentTeamDetails, run: RunSnapshot): string {
 	if (details.action === "cancel") return run.terminal ? humanRunStatus(run.status) : "stop requested";
 	if (details.action === "message") return details.message?.accepted === false ? "message denied" : "message queued";
-	if (details.action === "cleanup") return "evidence cleaned";
+	if (details.action === "cleanup") return "evidence deleted";
 	if (run.terminal) return humanRunStatus(run.status);
 	if (details.action === "start") return "started";
 	if (details.action === "peek") return "step snapshot";
@@ -185,7 +185,7 @@ function humanResultState(details: AgentTeamDetails, run: RunSnapshot): string {
 
 function formatResultTail(details: AgentTeamDetails, theme: Theme): string {
 	if (details.message) return `${theme.fg("muted", "message")} ${details.message.stepId} ${details.message.accepted ? theme.fg("success", "queued") : theme.fg("error", details.message.undeliveredReason ?? "denied")}`;
-	if (details.cleanup) return `${theme.fg("muted", "evidence cleaned")} ${theme.fg("dim", `${details.cleanup.deletedPaths.length} retained path(s) deleted`)}`;
+	if (details.cleanup) return `${theme.fg("muted", "evidence deleted")} ${theme.fg("dim", `${details.cleanup.deletedPaths.length} retained path(s)`)}`;
 	if (details.notice) return `${theme.fg("muted", details.notice.terminal ? "terminal notice" : "milestone notice")} ${theme.fg("accent", summarizeNotice(details))}${details.outputs.length > 0 ? ` ${theme.fg("dim", summarizeArtifacts(details.outputs))}` : ""}`;
 	if (details.outputs.length === 1) {
 		const output = details.outputs[0];
@@ -200,7 +200,13 @@ function formatExpanded(details: AgentTeamDetails, theme: Theme): string {
 	if (artifacts.length > 0) return `${theme.fg("muted", "artifacts")} ${theme.fg("dim", artifacts.join(", "))}`;
 	const errors = details.diagnostics.filter((diagnostic) => diagnostic.severity === "error").map((diagnostic) => diagnostic.code);
 	if (errors.length > 0) return `${theme.fg("muted", "diagnostics")} ${theme.fg("error", errors.join(", "))}`;
+	const tools = stepToolSummaries(details.steps);
+	if (tools.length > 0) return `${theme.fg("muted", "tools")} ${theme.fg("dim", tools.join("; "))}`;
 	return "";
+}
+
+function stepToolSummaries(steps: AgentTeamDetails["steps"]): string[] {
+	return steps.slice(0, MAX_IDS).map((step) => `${step.id}=${step.effectiveTools.join(",") || "none"}`);
 }
 
 function summarizeOutputIds(outputs: AgentTeamDetails["outputs"]): string {

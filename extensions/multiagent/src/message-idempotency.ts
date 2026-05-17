@@ -26,7 +26,7 @@ export function createMessageReceiptCache(): MessageReceiptCache {
 			const existing = receipts.get(key);
 			if (!existing) return undefined;
 			if (existing.channel !== channel || existing.text !== text) return "conflict";
-			return existing.receipt ? { ...existing.receipt } : existing.pending;
+			return reusedReceipt(existing);
 		},
 		reserve(stepId, channel, text, clientMessageId, pending) {
 			const key = messageKey(stepId, clientMessageId);
@@ -34,7 +34,7 @@ export function createMessageReceiptCache(): MessageReceiptCache {
 			const existing = receipts.get(key);
 			if (existing) {
 				if (existing.channel !== channel || existing.text !== text) return "conflict";
-				return existing.receipt ? { ...existing.receipt } : existing.pending;
+				return reusedReceipt(existing);
 			}
 			receipts.set(key, { channel, text, receipt: undefined, pending });
 			return undefined;
@@ -50,6 +50,12 @@ export function createMessageReceiptCache(): MessageReceiptCache {
 			receipts.set(key, { channel, text, receipt: { ...receipt }, pending: undefined });
 		},
 	};
+}
+
+function reusedReceipt(entry: MessageCacheEntry): Promise<MessageReceipt> | undefined {
+	const receipt = entry.receipt ?? entry.pending;
+	if (!receipt) return undefined;
+	return Promise.resolve(receipt).then((item) => ({ ...item, reused: true }));
 }
 
 function messageKey(stepId: string, clientMessageId: string | undefined): string | undefined {

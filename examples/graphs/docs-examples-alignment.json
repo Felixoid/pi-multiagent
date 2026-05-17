@@ -26,7 +26,7 @@
       "needs": [
         "surface-map"
       ],
-      "mutationScope": "REPLACE before start. Allowed files/globs: <exact docs/examples/tests paths>. Allowed mutation class: <specific docs/examples/tests edit type>. Explicit exclusions: <paths/actions not allowed>. Validation commands authorized: <exact commands or none>. Stop if broader than current parent authorization.",
+      "mutationScope": "REPLACE before start. Allowed files/globs: <exact docs/examples/tests paths>. Allowed mutation class: <specific docs/examples/tests edit type>. Explicit exclusions: <paths/actions not allowed>. Validation commands authorized: <exact commands or none>. Stop if broader than current parent authorization. mutationScope is not a sandbox; bash/edit/write are not path-confined, so stop rather than touch anything outside this authorization.",
       "task": "Update only the affected docs, examples, and directly affected docs/example tests or fixtures so they describe implemented behavior. If mutationScope is still a placeholder, missing, or broader than the parent authorization, do not edit and return the mismatches and blocker. Keep README, cookbook, and examples human-facing; keep the skill/tool/result microcopy model-facing. Do not edit runtime code. Return changed paths and rationale."
     },
     {

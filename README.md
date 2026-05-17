@@ -74,7 +74,17 @@ README examples are `agent_team` tool inputs, not shell commands. This README is
 | `cancel` | `runId` | `reason` |
 | `cleanup` | `runId` | none |
 
-Do not send read-only controls such as `cursor`, `waitSeconds`, `maxBytes`, `preview`, or `debugEvents` to `catalog` or `start`. `catalog` is narrowed with `library.query`, not `maxBytes`. `preview` is retrieve/peek-only and defaults to `false`, so routine reads return status, diagnostics, step rows, artifact indexes, and artifact paths without child final text. `waitSeconds` is retrieve-only and returns the same compact snapshot after a material parent-visible event or timeout. Schema-admissible fatal shape failures render as `# agent_team error` with misplaced fields and repair copy instead of an empty action result; schema-invalid calls may be rejected by Pi before package rendering.
+Pseudo-schema, by action:
+
+- `catalog`: `{ action:"catalog", library?: { sources?, query?, projectAgents? } }`
+- `start`: `{ action:"start", graph, options? }` or `{ action:"start", graphFile, options? }`
+- `retrieve`: `{ action:"retrieve", runId, cursor?, stepId?, waitSeconds?, maxBytes?, preview?, debugEvents? }`
+- `peek`: `{ action:"peek", runId, stepId, maxBytes?, preview? }`
+- `message`: `{ action:"message", runId, stepId, channel:"steer"|"follow_up", text, clientMessageId? }`
+- `cancel`: `{ action:"cancel", runId, reason? }`
+- `cleanup`: `{ action:"cleanup", runId }`
+
+Do not send read-only controls such as `cursor`, `waitSeconds`, `maxBytes`, `preview`, or `debugEvents` to `catalog` or `start`. `catalog` is narrowed with `library.query`, not `maxBytes`. `preview` is retrieve/peek-only and defaults to `false`, so routine reads return status, diagnostics, step rows, effective tools, artifact indexes, and artifact paths without child final text. `waitSeconds` is retrieve-only and returns the same compact snapshot after a material parent-visible event or timeout. Schema-admissible fatal shape failures render as `# agent_team error` with misplaced fields and repair copy instead of an empty action result; schema-invalid calls may be rejected by Pi before package rendering.
 
 `options.notify` defaults to `mode:"milestones"`, `maxNotices:12`, and `minIntervalSeconds:10`. `mode:"none"` disables pushed notices. `mode:"final"` sends only the terminal notice. `mode:"milestones"` coalesces milestone reasons between sends; `maxNotices` caps non-terminal notices from 0 to 100, and the terminal notice is still sent unless mode is `none`.
 
@@ -91,94 +101,67 @@ Tool profile quick matrix:
 
 ## First success
 
-Copy this pattern first:
+### Minimum read-only run
 
-- Use `catalog` to choose a specialist.
-- For catalog agents, usually omit `agent.tools`; their `defaultTools` are inherited and capped by `graph.authority`. Explicit `agent.tools` replaces the whole catalog `defaultTools` profile, then mandatory read/discovery is added. It does not append; use it only to narrow or override the complete intended set.
-- Write each delegated task as a small contract: objective, scope, sources/tools, output format, and stop condition.
-- Let pushed notices be the manager inbox; use `retrieve` for intentional snapshot inspection or material-event bounded wait/read, `peek` for one step, artifact paths for full text, and `preview:true` only when bounded assistant text belongs in the parent context.
-- Treat retained artifacts as durable handoff/context evidence. Preserve or intentionally discard them before `cleanup`.
-
-1. Discover specialists:
-
-```json
-{
-  "action": "catalog",
-  "library": {
-    "sources": ["package"],
-    "query": "docs audit"
-  }
-}
-```
-
-2. Start a read-only docs audit. This catalog-agent example omits `agent.tools`, so the `package:docs-auditor` default profile is inherited and capped by graph authority.
+Copy this minimum read-only run first; adapt only `objective` and `task`. Use a known source-qualified package ref directly when the role is obvious. This is the fastest safe run; it launches one read-only specialist and returns a `runId`.
 
 ```json
 {
   "action": "start",
   "graph": {
-    "objective": "Review whether the current repository has enough docs for a first-time operator.",
-    "library": {
-      "sources": ["package"]
-    },
+    "objective": "Answer one scoped local question.",
     "authority": {
       "allowFilesystemRead": true
     },
     "steps": [
       {
-        "id": "review-docs",
+        "id": "inspect",
         "agent": {
-          "ref": "package:docs-auditor"
+          "ref": "package:scout"
         },
-        "task": "Review the current repository's README and adjacent docs for first-time operator clarity. Return findings first with severity, evidence path, operator impact, and concrete fix. Do not edit or run commands."
+        "task": "Inspect relevant local files. Do not edit or run commands. Return paths, facts, risks, and unknowns."
       }
     ]
   }
 }
 ```
 
-3. Let pushed notices report meaningful progress and terminal state. Use `retrieve` when you need an immediate compact snapshot or a bounded wait/read for material parent-visible events. Add `preview:true` only when you want bounded sink assistant text in the response:
+Let pushed notices report progress. When you need state or artifact paths, retrieve the compact manager snapshot:
 
 ```json
 {
   "action": "retrieve",
-  "runId": "agt_REPLACE_WITH_START_RUN_ID"
+  "runId": "agt_REPLACE_WITH_START_RUN_ID",
+  "waitSeconds": 30
 }
 ```
 
-4. Peek at one step when you need its live text or non-sink final; set `preview:true` to include bounded assistant text:
+Use `peek` only when one step's live or final text belongs in the parent context:
 
 ```json
 {
   "action": "peek",
   "runId": "agt_REPLACE_WITH_START_RUN_ID",
-  "stepId": "review-docs",
+  "stepId": "inspect",
   "preview": true
 }
 ```
 
-5. Message a live specialist only when a clarification or scope correction is worth interrupting its autonomous work:
+Cleanup is evidence deletion, not routine hygiene. Preserve the `runId`, status, and needed artifact paths before calling `cleanup`, and skip cleanup when retained evidence may help handoff or later synthesis.
 
-```json
-{
-  "action": "message",
-  "runId": "agt_REPLACE_WITH_START_RUN_ID",
-  "stepId": "review-docs",
-  "channel": "steer",
-  "text": "Clarification: prioritize install and first-run docs if you have not already covered them. Do not stop early if the audit is still productively in progress."
-}
-```
+Use catalog before start only when choosing among roles, checking current descriptions/tags/defaultTools, using `user:` or trusted `project:` refs, or copying active extension-tool provenance. Known bundled refs such as `package:scout`, `package:docs-auditor`, and `package:synthesizer` may be used directly when package sources are enough. Catalog defaults remove boilerplate, not authorization or ownership.
 
-6. Inspect any needed artifact paths from `retrieve` or `peek`. Cleanup after terminal state only when the retained evidence is no longer useful:
+### Supervision decision tree
 
-```json
-{
-  "action": "cleanup",
-  "runId": "agt_REPLACE_WITH_START_RUN_ID"
-}
-```
+After `start`:
 
-If progress looks silent or output is missing, keep the parent context small without sacrificing useful child work: inspect the pushed notice, use `retrieve` with `waitSeconds` when you need to wait for the next material parent-visible event or timeout, `peek` exactly one step, send one bounded `message` only for clarification or scope repair, and use `debugEvents:true` only for package diagnostics. Do not demand a premature final, cancel, or cleanup just to tidy the transcript; let healthy live steps finish and read or preserve needed artifacts first.
+- Notice says running and you do not need details: keep working.
+- Need current run state, sink artifact index, diagnostics, or effective tools: use `retrieve`.
+- Need to wait without polling: use `retrieve` with `waitSeconds`; it wakes on material events, not routine activity.
+- Need one step's live/final text or a non-sink artifact: use `peek` for that `stepId`, with `preview:true` only when text belongs in context.
+- Need to correct scope while the step is live: send one bounded `message`. Do not demand a premature final just to tidy the transcript.
+- Work is unsafe, obsolete, stuck, or explicitly lower value than freeing capacity: `cancel`.
+- Run is terminal and evidence is preserved or intentionally discarded: `cleanup`.
 
 ### All-inline starter
 
@@ -298,7 +281,7 @@ Library refs are always source-qualified:
 - `user:name`: personal prompts from `${PI_CODING_AGENT_DIR}/agents` or `~/.pi/agent/agents`.
 - `project:name`: project prompts from nearest `.pi/agents`, available only when project code is explicitly trusted.
 
-Bare names are invalid. Start graphs default to `graph.library.sources:["package"]`; opt into `user` or trusted `project` sources explicitly. Run `catalog` before using reusable agents; catalog output is authoritative for refs, descriptions, routing tags, default built-in tool profiles, paths, SHA metadata, and active parent extension-tool provenance. Catalog queries match exact phrases or non-stopword query terms across refs, descriptions, tags, sources, default tools, model, and path; omit the query to list everything.
+Bare names are invalid. Start graphs default to `graph.library.sources:["package"]`; opt into `user` or trusted `project` sources explicitly. Use known source-qualified bundled refs directly when the role choice is obvious and package sources are enough. Run `catalog` before start when choosing among roles, using `user:` or trusted `project:` agents, checking live descriptions/routing tags/default built-in tool profiles, or copying active parent extension-tool provenance. Catalog output is authoritative for refs, descriptions, routing tags, default built-in tool profiles, paths, SHA metadata, and active parent extension-tool provenance. Catalog queries match exact phrases or non-stopword query terms across refs, descriptions, tags, sources, default tools, model, and path; omit the query to list everything.
 
 Catalog descriptions and tags are model-facing routing contracts: prefer roles whose description or tags match the delegated job, then read the runtime `defaultTools`. Tags are routing metadata only; they do not grant tools, skills, source trust, shell, mutation, or release authority. Catalog defaults remove boilerplate, not authorization or ownership. Catalog output labels these as `defaultTools`. Structured details expose the same default built-in tool profile as `catalog[].tools`; do not confuse that metadata with step-level `agent.tools`. Omit `tools` on a library agent to inherit its catalog default profile capped by graph authority. If authority partially strips inherited defaults, start returns a `catalog-default-tools-capped` warning with the denied and effective tools; if authority would deny the mandatory read/discovery suite, start fails with `catalog-default-tools-denied` or `filesystem-read-authority-required`. Set `tools` explicitly only to narrow or override the complete profile; explicit `tools` replaces the whole catalog profile, then mandatory read/discovery is added. It does not append. Inline agents have no catalog defaults, but omitted or empty `tools` still receives mandatory read/discovery and requires `allowFilesystemRead:true`.
 
@@ -410,9 +393,9 @@ Every finalized step writes a best-effort tmp artifact containing run/step metad
 
 In interactive Pi, live detached work uses one pinned human operator panel while any graph is running. The panel updates in place, prioritizes live health, progress, active lanes, queued work, and attention states, and is cleared when the run terminalizes. Compact tool rows and pushed notice cards use the same human hierarchy for launches, status reads, stop receipts, and terminal receipts, so completed runs do not leave stacked live widgets or raw manager dumps.
 
-`message` is the live clarification and scope-repair path, not a hurry-up button. It accepts `channel: "steer"` or `channel: "follow_up"`, one `stepId`, bounded text, and an optional `clientMessageId`. `steer` queues delivery after the current child assistant turn finishes tool calls and before the next LLM call. `follow_up` defers a live follow-up until the child is quiescent before terminalization, if still messageable. A successful receipt means Pi accepted the queued message; it does not prove the child obeyed, produced output, completed, or should stop early. Exact duplicate keys reuse the accepted receipt; reusing a key for different text is denied so a corrective message is not silently dropped. Parent message text is delivered to the child as an escaped JSON payload, so delimiter-looking text inside the message is data rather than message structure. Messages can only operate within the original delegated task: they cannot broaden scope, grant tools, authorize mutation, permit destructive/external actions, or force a half-done final unless the parent explicitly accepts incomplete evidence. Messages are denied after the step or run is terminal; terminal nodes are not reactivated.
+`message` is the live clarification and scope-repair path, not a hurry-up button. It accepts `channel: "steer"` or `channel: "follow_up"`, one `stepId`, bounded text, and an optional `clientMessageId`. `steer` queues delivery after the current child assistant turn finishes tool calls and before the next LLM call. `follow_up` defers a live follow-up until the child is quiescent before terminalization, if still messageable; use it only for a short in-scope addendum, such as asking the child to copy a needed artifact path into its final. A successful receipt means Pi accepted the queued message; it does not prove the child obeyed, produced output, completed, or should stop early. Exact duplicate keys reuse the original receipt, whether accepted, denied, or timed out; a reused receipt does not queue another child message. Use a new `clientMessageId` for a fresh corrective retry. Reusing a key for different text is denied so a corrective message is not silently dropped. Parent message text is delivered to the child as an escaped JSON payload, so delimiter-looking text inside the message is data rather than message structure. Messages can only operate within the original delegated task: they cannot broaden scope, grant tools, authorize mutation, permit destructive/external actions, or force a half-done final unless the parent explicitly accepts incomplete evidence. Messages are denied after the step or run is terminal; terminal nodes are not reactivated.
 
-`cancel` requests cancellation. Do not cancel only because a step is inconvenient or taking real time; first use bounded retrieve wait/read, targeted peek, or a scoped clarification when preserving child work matters. Cancel when the user explicitly chooses stopping, the work is unsafe, obsolete, stuck, or lower value than freeing capacity. `cleanup` is allowed only after terminal state and deletes package-owned retained artifacts.
+`cancel` requests cancellation. Do not cancel only because a step is inconvenient or taking real time; first use bounded retrieve wait/read, targeted peek, or a scoped clarification when preserving child work matters. Cancel when the user explicitly chooses stopping, the work is unsafe, obsolete, stuck, or lower value than freeing capacity. `cleanup` is allowed only after terminal state and deletes package-owned retained artifacts. Cleanup is evidence deletion, not routine hygiene.
 
 ## Boundaries
 
@@ -451,7 +434,7 @@ Control flow comes from schemas, manager state, process state, RPC responses/eve
 
 Packaged examples are pure graph specs. Choose by authority first, then copy one into the current workspace, adapt it, and call `start` with `graphFile`. Use the graph design ladder in the skill/cookbook: no delegation, single specialist, inline fan-in, read-only fanout, artifact-chained follow-up, web research lane, web-to-local decision, human-gated plan, approved mutation run, then release/readiness foundry. Default to `single-specialist-read-only.json` or one catalog role. Use fanout only when independent lanes are explicitly valuable. Use artifact-chained decisions when prior retained artifact paths must cross compaction, approval, or phase boundaries; preserve terminal artifacts before cleanup. Use the cookbook-only Web Research to Local Decision pattern for current web facts plus local repo evidence after copying exact active catalog provenance and granting `allowExtensionCode:true`. Use mutation-capable graphs only after exact current mutation authorization. Do not run mutation-authority examples unless the user's current delegation explicitly authorizes the named mutation class. The first-class step `mutationScope` is both the copy/adapt contract and the planning-time prompt handoff for write-capable steps and bash-capable `package:worker` steps; replace it with the exact allowed file set or mutation class before starting the graph. `mutationScope` rejects missing or placeholder authorization but does not path-sandbox `bash`, `edit`, or `write`. Children do not receive the parent transcript and must not infer authorization.
 
-Before starting a mutation-capable graph, verify all four items: exact parent authorization for the mutation class, concrete `mutationScope` naming the file set or mutation class, graph authority limited to the needed read/shell/mutation grants, and no placeholder or `REPLACE` text left in mutationScope fields. Graph gates are model-level dependencies, not human approval checkpoints; use separate runs when a human decision must occur before mutation.
+Before starting a mutation-capable graph, verify all four items: exact parent authorization for the mutation class, concrete `mutationScope` naming the file set or mutation class, graph authority limited to the needed read/shell/mutation grants, and no placeholder or `REPLACE` text left in mutationScope fields. `mutationScope` is not a sandbox; bash/edit/write are not path-confined, so a child must stop rather than touch anything outside the authorization. Graph gates are model-level dependencies, not human approval checkpoints; use separate runs when a human decision must occur before mutation.
 
 | Example | Use when | Authority | Can mutate? | Concurrency | Sink | Parent authorization |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -528,15 +511,20 @@ Before the human publish step:
 
 2. Set the chosen version in `package.json`.
 3. Move release notes from `CHANGELOG.md` `Unreleased` into `## <version> - <YYYY-MM-DD>` and leave `Unreleased` empty.
-4. Run and preserve output from:
+4. Run and preserve output from the deterministic local and dry-run release checks:
 
    ```bash
    pnpm run gate
    pnpm run check:release
    npm pack --dry-run --json
    npm publish --dry-run --json
-   PI_MULTIAGENT_REAL_SMOKE=1 PI_MULTIAGENT_REAL_SMOKE_TIMEOUT_MS=180000 pnpm run smoke:pi
    git diff --check
+   ```
+
+   Optional real-runtime smoke may spend model/API credentials or invoke local Pi. Run it only with explicit operator approval; otherwise record it as deferred:
+
+   ```bash
+   PI_MULTIAGENT_REAL_SMOKE=1 PI_MULTIAGENT_REAL_SMOKE_TIMEOUT_MS=180000 pnpm run smoke:pi
    ```
 
 5. Inspect `npm pack --dry-run --json` for intended version, file list, size, no secrets, `pi` manifest, README, changelog, license, agents, assets, examples, skills, and extensions.
