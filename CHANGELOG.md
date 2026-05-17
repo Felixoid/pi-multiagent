@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added GitHub Release creation and verification to the standard release choreography, package skill, cookbook, public-release foundry, and public-doc checks.
+
 ## 0.7.0 - 2026-05-17
 
 - Replaced foreground `agent_team run` with detached lifecycle actions: `start`, compact `retrieve`, `peek`, `message`, `cancel`, and `cleanup`.

@@ -74,7 +74,7 @@ test("mutation-capable graph examples repeat authorization and validation gates"
 	assert.match(stepMutationScope(releaseFoundry, "release-fix-worker"), /Allowed files\/globs/);
 	assert.match(stepMutationScope(releaseFoundry, "release-fix-worker"), /Allowed mutation class/);
 	assert.match(stepMutationScope(releaseFoundry, "release-fix-worker"), /Explicit exclusions/);
-	for (const stepId of ["release-scope", "release-fix-worker"]) assert.match(stepTask(releaseFoundry, stepId), /Do not version-bump, commit, tag, push, publish, or create releases/);
+	for (const stepId of ["release-scope", "release-fix-worker"]) assert.match(stepTask(releaseFoundry, stepId), /Do not version-bump, commit, tag, push, publish, or create GitHub Releases/);
 });
 
 test("mutation examples with authorization placeholders fail closed", async () => {

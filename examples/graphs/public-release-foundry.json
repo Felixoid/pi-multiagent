@@ -1,5 +1,5 @@
 {
-  "objective": "Prepare a package release-readiness candidate with source/package/docs validation and release-fix review only. This packaged graph must never version-bump, commit, tag, push, publish, or create releases.",
+  "objective": "Prepare a package release-readiness candidate with source/package/docs validation and release-fix review only. This packaged graph must never version-bump, commit, tag, push, publish, or create GitHub Releases.",
   "library": {
     "sources": [
       "package"
@@ -20,7 +20,7 @@
           "bash"
         ]
       },
-      "task": "Map current version, dirty state, changelog/package/docs/examples/tests, README Public npm release handoff obligations, and npm registry version state. Use bash only for these bounded read-only probes: git status -sb, git diff --check, npm view pi-multiagent version versions dist-tags time --json, npm pack --dry-run --json. Do not version-bump, commit, tag, push, publish, or create releases."
+      "task": "Map current version, dirty state, changelog/package/docs/examples/tests, README Public npm release handoff obligations, npm registry version state, and GitHub Release closeout requirements. Use bash only for these bounded read-only probes: git status -sb, git diff --check, npm view pi-multiagent version versions dist-tags time --json, npm pack --dry-run --json. Do not version-bump, commit, tag, push, publish, or create GitHub Releases."
     },
     {
       "id": "artifact-audit",
@@ -30,7 +30,7 @@
       "needs": [
         "release-scope"
       ],
-      "task": "Inspect package contents and public docs for stale or missing release-critical surfaces using upstream evidence and read/discovery tools. Do not version-bump, commit, tag, push, publish, or create releases. Return findings first with exact paths."
+      "task": "Inspect package contents and public docs for stale or missing release-critical surfaces, including GitHub Release creation and verification choreography, using upstream evidence and read/discovery tools. Do not version-bump, commit, tag, push, publish, or create GitHub Releases. Return findings first with exact paths."
     },
     {
       "id": "release-fix-worker",
@@ -40,8 +40,8 @@
       "needs": [
         "artifact-audit"
       ],
-      "mutationScope": "REPLACE before start. Allowed files/globs: <exact release-readiness paths>. Allowed mutation class: <specific release-readiness fix type>. Explicit exclusions: version bump, commit, tag, push, publish, release creation, and <additional paths/actions not allowed>. Validation commands authorized: <exact commands or none>. Stop if broader than current parent authorization.",
-      "task": "Apply only that authorized release-readiness scope across docs, metadata, examples, and tests. If mutationScope is still a placeholder, missing, or broader than the parent authorization, return blocker evidence without editing. Do not version-bump, commit, tag, push, publish, or create releases. Return changed paths and validation."
+      "mutationScope": "REPLACE before start. Allowed files/globs: <exact release-readiness paths>. Allowed mutation class: <specific release-readiness fix type>. Explicit exclusions: version bump, commit, tag, push, publish, GitHub Release creation, and <additional paths/actions not allowed>. Validation commands authorized: <exact commands or none>. Stop if broader than current parent authorization.",
+      "task": "Apply only that authorized release-readiness scope across docs, metadata, examples, and tests. If mutationScope is still a placeholder, missing, or broader than the parent authorization, return blocker evidence without editing. Do not version-bump, commit, tag, push, publish, or create GitHub Releases. Return changed paths and validation."
     },
     {
       "id": "release-validation",
@@ -51,7 +51,7 @@
       "needs": [
         "release-fix-worker"
       ],
-      "task": "Run only release-candidate commands explicitly copied here by the parent: REPLACE_WITH_EXACT_RELEASE_COMMANDS. Canonical local release commands are pnpm run gate; pnpm run check:release; npm pack --dry-run --json; npm publish --dry-run --json; git diff --check. Run PI_MULTIAGENT_REAL_SMOKE=1 PI_MULTIAGENT_REAL_SMOKE_TIMEOUT_MS=180000 pnpm run smoke:pi only if explicit real-runtime smoke approval is copied here. If this placeholder remains, no commands are present, or scope is only implied by upstream evidence, return needs-command-scope without running commands. Do not version-bump, commit, tag, push, publish, or create releases. Return pass/fail/deferred with exact commands."
+      "task": "Run only release-candidate commands explicitly copied here by the parent: REPLACE_WITH_EXACT_RELEASE_COMMANDS. Canonical local release commands are pnpm run gate; pnpm run check:release; npm pack --dry-run --json; npm publish --dry-run --json; git diff --check. Run PI_MULTIAGENT_REAL_SMOKE=1 PI_MULTIAGENT_REAL_SMOKE_TIMEOUT_MS=180000 pnpm run smoke:pi only if explicit real-runtime smoke approval is copied here. If this placeholder remains, no commands are present, or scope is only implied by upstream evidence, return needs-command-scope without running commands. Do not version-bump, commit, tag, push, publish, or create GitHub Releases. Return pass/fail/deferred with exact commands."
     },
     {
       "id": "ship-decision",
@@ -64,7 +64,7 @@
         "release-fix-worker",
         "release-validation"
       ],
-      "task": "Preserve audit findings, validation commands, package identity, block/ship recommendation, and README Public npm release handoff steps as not-executed human-owned next actions after all lanes terminalize, including failed or blocked lane evidence. Do not invent validation or claim publication, and do not version-bump, commit, tag, push, publish, or create releases."
+      "task": "Preserve audit findings, validation commands, package identity, block/ship recommendation, and README Public npm release handoff steps as not-executed human-owned next actions after all lanes terminalize, including GitHub Release creation and gh release view verification. Include failed or blocked lane evidence. Do not invent validation or claim publication, and do not version-bump, commit, tag, push, publish, or create GitHub Releases."
     }
   ],
   "limits": {

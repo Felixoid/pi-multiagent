@@ -223,10 +223,10 @@ function checkReleaseHandoffContract(): void {
 		failures.push("package.json: release handoff contract requires object metadata");
 		return;
 	}
-	for (const fragment of ["Public npm release handoff", "pnpm run check:release", "npm publish --dry-run --json", "npm whoami", "npm publish", "npm view pi-multiagent@<version>", "pi install npm:pi-multiagent@<version>", "https://unpkg.com/pi-multiagent@<version>/assets/pi-multiagent-gallery.webp", "human-owned", "not required", "`npm pack --dry-run --json` creates no `.tgz`"]) {
+	for (const fragment of ["Public npm release handoff", "pnpm run check:release", "npm publish --dry-run --json", "npm whoami", "npm publish", "GitHub Release creation", "gh release create v<version>", "gh release view v<version>", "npm view pi-multiagent@<version>", "pi install npm:pi-multiagent@<version>", "https://unpkg.com/pi-multiagent@<version>/assets/pi-multiagent-gallery.webp", "human-owned", "not required", "`npm pack --dry-run --json` creates no `.tgz`"]) {
 		if (!readme.includes(fragment)) failures.push(`README.md: missing release handoff copy ${JSON.stringify(fragment)}`);
 	}
-	if (!publicReleaseFoundry.includes("README Public npm release handoff") || !publicReleaseFoundry.includes("not-executed human-owned next actions")) failures.push("examples/graphs/public-release-foundry.json: release synthesis must point at README handoff and preserve publish steps as not-executed human-owned actions");
+	if (!publicReleaseFoundry.includes("README Public npm release handoff") || !publicReleaseFoundry.includes("not-executed human-owned next actions") || !publicReleaseFoundry.includes("GitHub Release creation") || !publicReleaseFoundry.includes("gh release view verification")) failures.push("examples/graphs/public-release-foundry.json: release synthesis must point at README handoff and preserve publish/GitHub Release steps as not-executed human-owned actions");
 	if (parsed.packageManager !== "pnpm@11.1.2") failures.push("package.json: packageManager must pin the release package manager used by this repository");
 	if (!isObject(parsed.engines) || typeof parsed.engines.node !== "string") failures.push("package.json: engines.node must document supported runtime floor");
 	if (!isObject(parsed.publishConfig) || parsed.publishConfig.access !== "public") failures.push("package.json: publishConfig.access must be public for release handoff clarity");

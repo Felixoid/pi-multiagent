@@ -467,7 +467,7 @@ Before starting a mutation-capable graph, verify all four items: exact parent au
 | [`research-to-change-gated-loop.json`](examples/graphs/research-to-change-gated-loop.json) | Ambiguous local repo change needs evidence, plan, critique, and human-gated next action | filesystem read | No | parallel/serialized read lanes | `final-report` | Read-only planning delegation |
 | [`docs-examples-alignment.json`](examples/graphs/docs-examples-alignment.json) | Docs/examples/tests need alignment after implemented behavior changes | filesystem, shell, mutation | Yes, docs/examples/tests only | serialized | `alignment-summary` | Explicit docs mutation authorization plus concrete `mutationScope` |
 | [`implementation-review-gate.json`](examples/graphs/implementation-review-gate.json) | One scoped authorized package change needs map/plan/critique/work/review | filesystem, shell, mutation | Yes | serialized | `final-decision` | Explicit implementation authorization plus concrete `mutationScope` |
-| [`public-release-foundry.json`](examples/graphs/public-release-foundry.json) | Release-readiness review before human-owned release actions | filesystem, shell, mutation | Yes, release-readiness fixes only | serialized | `ship-decision` | Explicit release-fix authorization plus concrete `mutationScope`; never version bump, commit, tag, push, publish, or create releases |
+| [`public-release-foundry.json`](examples/graphs/public-release-foundry.json) | Release-readiness review before human-owned release actions | filesystem, shell, mutation | Yes, release-readiness fixes only | serialized | `ship-decision` | Explicit release-fix authorization plus concrete `mutationScope`; never version bump, commit, tag, push, publish, or create GitHub Releases |
 
 For current web facts, use `package:web-researcher` with the Exa extension grant pattern above, the cookbook Web Research Extension Lane, or the cookbook-only Web Research to Local Decision pattern. Require official or primary sources, fetched URLs, source/provenance notes, and exact active catalog provenance for extension grants. The research-to-change example is read-only local repository research and planning, not web research and not mutation.
 
@@ -516,7 +516,7 @@ For major rewrites, live integration changes, or release-readiness claims, stati
 
 ## Public npm release handoff
 
-Publishing is human-owned. Do not run `npm publish`, git commit/tag/push, or GitHub release creation from `public-release-foundry.json` or another delegated graph.
+Publishing is human-owned. Do not run `npm publish`, git commit/tag/push, or GitHub Release creation from `public-release-foundry.json` or another delegated graph. GitHub Release creation is a required release closeout step for the pushed tag; perform it only in the top-level release workflow with explicit human authorization, or list it as a not-executed human action.
 
 Before the human publish step:
 
@@ -542,8 +542,9 @@ Before the human publish step:
 5. Inspect `npm pack --dry-run --json` for intended version, file list, size, no secrets, `pi` manifest, README, changelog, license, agents, assets, examples, skills, and extensions.
 6. Preserve release validation artifacts, runIds, and command output before any `agent_team cleanup`.
 7. Review, stage, commit, tag, and push according to the repository owner's policy so the exact published source is recoverable.
+8. Record that GitHub Release creation for `v<version>` is still required after npm publish unless it was explicitly authorized and created earlier. The release is not complete until `gh release view v<version>` succeeds for the pushed tag.
 
-Stop here for agent-owned release prep. The human publisher then checks npm identity and performs the publish:
+Stop here for agent-owned release prep unless the human explicitly authorizes git/GitHub release actions. The human publisher then checks npm identity and performs the publish:
 
 ```bash
 npm whoami
@@ -552,7 +553,14 @@ npm publish
 
 For this unscoped public package, `publishConfig.access` is already `public`; `npm publish --access public` is acceptable but not required. The publisher owns any npm 2FA, token, provenance, or trusted-publishing decisions.
 
-After publish, verify the public artifact:
+After publish, create or verify the GitHub Release for the pushed tag using the changelog section as release notes:
+
+```bash
+gh release create v<version> --repo Tiziano-AI/pi-multiagent --title "pi-multiagent <version>" --notes-file <release-notes-from-changelog.md>
+gh release view v<version> --repo Tiziano-AI/pi-multiagent --json tagName,name,url,isDraft,isPrerelease,publishedAt
+```
+
+Then verify the public artifact:
 
 ```bash
 npm view pi-multiagent@<version> version dist-tags time repository homepage license keywords peerDependencies pi dist.tarball dist.integrity --json
