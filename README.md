@@ -6,7 +6,7 @@ Use it when a side task would flood the main conversation with search results, l
 
 After installation, Pi has:
 
-- `agent_team`, with actions `catalog`, `start`, `retrieve`, `peek`, `message`, `cancel`, and `cleanup`.
+- `agent_team`, with actions `catalog`, `start`, `run_status`, `step_result`, `message`, `cancel`, and `cleanup`.
 - `/skill:pi-multiagent`, the package-owned guide for agents using or improving this package.
 - Bundled catalog agents such as `package:scout`, `package:web-researcher`, `package:planner`, `package:critic`, `package:docs-auditor`, `package:reviewer`, `package:validator`, `package:worker`, and `package:synthesizer`, with routing tags exposed by `catalog`.
 - Pure graph examples under `examples/graphs/*.json` that can be copied into a workspace and started with `graphFile`.
@@ -46,7 +46,7 @@ One run without installing:
 pi -e /absolute/path/to/pi-multiagent
 ```
 
-After installing in a running Pi session, use `/reload`. Reload requests cancellation of live registered `agent_team` runs; before reloading, retrieve/preserve needed artifacts and cancel only work that is safe to stop.
+After installing in a running Pi session, use `/reload`. Reload requests cancellation of live registered `agent_team` runs; before reloading, use `run_status` and preserve needed artifacts, then cancel only work that is safe to stop.
 
 ## Actions
 
@@ -54,17 +54,17 @@ After installing in a running Pi session, use `/reload`. Reload requests cancell
 | --- | --- |
 | `catalog` | List reusable package/user/project specialists, their default built-in tool profiles, and active parent extension-tool provenance. |
 | `start` | Validate exactly one pure graph or `graphFile`, register a detached run, launch work asynchronously, return a `runId`, and push compact notices by default. |
-| `retrieve` | Read a compact run snapshot and sink artifact index, or wait with `waitSeconds` for a material parent-visible event or timeout, then return the same compact snapshot. Assistant text previews require `preview:true`; raw events require `debugEvents:true`. |
-| `peek` | Inspect exactly one specialist's live/terminal artifact surface; assistant text previews require `preview:true`, and finalized steps include artifact paths. |
+| `run_status` | Read a compact run snapshot and sink artifact index, or wait with `waitSeconds` for a material parent-visible event or timeout, then return the same compact snapshot. Assistant text previews require `preview:true`; raw events require `debugEvents:true`. |
+| `step_result` | Inspect exactly one specialist's live/terminal artifact surface; assistant text previews require `preview:true`, and finalized steps include artifact paths. |
 | `message` | Queue a bounded live parent message to one running step through the `steer` or `follow_up` child RPC channel; acceptance is delivery evidence, not compliance proof. |
 | `cancel` | Request cancellation of a live detached run. |
 | `cleanup` | Delete retained artifacts for a terminal run only when that evidence is no longer needed. |
 
-`start` returns a usable registered `runId` or leaves no child process alive. Parent abort before registration cancels setup; parent abort after `runId` does not kill the detached run. Normal supervision is fire-and-forget: compact notices are pushed back to the parent as steer messages, while `retrieve` and `peek` remain explicit reads. `retrieve.waitSeconds` is a bounded wait/read convenience; it wakes on material parent-visible events, not routine assistant/tool activity. Use `cancel`, timeout, max-run expiry, terminal finalization, or `cleanup` for lifecycle closure. Live and retained run registries are process-local; on Pi session shutdown or reload the extension requests cancellation of live registered runs, but `agent_team` is not crash-resumable and in-memory `runId`s should not be treated as recoverable after reload.
+`start` returns a usable registered `runId` or leaves no child process alive. Parent abort before registration cancels setup; parent abort after `runId` does not kill the detached run. Normal supervision is fire-and-forget: compact notices are pushed back to the parent as steer messages, while `run_status` and `step_result` remain explicit reads. `run_status.waitSeconds` is a bounded wait/read convenience; it wakes on material parent-visible events, not routine assistant/tool activity. Use `cancel`, timeout, max-run expiry, terminal finalization, or `cleanup` for lifecycle closure. Live and retained run registries are process-local; on Pi session shutdown or reload the extension requests cancellation of live registered runs, but `agent_team` is not crash-resumable and in-memory `runId`s should not be treated as recoverable after reload.
 
 README examples are `agent_team` tool inputs, not shell commands. This README is the human/operator path for install, trust boundaries, first run, lifecycle, limits, and validation. `/skill:pi-multiagent` is the complete canonical agent-facing reference and progressive-disclosure hub; its cookbook/reference assets carry deeper graph choreography for agents, while graph examples are schema-checked copyable specs.
 
-Detailed action pseudo-schema belongs in `/skill:pi-multiagent`. Operator-facing rule of thumb: `catalog` takes library controls, `start` takes exactly one graph source, `retrieve`/`peek` are artifact reads, `message` is live step steering, `cancel` is stop-only, and `cleanup` is terminal evidence deletion. Do not send read controls such as `cursor`, `waitSeconds`, `maxBytes`, `preview`, or `debugEvents` to `catalog` or `start`. `catalog` is narrowed with `library.query`, not `maxBytes`. `preview` is retrieve/peek-only and defaults to `false`, so routine reads return status, diagnostics, step rows, effective tools, artifact indexes, and artifact paths without child final text. `waitSeconds` is retrieve-only and returns the same compact snapshot after a material parent-visible event or timeout. Schema-admissible fatal shape failures render as `# agent_team error` with misplaced fields and repair copy instead of an empty action result; schema-invalid calls may be rejected by Pi before package rendering.
+Detailed action pseudo-schema belongs in `/skill:pi-multiagent`. Operator-facing rule of thumb: `catalog` takes library controls, `start` takes exactly one graph source, `run_status`/`step_result` are artifact reads, `message` is live step steering, `cancel` is stop-only, and `cleanup` is terminal evidence deletion. Do not send read controls such as `cursor`, `waitSeconds`, `maxBytes`, `preview`, or `debugEvents` to `catalog` or `start`. `catalog` is narrowed with `library.query`, not `maxBytes`. `preview` is run_status/step_result-only and defaults to `false`, so routine reads return status, diagnostics, step rows, effective tools, artifact indexes, and artifact paths without child final text. `waitSeconds` is run_status-only and returns the same compact snapshot after a material parent-visible event or timeout. Schema-admissible fatal shape failures render as `# agent_team error` with misplaced fields and repair copy instead of an empty action result; schema-invalid calls may be rejected by Pi before package rendering.
 
 `options.notify` defaults to `mode:"milestones"`, `maxNotices:12`, and `minIntervalSeconds:10`. `mode:"none"` disables pushed notices. `mode:"final"` sends only the terminal notice. `mode:"milestones"` coalesces milestone reasons between sends; `maxNotices` caps non-terminal notices from 0 to 100, and the terminal notice is still sent unless mode is `none`.
 
@@ -97,21 +97,21 @@ Copy this minimum read-only run first; adapt only `objective` and `task`. Use a 
 }
 ```
 
-Let pushed notices report progress. When you need state or artifact paths, retrieve the compact manager snapshot:
+Let pushed notices report progress. When you need state or artifact paths, call `run_status` for the compact manager snapshot:
 
 ```json
 {
-  "action": "retrieve",
+  "action": "run_status",
   "runId": "agt_REPLACE_WITH_START_RUN_ID",
   "waitSeconds": 30
 }
 ```
 
-Use `peek` only when one step's live or final text belongs in the parent context:
+Use `step_result` only when one step's live or final text belongs in the parent context:
 
 ```json
 {
-  "action": "peek",
+  "action": "step_result",
   "runId": "agt_REPLACE_WITH_START_RUN_ID",
   "stepId": "inspect",
   "preview": true
@@ -127,9 +127,9 @@ Use catalog before start only when choosing among roles, checking current descri
 After `start`:
 
 - Notice says running and you do not need details: keep working.
-- Need current run state, sink artifact index, diagnostics, or effective tools: use `retrieve`.
-- Need to wait without polling: use `retrieve` with `waitSeconds`; it wakes on material events, not routine activity.
-- Need one step's live/final text or a non-sink artifact: use `peek` for that `stepId`, with `preview:true` only when text belongs in context.
+- Need current run state, sink artifact index, diagnostics, or effective tools: use `run_status`.
+- Need to wait without polling: use `run_status` with `waitSeconds`; it wakes on material events, not routine activity.
+- Need one step's live/final text or a non-sink artifact: use `step_result` for that `stepId`, with `preview:true` only when text belongs in context.
 - Need to correct scope while the step is live: send one bounded `message`. Do not demand a premature final just to tidy the transcript.
 - Work is unsafe, obsolete, stuck, or explicitly lower value than freeing capacity: `cancel`.
 - Run is terminal and evidence is preserved or intentionally discarded: `cleanup`.
@@ -153,7 +153,7 @@ Use inline agents when you want to hand-author a one-off team instead of using c
           "system": "Read only README.md. Report inline-agent UX gaps. Do not edit.",
           "tools": ["read"]
         },
-        "task": "Assess whether README teaches inline agents, retrieve, peek, and retained-artifact handling clearly. Return three findings and two fixes."
+        "task": "Assess whether README teaches inline agents, run_status, step_result, and retained-artifact handling clearly. Return three findings and two fixes."
       },
       {
         "id": "read-skill",
@@ -332,27 +332,27 @@ Detached runs do not inherit caller-visible skills by default. A step may reques
 
 `tools:["read"]` expands to the full read/discovery suite. Skills require the read/discovery suite; skills never grant tools. Project-scoped, temporary-scoped, or workspace-local caller skill files require `graph.authority.allowProjectCode:true`. Child launch still uses `--no-skills` and then adds only selected verified `--skill` paths.
 
-## Retrieve, peek, message, cancel, cleanup
+## `run_status`, `step_result`, message, cancel, cleanup
 
-`retrieve` is the compact manager read path. With no `waitSeconds`, it returns immediately. With `waitSeconds`, it waits until a material parent-visible event occurs or the timeout expires, then returns the same compact retrieve shape. Material events are run terminal/cancel/expiry, sink or targeted step finish, failed/blocked/timed-out/canceled step, or error diagnostic; routine assistant/tool activity does not wake the wait. It returns snapshots and does not stream child text. Graph sink finals are artifact-first. It returns:
+`run_status` is the compact manager read path. With no `waitSeconds`, it returns immediately. With `waitSeconds`, it waits until a material parent-visible event occurs or the timeout expires, then returns the same compact run_status shape. Material events are run terminal/cancel/expiry, sink or targeted step finish, failed/blocked/timed-out/canceled step, or error diagnostic; routine assistant/tool activity does not wake the wait. It returns snapshots and does not stream child text. Graph sink finals are artifact-first. It returns:
 
-- run status, objective, live step ids, sink step ids, counts, and last important event summary;
+- run state, objective, live step ids, sink step ids, counts, and last important event summary;
 - step snapshots with compact `lastActivity` for silent live nodes;
 - a first-class sink artifact index with step id, status, artifact path, and full-text character count;
 - sink final previews only when `preview:true` is set, bounded separately from the full artifact files;
 - diagnostics and action errors.
 
-Use `cursor` from a prior retrieve call only when you need wait-from-that-point behavior or debug-event pagination/backfill. Use `stepId` on retrieve only to target material wait wakeups or debug-event filtering; use `peek` for one step's text/artifact. Optional `preview:true` includes bounded assistant text previews; default `preview:false` keeps retrieve and peek artifact/status-first. Optional `maxBytes` bounds returned preview text across sink outputs and debug-event text; it does not trim the full artifact files. The final model-facing response still has the compact formatter cap listed below. Default retrieve does not return raw event/protocol records. Set `debugEvents:true` only when package debugging needs raw background events.
+Use `cursor` from a prior run_status call only when you need wait-from-that-point behavior or debug-event pagination/backfill. Use `stepId` on run_status only to target material wait wakeups or debug-event filtering; use `step_result` for one step's text/artifact. Optional `preview:true` includes bounded assistant text previews; default `preview:false` keeps run_status and step_result artifact/status-first. Optional `maxBytes` bounds returned preview text across sink outputs and debug-event text; it does not trim the full artifact files. The final model-facing response still has the compact formatter cap listed below. Default run_status does not return raw event/protocol records. Set `debugEvents:true` only when package debugging needs raw background events.
 
-`peek` is the microscope. It inspects exactly one `stepId`. By default it returns status, artifact path, and character counts without assistant text. With `preview:true`, a running step returns normal emitted assistant text so far; a terminal step returns that step's final preview and artifact path, including non-sink upstream-only steps. `maxBytes` bounds the returned preview; full terminal text remains in the artifact path.
+`step_result` is the microscope. It inspects exactly one `stepId`. By default it returns status, artifact path, and character counts without assistant text. With `preview:true`, a running step returns normal emitted assistant text so far; a terminal step returns that step's final preview and artifact path, including non-sink upstream-only steps. `maxBytes` bounds the returned preview; full terminal text remains in the artifact path.
 
-Every finalized step writes a best-effort tmp artifact containing run/step metadata, status, agent ref/source, timestamps, and every non-empty assistant final in chronological order. A single assistant final is stored as the raw final text; multiple assistant finals are rendered as ordered `Assistant final N` sections so later turns do not overwrite earlier evidence. The canonical artifact path is the structured `StepOutput.filePath` value populated once when the step final is recorded; model-facing retrieve and peek text render that path as an artifact index before previews so truncation is less likely to hide it. A child that reaches terminal RPC state without non-empty assistant final text is marked failed rather than succeeded with an empty artifact. If artifact writing fails, terminalization continues with bounded text and a diagnostic but no artifact path. `retrieve` exposes sink artifacts and optional sink previews; `peek` exposes a single step artifact and optional preview. Pushed notices omit child-authored final text to keep parent context compact and show a human receipt with artifact names, not raw paths; use `retrieve` or `peek` when the parent needs artifact paths or text. Retained artifacts are useful handoff/context state for compaction, connection drops, later sessions in the same extension process, and chained graphs that quote artifact paths. Inspect, preserve, or intentionally discard needed artifacts before `cleanup`, because cleanup deletes them.
+Every finalized step writes a best-effort tmp artifact containing run/step metadata, status, agent ref/source, timestamps, and every non-empty assistant final in chronological order. A single assistant final is stored as the raw final text; multiple assistant finals are rendered as ordered `Assistant final N` sections so later turns do not overwrite earlier evidence. The canonical artifact path is the structured `StepOutput.filePath` value populated once when the step final is recorded; model-facing run_status and step_result text render that path as an artifact index before previews so truncation is less likely to hide it. A child that reaches terminal RPC state without non-empty assistant final text is marked failed rather than succeeded with an empty artifact. If artifact writing fails, terminalization continues with bounded text and a diagnostic but no artifact path. `run_status` exposes sink artifacts and optional sink previews; `step_result` exposes a single step artifact and optional preview. Pushed notices omit child-authored final text to keep parent context compact and show a human receipt with artifact names, not raw paths; use `run_status` or `step_result` when the parent needs artifact paths or text. Retained artifacts are useful handoff/context state for compaction, connection drops, later sessions in the same extension process, and chained graphs that quote artifact paths. Inspect, preserve, or intentionally discard needed artifacts before `cleanup`, because cleanup deletes them.
 
 In interactive Pi, live detached work uses one pinned human operator panel while any graph is running. The panel updates in place, prioritizes live health, progress, active lanes, queued work, and attention states, and is cleared when the run terminalizes. Compact tool rows and pushed notice cards use the same human hierarchy for launches, status reads, stop receipts, and terminal receipts, so completed runs do not leave stacked live widgets or raw manager dumps.
 
 `message` is the live clarification and scope-repair path, not a hurry-up button. It accepts `channel: "steer"` or `channel: "follow_up"`, one `stepId`, bounded text, and an optional `clientMessageId`. `steer` queues delivery after the current child assistant turn finishes tool calls and before the next LLM call. `follow_up` defers a live follow-up until the child is quiescent before terminalization, if still messageable; use it only for a short in-scope addendum, such as asking the child to copy a needed artifact path into its final. A successful receipt means Pi accepted the queued message; it does not prove the child obeyed, produced output, completed, or should stop early. Exact duplicate keys reuse the original receipt, whether accepted, denied, or timed out; a reused receipt does not queue another child message. Use a new `clientMessageId` for a fresh corrective retry. Reusing a key for different text is denied so a corrective message is not silently dropped. Parent message text is delivered to the child as an escaped JSON payload, so delimiter-looking text inside the message is data rather than message structure. Messages can only operate within the original delegated task: they cannot broaden scope, grant tools, authorize mutation, permit destructive/external actions, or force a half-done final unless the parent explicitly accepts incomplete evidence. Messages are denied after the step or run is terminal; terminal nodes are not reactivated.
 
-`cancel` requests cancellation. Do not cancel only because a step is inconvenient or taking real time; first use bounded retrieve wait/read, targeted peek, or a scoped clarification when preserving child work matters. Cancel when the user explicitly chooses stopping, the work is unsafe, obsolete, stuck, or lower value than freeing capacity. `cleanup` is allowed only after terminal state and deletes package-owned retained artifacts. Cleanup is evidence deletion, not routine hygiene.
+`cancel` requests cancellation. Do not cancel only because a step is inconvenient or taking real time; first use bounded run_status wait/read, targeted step_result, or a scoped clarification when preserving child work matters. Cancel when the user explicitly chooses stopping, the work is unsafe, obsolete, stuck, or lower value than freeing capacity. `cleanup` is allowed only after terminal state and deletes package-owned retained artifacts. Cleanup is evidence deletion, not routine hygiene.
 
 ## Boundaries
 
@@ -372,12 +372,12 @@ Control flow comes from schemas, manager state, process state, RPC responses/eve
 | Per-step timeout | 1 to 36000 seconds; `timeoutSecondsPerStep` defaults to 7200 seconds |
 | Max run time | 1 to 86400 seconds; default 86400 seconds |
 | Terminal retention | 1 to 604800 seconds; default 86400 seconds |
-| Retrieve wait | `waitSeconds` max 60 seconds |
+| `run_status` wait | `waitSeconds` max 60 seconds |
 | Live detached runs | 16 live runs per extension process; completion or cancel frees live capacity |
 | Retained detached runs | 64 retained runs per extension process, including live and terminal runs; cleanup frees only terminal retained runs |
 | Pushed notices | `none`, `final`, or `milestones`; default `milestones`; max 100 non-terminal notices; default 12; minimum interval default 10 seconds, max 3600 |
 | Inline upstream handoff | 12000 chars per dependency; larger upstream sends a 2000-char preview plus artifact path |
-| Retrieve/peek model-facing output | Compact formatter cap is owned by Pi/package display; `preview` defaults false, and full artifacts are not trimmed |
+| `run_status`/`step_result` model-facing output | Compact formatter cap is owned by Pi/package display; `preview` defaults false, and full artifacts are not trimmed |
 | Final preview per step | Optional `preview:true`; 6000 chars plus full tmp artifact path |
 | Graph file input | Relative `.json` file inside cwd; 256 KiB max |
 | Agent file input | 128 KiB per library agent Markdown file |
@@ -401,7 +401,7 @@ For current web facts, use `package:web-researcher` with the Exa extension grant
 
 | Symptom | Check |
 | --- | --- |
-| `run` is rejected | Use `start`, then `retrieve`; `run` is intentionally absent. |
+| `run` is rejected | Use `start`, then `run_status`; `run` is intentionally absent. |
 | Catalog has no expected role | Omit the query to list all roles, or use exact phrases/non-stopword routing terms that match descriptions or tags; check `library.sources` and whether the role is package, user, or trusted project. |
 | Bare ref is rejected | Use a source-qualified ref such as `package:reviewer`. |
 | Project agents do not load | For start graphs, set both `graph.library.sources:["project"]` and `graph.authority.allowProjectCode:true`; for catalog, use `library.sources:["project"]` with `projectAgents:"allow"` only for trusted repos. |
@@ -409,13 +409,13 @@ For current web facts, use `package:web-researcher` with the Exa extension grant
 | Built-in tool is rejected | Add `allowFilesystemRead:true` for the mandatory read/discovery suite, add shell/mutation authority only when intended, or set `agent.tools:[]` to drop non-read catalog defaults while keeping mandatory read/discovery. |
 | Extension tool is rejected | Keep extension grants in `extensionTools` and copy source/scope/origin from `catalog`. |
 | Bash child is refused | Step cwd is inside a tree with `.pi/settings.json`; remove `bash`, change cwd, or run outside that settings tree. |
-| Message is denied or seems ignored | The target step may not be live, the run may be terminal/canceling, the per-step message budget may be spent, or the accepted message may still be queued. Use `steer` for active-run intervention, `follow_up` for a deferred live follow-up before terminalization when the child is quiescent, then retrieve/peek before canceling. |
-| Need upstream output | Use `peek` with that step id; add `preview:true` for bounded assistant text, or read the artifact path for full text. Default `retrieve` exposes sink artifact indexes and, when available, compact non-sink terminal artifact paths. |
-| Live step has no text yet | Use compact `retrieve` first and check step `lastActivity`; add `preview:true` only when text belongs in context; use retrieve `waitSeconds` to wait for a material parent-visible event or timeout without polling; for package debugging use `debugEvents:true` to distinguish raw protocol events. |
-| Terminal step has empty final text | Treat it as failed evidence. Current runtime marks empty assistant finals failed with `assistant-final-empty`; inspect `errorMessage`, `lastActivity`, `peek`, artifact metadata, and `debugEvents:true` before cleanup. |
-| Need raw event records | Use `retrieve` with `debugEvents:true`; default retrieve is intentionally compact. |
-| Action rejects fields | For schema-admissible misplaced controls, read the `# agent_team error` repair line. Remove controls from the wrong action: `cursor` and `debugEvents` are retrieve-only; `preview` and `maxBytes` are for `retrieve` and `peek`, not `catalog`. Unknown or misplaced fields may be rejected by Pi schema validation before package rendering. |
-| Cleanup is denied | Retrieve terminal state first; cleanup is not allowed for live runs. |
+| Message is denied or seems ignored | The target step may not be live, the run may be terminal/canceling, the per-step message budget may be spent, or the accepted message may still be queued. Use `steer` for active-run intervention, `follow_up` for a deferred live follow-up before terminalization when the child is quiescent, then run_status/step_result before canceling. |
+| Need upstream output | Use `step_result` with that step id; add `preview:true` for bounded assistant text, or read the artifact path for full text. Default `run_status` exposes sink artifact indexes and, when available, compact non-sink terminal artifact paths. |
+| Live step has no text yet | Use compact `run_status` first and check step `lastActivity`; add `preview:true` only when text belongs in context; use run_status `waitSeconds` to wait for a material parent-visible event or timeout without polling; for package debugging use `debugEvents:true` to distinguish raw protocol events. |
+| Terminal step has empty final text | Treat it as failed evidence. Current runtime marks empty assistant finals failed with `assistant-final-empty`; inspect `errorMessage`, `lastActivity`, `step_result`, artifact metadata, and `debugEvents:true` before cleanup. |
+| Need raw event records | Use `run_status` with `debugEvents:true`; default run_status is intentionally compact. |
+| Action rejects fields | For schema-admissible misplaced controls, read the `# agent_team error` repair line. Remove controls from the wrong action: `cursor` and `debugEvents` are run_status-only; `preview` and `maxBytes` are for `run_status` and `step_result`, not `catalog`. Unknown or misplaced fields may be rejected by Pi schema validation before package rendering. |
+| Cleanup is denied | Confirm terminal state with `run_status` first; cleanup is not allowed for live runs. |
 
 ## Validate the package
 
@@ -439,7 +439,7 @@ PI_MULTIAGENT_REAL_SMOKE=1 pnpm run smoke:pi
 
 `smoke:pi` is intentionally outside the deterministic gate; it launches the installed Pi RPC runtime with this package loaded and asks the configured model to exercise `agent_team catalog`.
 
-For major rewrites, live integration changes, or release-readiness claims, static gates and toy smokes are not enough. Run a meaningful articulated graph, supervise it with pushed notices, compact `retrieve` for inspection, bounded `retrieve.waitSeconds` for material events, targeted `peek`, and `debugEvents:true` only for package debugging. Inspect or preserve terminal artifacts before deciding whether cleanup is appropriate. If the serious graph stalls, requires manual cancellation, or never reaches its sink final, treat the result as NEEDS-WORK rather than GO.
+For major rewrites, live integration changes, or release-readiness claims, static gates and toy smokes are not enough. Run a meaningful articulated graph, supervise it with pushed notices, compact `run_status` for inspection, bounded `run_status.waitSeconds` for material events, targeted `step_result`, and `debugEvents:true` only for package debugging. Inspect or preserve terminal artifacts before deciding whether cleanup is appropriate. If the serious graph stalls, requires manual cancellation, or never reaches its sink final, treat the result as NEEDS-WORK rather than GO.
 
 ## Public npm release handoff
 

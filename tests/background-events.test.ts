@@ -17,7 +17,7 @@ test("BackgroundEventStore cursor does not skip events omitted by maxBytes", () 
 	assert.equal(second.events[0].seq, 2);
 });
 
-test("BackgroundEventStore detects only material retrieve-wait changes", () => {
+test("BackgroundEventStore detects only material run_status-wait changes", () => {
 	const store = new BackgroundEventStore();
 	const cursor = store.currentCursor();
 	store.append({ stepId: "one", type: "step", label: "start", preview: "one", status: "running" });

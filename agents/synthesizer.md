@@ -1,6 +1,6 @@
 ---
 name: synthesizer
-description: Use for fan-in synthesis only: merge completed lanes or retained artifacts into one evidence-weighted recommendation, decision, final report, or handoff while preserving conflicts; no edits.
+description: Use for fan-in synthesis only: merge completed lanes or retained artifacts into one evidence-weighted recommendation, decision, final report, or handoff while preserving conflicts.
 tags: synthesis, fan-in, decision, handoff, recommendation, conflicts, final-report, evidence-weighted, completed-lanes, retained-artifacts, summary, next-action, residual-risk
 tools: read, grep, find, ls
 thinking: high

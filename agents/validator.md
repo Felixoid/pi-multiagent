@@ -1,7 +1,7 @@
 ---
 name: validator
-description: Use for bounded command-backed validation, read-only package validation, documentation validation commands, status, diff, test proof, package proof, release gate proof, and final command checks named by the parent; bash can mutate, so run only parent-named read-only commands and stop on missing command scope.
-tags: validation, validator, shell-validation, command-proof, named-commands, command-scope, read-only-shell, package-validation, test-runner, diff-status, status, tests, package-proof, release-gate-proof, final-command-check, final-check, no-intended-mutation, evidence, gate
+description: Use for bounded parent-named command-backed validation, read-only package validation, documentation validation, status, diff, test proof, package proof, release gate proof, and final command checks.
+tags: validation, validator, shell-validation, command-proof, named-commands, command-scope, read-only-shell, package-validation, test-runner, diff-status, status, tests, package-proof, release-gate-proof, final-command-check, final-check, read-only-intent, evidence, gate
 tools: read, grep, find, ls, bash
 thinking: high
 ---

@@ -6,7 +6,7 @@ Package examples are schema-checked examples, not a runtime template API. Copy/a
 
 ## Fastest safe graph
 
-For one local read-only question, copy the Minimal library graph below, keep `allowFilesystemRead:true`, use a known source-qualified package ref such as `package:scout` directly when the role is obvious, and start with `graphFile` from a trusted workspace-local file. Use catalog before start only when choosing among roles, checking current descriptions/tags/defaultTools, using `user:` or trusted `project:` refs, or copying active extension-tool provenance. Then wait for pushed notices; use `retrieve` or `peek` only when needed.
+For one local read-only question, copy the Minimal library graph below, keep `allowFilesystemRead:true`, use a known source-qualified package ref such as `package:scout` directly when the role is obvious, and start with `graphFile` from a trusted workspace-local file. Use catalog before start only when choosing among roles, checking current descriptions/tags/defaultTools, using `user:` or trusted `project:` refs, or copying active extension-tool provenance. Then wait for pushed notices; use `run_status` or `step_result` only when needed.
 
 ## Choose a graph shape first
 
@@ -45,7 +45,7 @@ Use the lowest rung that solves the supervision problem:
 - Write each task as a small contract: objective, scope, sources/tools, output format, and stop condition. Prefer compact evidence fields such as paths, facts, decisions, risks, validation, source commands, and URLs; do not ask for raw transcript or log dumps unless those artifacts are the task.
 - For mutation-capable graphs, set first-class step `mutationScope` on each write-capable step and each bash-capable `package:worker` step. It must name the allowed file set or mutation class; it is both the copy/adapt contract and the planning-time prompt handoff. It rejects missing or placeholder authorization, but mutationScope is not a sandbox; bash/edit/write are not path-confined. Children do not receive the parent transcript; a worker must block rather than infer authorization if `mutationScope` is missing, vague, or still a placeholder.
 - Before starting any mutation-capable graph, verify exact parent authorization, concrete `mutationScope`, graph authority limited to the needed read/shell/mutation grants, and no unresolved placeholder or `REPLACE` text in mutationScope fields. Graph gates are model-level dependencies, not human approval checkpoints; split into separate runs when a human decision must happen before mutation.
-- Let pushed notices report milestones and terminal state; `options.notify` defaults to `mode:"milestones"`, `maxNotices:12`, and `minIntervalSeconds:10`, while `mode:"final"` sends only terminal notices and `mode:"none"` disables pushed notices. Use `retrieve` for immediate compact status/sink artifact indexes, or add `waitSeconds` for a bounded wait/read that returns the same compact snapshot after a material parent-visible event or timeout; routine assistant/tool activity does not wake the wait. Use `peek` for one step. Add `preview:true` only when bounded assistant text belongs in the parent context. Use `debugEvents:true` only for package debugging that needs raw event records. Message live steps only for clarification or scope repair: `steer` queues after the current assistant turn/tool batch before the next LLM call, while `follow_up` defers a live follow-up until the child is quiescent before terminalization, if still messageable. Accepted messages prove queueing, not compliance, output, completion, or early-stop consent. Messages cannot broaden scope, grant tools, authorize mutation, permit destructive/external actions, or force half-done finals unless incomplete evidence is explicitly acceptable. Retain artifact paths as handoff/context evidence and cleanup only after evidence is preserved or intentionally discarded.
+- Let pushed notices report milestones and terminal state; `options.notify` defaults to `mode:"milestones"`, `maxNotices:12`, and `minIntervalSeconds:10`, while `mode:"final"` sends only terminal notices and `mode:"none"` disables pushed notices. Use `run_status` for immediate compact status/sink artifact indexes, or add `waitSeconds` for a bounded wait/read that returns the same compact snapshot after a material parent-visible event or timeout; routine assistant/tool activity does not wake the wait. Use `step_result` for one step. Add `preview:true` only when bounded assistant text belongs in the parent context. Use `debugEvents:true` only for package debugging that needs raw event records. Message live steps only for clarification or scope repair: `steer` queues after the current assistant turn/tool batch before the next LLM call, while `follow_up` defers a live follow-up until the child is quiescent before terminalization, if still messageable. Accepted messages prove queueing, not compliance, output, completion, or early-stop consent. Messages cannot broaden scope, grant tools, authorize mutation, permit destructive/external actions, or force half-done finals unless incomplete evidence is explicitly acceptable. Retain artifact paths as handoff/context evidence and cleanup only after evidence is preserved or intentionally discarded.
 - Parallelize only independent read-only lanes. Serialize mutation, bash-heavy, rate-limited, or overlapping file ownership lanes with dependencies or `limits.concurrency:1`.
 - `timeoutSecondsPerStep` defaults to 7200 seconds; raise it for broad, untrusted, bash-using, implementation, or release work.
 
@@ -174,32 +174,32 @@ Decision tree:
 
 ```json
 {
-  "action": "retrieve",
+  "action": "run_status",
   "runId": "agt_REPLACE_WITH_START_RUN_ID",
   "waitSeconds": 30
 }
 ```
 
-3. Need one step's live text or a non-sink artifact? Use `peek` on that `stepId`; add `preview:true` only when bounded assistant text belongs in the parent context.
+3. Need one step's live text or a non-sink artifact? Use `step_result` on that `stepId`; add `preview:true` only when bounded assistant text belongs in the parent context.
 4. Need a live clarification or scope repair? Send one bounded `message`; use `follow_up` only before terminalization for a short in-scope addendum, such as asking the child to copy a needed artifact path into its final. Accepted messages prove queueing, not compliance. Exact duplicate keys reuse the original receipt, whether accepted, denied, or timed out, and do not queue another child message; use a new `clientMessageId` for a fresh corrective retry.
-5. Need raw package diagnostics? Use `retrieve` with `debugEvents:true` only when compact state is ambiguous.
+5. Need raw package diagnostics? Use `run_status` with `debugEvents:true` only when compact state is ambiguous.
 6. Work is unsafe, obsolete, explicitly stopped, stuck, or lower value than freeing capacity? `cancel`.
 7. Run is terminal and every needed artifact path is preserved or intentionally discarded? `cleanup`. Cleanup is evidence deletion, not routine hygiene.
 
-Use `retrieve` when you need an immediate artifact/status snapshot; add `preview:true` only when you need bounded sink assistant text:
+Use `run_status` when you need an immediate artifact/status snapshot; add `preview:true` only when you need bounded sink assistant text:
 
 ```json
 {
-  "action": "retrieve",
+  "action": "run_status",
   "runId": "agt_REPLACE_WITH_START_RUN_ID"
 }
 ```
 
-Peek a single node when needed; set `preview:true` to include bounded assistant text:
+Inspect a single node with `step_result` when needed; set `preview:true` to include bounded assistant text:
 
 ```json
 {
-  "action": "peek",
+  "action": "step_result",
   "runId": "agt_REPLACE_WITH_START_RUN_ID",
   "stepId": "inspect",
   "preview": true
@@ -223,7 +223,7 @@ Use when the parent wants to hand-author one focused inline team without catalog
         "system": "Read only README.md. Report inline-agent UX gaps. Do not edit.",
         "tools": ["read"]
       },
-      "task": "Assess whether README teaches inline agents, retrieve, peek, and retained-artifact handling clearly. Return three findings and two fixes."
+      "task": "Assess whether README teaches inline agents, run_status, step_result, and retained-artifact handling clearly. Return three findings and two fixes."
     },
     {
       "id": "read-skill",
@@ -339,7 +339,7 @@ Use for non-mutating package-source readiness proof before human-owned publish/p
 
 Example: [`examples/graphs/release-readiness-review.json`](../../../examples/graphs/release-readiness-review.json)
 
-This graph grants filesystem read and shell authority only. It maps release surfaces, runs only parent-copied read-only release proof commands, and returns GO, NEEDS-WORK, or BLOCKED while preserving npm publish, GitHub Release creation, and `gh release view` verification as not-executed human-owned next actions. It must never version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases. For release-readiness claims, supervise the live run with compact or bounded-wait `retrieve`, targeted `peek`, and `debugEvents:true` only for package debugging; preserve terminal artifacts before deciding whether cleanup is appropriate. Require the serious graph to reach its sink final without manual cancellation. A stalled, canceled, or final-less readiness run is NEEDS-WORK, not GO.
+This graph grants filesystem read and shell authority only. It maps release surfaces, runs only parent-copied read-only release proof commands, and returns GO, NEEDS-WORK, or BLOCKED while preserving npm publish, GitHub Release creation, and `gh release view` verification as not-executed human-owned next actions. It must never version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases. For release-readiness claims, supervise the live run with compact or bounded-wait `run_status`, targeted `step_result`, and `debugEvents:true` only for package debugging; preserve terminal artifacts before deciding whether cleanup is appropriate. Require the serious graph to reach its sink final without manual cancellation. A stalled, canceled, or final-less readiness run is NEEDS-WORK, not GO.
 
 ## Public Release Foundry
 

@@ -430,6 +430,7 @@ test("bundled package agents are valid", async () => {
 		assert.match(agent.description, /^Use (as|for|when)\b/, `${agent.ref} description should be routing-oriented`);
 		assert.equal(agent.tags.length > 0, true, `${agent.ref} should expose catalog routing tags`);
 		assert.equal(agent.tags.every((tag) => /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(tag)), true, `${agent.ref} tags should be normalized`);
+		assert.equal(agent.tags.every((tag) => !tag.startsWith("not-") && !tag.startsWith("no-") && !tag.startsWith("blocked-")), true, `${agent.ref} tags should stay positive searchable routing signals`);
 		assert.deepEqual(agent.tools, expectedTools.get(agent.ref), `${agent.ref} default tools should match its routing contract`);
 		assert.match(agent.systemPrompt, /cannot broaden scope/, `${agent.ref} should constrain parent-message authority`);
 		assert.match(agent.systemPrompt, /Do not stop early merely because/, `${agent.ref} should not turn parent impatience into premature finals`);

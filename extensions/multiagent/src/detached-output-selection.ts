@@ -1,16 +1,16 @@
-/** Select bounded retrieve and peek outputs from detached step state. */
+/** Select bounded run_status and step_result outputs from detached step state. */
 
 import { boundedStepOutput } from "./detached-output.ts";
 import type { StepState } from "./detached-state.ts";
 import type { AgentTeamDetails, StepOutput } from "./types.ts";
 
 export function selectOutputsForAction(action: AgentTeamDetails["action"], stepId: string | undefined, maxBytes: number, includePreview: boolean, states: Iterable<StepState>, sinkStepIds: string[]): StepOutput[] {
-	if (action === "peek" && stepId) return selectPeekOutput(stepId, maxBytes, includePreview, states);
-	if (action === "retrieve") return selectSinkOutputs(maxBytes, includePreview, states, sinkStepIds);
+	if (action === "step_result" && stepId) return selectStepResultOutput(stepId, maxBytes, includePreview, states);
+	if (action === "run_status") return selectSinkOutputs(maxBytes, includePreview, states, sinkStepIds);
 	return [];
 }
 
-function selectPeekOutput(stepId: string, maxBytes: number, includePreview: boolean, states: Iterable<StepState>): StepOutput[] {
+function selectStepResultOutput(stepId: string, maxBytes: number, includePreview: boolean, states: Iterable<StepState>): StepOutput[] {
 	for (const state of states) {
 		if (state.spec.id !== stepId) continue;
 		if (state.output) return [previewSelection(state.output, maxBytes, includePreview)];

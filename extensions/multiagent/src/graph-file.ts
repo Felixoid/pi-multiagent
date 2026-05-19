@@ -135,7 +135,7 @@ function readGraphFile(file: OpenGraphFile): { graph?: GraphSpec; diagnostics: A
 		return { diagnostics: [makeDiagnostic("graph-file-json-invalid", `Could not parse graphFile JSON: ${errorMessage(error)}`, "/graphFile")] };
 	}
 	if (!isRecord(parsed)) return { diagnostics: [makeDiagnostic("graph-file-object-required", "graphFile JSON must be an object.", "/graphFile")] };
-	const forbidden = ["action", "runId", "graphFile", "retrieve", "message", "cancel", "cleanup"].filter((key) => parsed[key] !== undefined);
+	const forbidden = ["action", "runId", "graphFile", "run_status", "step_result", "message", "cancel", "cleanup"].filter((key) => parsed[key] !== undefined);
 	if (forbidden.length > 0) return { diagnostics: [makeDiagnostic("graph-file-control-fields-denied", `graphFile must be a pure graph; remove control fields: ${forbidden.join(", ")}.`, "/graphFile")] };
 	if (!validateGraph.Check(parsed)) {
 		return { diagnostics: [...validateGraph.Errors(parsed)].map((error) => makeDiagnostic("graph-file-schema-invalid", `graphFile schema violation: ${error.message}`, `/graphFile${error.instancePath}`)) };

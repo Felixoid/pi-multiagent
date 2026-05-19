@@ -1,6 +1,6 @@
 /** Shared contracts for the detached-only Pi multiagent package. */
 
-export type AgentTeamAction = "catalog" | "start" | "retrieve" | "peek" | "message" | "cancel" | "cleanup" | "missing/invalid";
+export type AgentTeamAction = "catalog" | "start" | "run_status" | "step_result" | "message" | "cancel" | "cleanup" | "missing/invalid";
 export type ExecutionAction = Exclude<AgentTeamAction, "missing/invalid">;
 export type AgentSource = "package" | "user" | "project" | "inline";
 export type LibrarySource = "package" | "user" | "project";
@@ -13,12 +13,12 @@ export type MessageChannel = "steer" | "follow_up";
 export type NotifyMode = "none" | "final" | "milestones";
 export type EventType = "run" | "step" | "assistant_delta" | "assistant_final" | "tool" | "diagnostic" | "parent_message" | "rpc" | "ui";
 
-export const DEFAULT_LIBRARY_SOURCES: LibrarySource[] = ["package", "user"];
+export const DEFAULT_LIBRARY_SOURCES: LibrarySource[] = ["package"];
 export const DEFAULT_GRAPH_LIBRARY_SOURCES: LibrarySource[] = ["package"];
 export const DEFAULT_PROJECT_AGENTS_POLICY: ProjectAgentsPolicy = "deny";
 export const LIBRARY_SOURCE_VALUES = ["package", "user", "project"] as const;
 export const PROJECT_AGENTS_POLICY_VALUES = ["deny", "confirm", "allow"] as const;
-export const AGENT_TEAM_ACTION_VALUES = ["catalog", "start", "retrieve", "peek", "message", "cancel", "cleanup"] as const;
+export const AGENT_TEAM_ACTION_VALUES = ["catalog", "start", "run_status", "step_result", "message", "cancel", "cleanup"] as const;
 export const INVOCATION_AGENT_KIND_VALUES = ["inline", "library"] as const;
 export const THINKING_LEVEL_VALUES = ["inherit", "off", "minimal", "low", "medium", "high", "xhigh"] as const;
 export const RUN_STATUS_VALUES = ["running", "succeeded", "mixed", "failed", "canceling", "canceled", "expired"] as const;
@@ -59,9 +59,9 @@ export const DEFAULT_MAX_RUN_SECONDS = 86400;
 export const MAX_MAX_RUN_SECONDS = 86400;
 export const DEFAULT_TERMINAL_RETENTION_SECONDS = 86400;
 export const MAX_TERMINAL_RETENTION_SECONDS = 604800;
-export const DEFAULT_RETRIEVE_MAX_BYTES = 50 * 1024;
-export const MAX_RETRIEVE_MAX_BYTES = 200000;
-export const MAX_RETRIEVE_WAIT_SECONDS = 60;
+export const DEFAULT_RESULT_PREVIEW_MAX_BYTES = 50 * 1024;
+export const MAX_RESULT_PREVIEW_BYTES = 200000;
+export const MAX_RUN_STATUS_WAIT_SECONDS = 60;
 export const DEFAULT_NOTIFY_MODE: NotifyMode = "milestones";
 export const DEFAULT_NOTIFY_MAX_NOTICES = 12;
 export const MAX_NOTIFY_MAX_NOTICES = 100;

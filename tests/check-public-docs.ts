@@ -23,7 +23,7 @@ import {
 	MAX_PARENT_MESSAGES_PER_STEP,
 	MAX_RETAINED_DETACHED_RUNS,
 	MAX_STEP_OUTPUT_BYTES,
-	MAX_RETRIEVE_WAIT_SECONDS,
+	MAX_RUN_STATUS_WAIT_SECONDS,
 	MAX_STEPS,
 	MAX_TERMINAL_RETENTION_SECONDS,
 	MAX_TIMEOUT_SECONDS_PER_STEP,
@@ -142,7 +142,7 @@ function checkPublicSurfaceOwnership(): void {
 function checkActionSnippetHygiene(): void {
 	for (const file of ["README.md", "skills/pi-multiagent/references/graph-cookbook.md"]) {
 		const text = readFileSync(join(packageRoot, file), "utf8");
-		if (text.includes('"cursor": "0"')) failures.push(`${file}: routine retrieve snippets must not include cursor:"0"; cursor is for prior retrieve/debug backfill`);
+		if (text.includes('"cursor": "0"')) failures.push(`${file}: routine run_status snippets must not include cursor:"0"; cursor is for prior run_status/debug backfill`);
 	}
 }
 
@@ -169,7 +169,7 @@ function checkLimitsContract(): void {
 		`1 to ${MAX_TIMEOUT_SECONDS_PER_STEP} seconds; \`timeoutSecondsPerStep\` defaults to ${DEFAULT_TIMEOUT_SECONDS_PER_STEP} seconds`,
 		`1 to ${MAX_MAX_RUN_SECONDS} seconds; default ${DEFAULT_MAX_RUN_SECONDS} seconds`,
 		`1 to ${MAX_TERMINAL_RETENTION_SECONDS} seconds; default ${DEFAULT_TERMINAL_RETENTION_SECONDS} seconds`,
-		`\`waitSeconds\` max ${MAX_RETRIEVE_WAIT_SECONDS} seconds`,
+		`\`waitSeconds\` max ${MAX_RUN_STATUS_WAIT_SECONDS} seconds`,
 		`| Live detached runs | ${MAX_LIVE_DETACHED_RUNS} live runs per extension process; completion or cancel frees live capacity |`,
 		`| Retained detached runs | ${MAX_RETAINED_DETACHED_RUNS} retained runs per extension process, including live and terminal runs; cleanup frees only terminal retained runs |`,
 		`default \`${DEFAULT_NOTIFY_MODE}\`; max ${MAX_NOTIFY_MAX_NOTICES} non-terminal notices; default ${DEFAULT_NOTIFY_MAX_NOTICES}; minimum interval default ${DEFAULT_NOTIFY_MIN_INTERVAL_SECONDS} seconds, max ${MAX_NOTIFY_MIN_INTERVAL_SECONDS}`,

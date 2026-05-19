@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-05-19
+
+- Replaced the public supervision contract with `run_status` for compact run snapshots and `step_result` for single-step inspection across runtime, schema, docs, examples, and tests.
+- Hardened model-facing delegation guidance for package-only default catalog sources, positive catalog routing tags, artifact-first supervision, copy/adapt packets, reducer contracts, and command/mutation scope handoffs.
+
 ## 0.7.2 - 2026-05-19
 
 - Improved detached-run diagnostics for retained-capacity failures, stalled pending steps, retained-run capacity buckets, terminal pushed notices, and compact failed-step reasons.
@@ -21,16 +26,16 @@
 
 ## 0.7.0 - 2026-05-17
 
-- Replaced foreground `agent_team run` with detached lifecycle actions: `start`, compact `retrieve`, `peek`, `message`, `cancel`, and `cleanup`.
-- Moved execution to an RPC-backed detached run manager with compact sink-final retrieval, node peeking, live step messaging, cancellation, retention cleanup, and pure graph-file ingress.
+- Replaced foreground `agent_team run` with detached lifecycle actions: `start`, compact `run_status`, `step_result`, `message`, `cancel`, and `cleanup`.
+- Moved execution to an RPC-backed detached run manager with compact sink-final indexing, single-step inspection, live step messaging, cancellation, retention cleanup, and pure graph-file ingress.
 - Added capped compact milestone/terminal pushed notices, a single live-only low-noise TUI card, debug-only raw events, and tmp final artifacts for every finalized step.
-- Made detached background UI/final callbacks compaction-safe by avoiding retained tool-update callbacks and surfacing UI/final callback failures as compact retrieve diagnostics plus debug events.
+- Made detached background UI/final callbacks compaction-safe by avoiding retained tool-update callbacks and surfacing UI/final callback failures as compact run_status diagnostics plus debug events.
 - Hardened detached RPC closeout, max-run expiry, event pagination, JSONL framing, artifact ownership/cleanup, launch-time source verification, and fail-closed planning diagnostics.
 - Changed library-agent tool grants to inherit catalog `defaultTools` capped by graph authority, expanded read/discovery primitives into the full `read`/`grep`/`find`/`ls` suite, and split shell authority (`allowShellTools`) from structured mutation authority (`allowMutationTools`).
 - Made filesystem read/discovery mandatory for every child step, so `agent.tools:[]` now means mandatory read-only rather than no tools, and `package:synthesizer`/`package:web-researcher` can inspect delegated artifact paths.
 - Added fail-closed planning for mutation-capable steps without concrete first-class `mutationScope`, including write-capable steps and bash-capable `package:worker` steps.
-- Added retrieve `waitSeconds` for bounded wait/read snapshots, chronological append-only assistant-final artifacts, clearer compact live-step phase labels, and retention guidance that treats artifacts as durable handoff/context evidence rather than automatic cleanup trash.
-- Kept `peek` step-not-found output compact, made retrieve/peek assistant text opt-in with `preview:false` by default, added retrieve hints for non-sink terminal evidence, and strengthened child prompts to require self-contained final answers.
+- Added run_status `waitSeconds` for bounded wait/read snapshots, chronological append-only assistant-final artifacts, clearer compact live-step phase labels, and retention guidance that treats artifacts as durable handoff/context evidence rather than automatic cleanup trash.
+- Kept `step_result` step-not-found output compact, made run_status/step_result assistant text opt-in with `preview:false` by default, added run_status hints for non-sink terminal evidence, and strengthened child prompts to require self-contained final answers.
 - Added schema-valid all-inline starter guidance so parents can hand-author useful no-catalog graphs without invalid dependency or tool placement.
 - Added a shared internal authority-policy matrix and removed latent extension-confirm/caller-skill inheritance branches so start planning keeps explicit include-only skill selection and deny/allow extension-source policy.
 - Added graph design ladder guidance, `artifact-chained-decision.json`, and cookbook-only Web Research to Local Decision guidance with exact active catalog provenance requirements.

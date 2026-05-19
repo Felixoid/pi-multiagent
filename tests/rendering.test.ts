@@ -11,7 +11,7 @@ const theme = {
 
 test("renderAgentTeamCall summarizes detached actions", () => {
 	assert.match(renderAgentTeamCall({ action: "start", graph: { objective: "x", steps: [{ id: "one", agent: { system: "x" }, task: "x" }] } }, theme, undefined).render(120).join("\n"), /launch 1 step/);
-	assert.match(renderAgentTeamCall({ action: "retrieve", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" }, theme, undefined).render(120).join("\n"), /status/);
+	assert.match(renderAgentTeamCall({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" }, theme, undefined).render(120).join("\n"), /status/);
 	assert.match(renderAgentTeamCall({ action: "cancel", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" }, theme, undefined).render(120).join("\n"), /stop run/);
 	assert.match(renderAgentTeamCall({ action: "cleanup", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" }, theme, undefined).render(120).join("\n"), /delete evidence/);
 });
@@ -52,11 +52,11 @@ test("renderAgentTeamLiveRunsWidget renders a readable live operator panel", () 
 	});
 	const lines = renderAgentTeamLiveRunsWidget([started], theme).render(120);
 	assert.deepEqual(lines, ["agent_team running TUI rewrite", "[--------------] 0/1 complete  1 working", "working now", "  > scout writing"]);
-	assert.doesNotMatch(lines.join("\n"), /objective|active=|sinks=|retrieve|peek|cleanup|cursor|debugEvents|Artifact:|\/tmp\//i);
+	assert.doesNotMatch(lines.join("\n"), /objective|active=|sinks=|run_status|step_result|cleanup|cursor|debugEvents|Artifact:|\/tmp\//i);
 });
 
 test("renderAgentTeamLiveRunsWidget surfaces active roles and queued work without control vocabulary", () => {
-	const live = details("retrieve", {
+	const live = details("run_status", {
 		run: run({ objective: "Human TUI operator HUD", liveStepIds: ["audit", "docs"], sinkStepIds: ["final"], counts: counts({ pending: 1, running: 2, succeeded: 1 }) }),
 		steps: [
 			step({ id: "audit", agentRef: "package:scout", status: "running", lastActivity: "assistant writing" }),
@@ -68,11 +68,11 @@ test("renderAgentTeamLiveRunsWidget surfaces active roles and queued work withou
 	assert.match(rendered, /1\/4 complete  2 working  1 queued/);
 	assert.match(rendered, /working now\n  > scout writing\n  > docs-auditor rg running/);
 	assert.match(rendered, /queued next synthesizer/);
-	assert.doesNotMatch(rendered, /retrieve|peek|cleanup|cursor|debugEvents|Artifact:/i);
+	assert.doesNotMatch(rendered, /run_status|step_result|cleanup|cursor|debugEvents|Artifact:/i);
 });
 
 test("renderAgentTeamLiveRunsWidget lets attention outrank objective text", () => {
-	const problem = details("retrieve", {
+	const problem = details("run_status", {
 		run: run({ objective: "This long objective should not outrank the failure because the human needs the issue first", liveStepIds: ["worker"], sinkStepIds: ["worker"], counts: counts({ running: 1, failed: 1, succeeded: 3 }) }),
 		steps: [
 			step({ id: "validator", agentRef: "package:validator", status: "failed", errorMessage: "typecheck failed" }),
@@ -87,15 +87,15 @@ test("renderAgentTeamLiveRunsWidget lets attention outrank objective text", () =
 });
 
 test("renderAgentTeamLiveRunsWidget distinguishes multiple live runs", () => {
-	const first = details("retrieve", {
+	const first = details("run_status", {
 		run: run({ runId: "agt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", objective: "TUI rewrite", liveStepIds: ["review"], counts: counts({ running: 1, succeeded: 2 }) }),
 		steps: [step({ id: "review", agentRef: "package:reviewer", status: "running", lastActivity: "assistant writing" })],
 	});
-	const second = details("retrieve", {
+	const second = details("run_status", {
 		run: run({ runId: "agt_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", objective: "Release proof", liveStepIds: ["fix"], counts: counts({ running: 1, failed: 1 }) }),
 		steps: [step({ id: "validator", agentRef: "package:validator", status: "failed", errorMessage: "gate failed" }), step({ id: "fix", agentRef: "package:worker", status: "running", lastActivity: "tool read running" })],
 	});
-	const third = details("retrieve", {
+	const third = details("run_status", {
 		run: run({ runId: "agt_cccccccccccccccccccccccccccccccc", objective: "Docs audit", liveStepIds: ["docs"], counts: counts({ running: 1 }) }),
 		steps: [step({ id: "docs", agentRef: "package:docs-auditor", status: "running", lastActivity: "assistant writing" })],
 	});
@@ -108,7 +108,7 @@ test("renderAgentTeamLiveRunsWidget distinguishes multiple live runs", () => {
 });
 
 test("renderAgentTeamLiveRunsWidget fits narrow widths", () => {
-	const live = details("retrieve", {
+	const live = details("run_status", {
 		run: run({ objective: "Very long objective that should never force lines wider than the terminal width", liveStepIds: ["audit", "docs", "review"], counts: counts({ pending: 1, running: 3, succeeded: 2 }) }),
 		steps: [
 			step({ id: "audit", agentRef: "package:scout", status: "running", lastActivity: "assistant writing with a long note" }),
@@ -146,8 +146,8 @@ test("renderAgentTeamResult expanded mode can show effective tools", () => {
 	assert.match(rendered, /tools audit=read,grep,find,ls,bash/);
 });
 
-test("renderAgentTeamResult labels running peek output as live", () => {
-	const live = details("peek", {
+test("renderAgentTeamResult labels running step_result output as live", () => {
+	const live = details("step_result", {
 		run: run({ objective: "detached", liveStepIds: ["one"], sinkStepIds: ["one"], lastEvent: "one: text", counts: counts({ running: 1 }) }),
 		outputs: [{ stepId: "one", status: "running", text: "partial", filePath: undefined, chars: 7 }],
 	});
@@ -157,7 +157,7 @@ test("renderAgentTeamResult labels running peek output as live", () => {
 });
 
 test("renderAgentTeamResult summarizes pushed notices with visible artifacts", () => {
-	const notice = details("retrieve", {
+	const notice = details("run_status", {
 		run: run({ objective: "detached", status: "succeeded", terminal: true, liveStepIds: [], sinkStepIds: ["one"], lastEvent: "terminal: succeeded", canMessage: false, canCancel: false, canCleanup: true, counts: counts({ succeeded: 1 }) }),
 		outputs: [{ stepId: "one", status: "succeeded", text: undefined, filePath: "/tmp/one-final.md", chars: 100 }],
 		notice: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", mode: "milestones", terminal: true, reasons: ["terminal:succeeded"], noticeCount: 1, noticeLimitReached: false },
@@ -169,18 +169,18 @@ test("renderAgentTeamResult summarizes pushed notices with visible artifacts", (
 	assert.match(fallback, /agent_team succeeded detached/);
 	assert.match(fallback, /runId=agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_/);
 	assert.match(fallback, /final evidence one succeeded one-final.md/);
-	assert.match(fallback, /untrusted status evidence; retrieve\/peek for artifacts/);
+	assert.match(fallback, /untrusted status evidence; run_status\/step_result for artifacts/);
 	assert.doesNotMatch(fallback, /# agent_team|Objective:|Run:|Status:|Exceptional controls|Next:|artifact=|\/tmp\/|cleanup|cursor|debugEvents|Artifact:/i);
 	const noticeCard = renderAgentTeamNoticeMessage(notice, fallback, { expanded: false }, theme).render(120).join("\n");
 	assert.match(noticeCard, /agent_team succeeded detached/);
-	assert.doesNotMatch(noticeCard, /Objective:|Run:|Exceptional controls|\/tmp\/|retrieve|peek|cleanup|cursor|debugEvents/i);
+	assert.doesNotMatch(noticeCard, /Objective:|Run:|Exceptional controls|\/tmp\/|run_status|step_result|cleanup|cursor|debugEvents/i);
 	const missingDetailsCard = renderAgentTeamNoticeMessage(undefined, fallback, { expanded: false }, theme).render(120).join("\n");
 	assert.match(missingDetailsCard, /agent_team succeeded detached/);
-	assert.match(missingDetailsCard, /untrusted status evidence; retrieve\/peek for artifacts/);
+	assert.match(missingDetailsCard, /untrusted status evidence; run_status\/step_result for artifacts/);
 });
 
 test("renderAgentTeamResult summarizes multiple sink finals", () => {
-	const terminal = details("retrieve", {
+	const terminal = details("run_status", {
 		run: run({ objective: "detached", status: "succeeded", terminal: true, liveStepIds: [], sinkStepIds: ["one", "two"], lastEvent: "terminal: succeeded", canMessage: false, canCancel: false, canCleanup: true, counts: counts({ succeeded: 2 }) }),
 		outputs: [
 			{ stepId: "one", status: "succeeded", text: "one", filePath: "/tmp/one.md", chars: 3 },
@@ -203,7 +203,7 @@ test("renderAgentTeamResult reports cleanup as evidence deletion", () => {
 	const plain = formatAgentTeamNoticeText(cleanup);
 	assert.match(plain, /agent_team evidence deleted/);
 	assert.match(plain, /evidence deleted 1 retained path/);
-	assert.doesNotMatch(plain, /retrieve|peek|artifacts/);
+	assert.doesNotMatch(plain, /run_status|step_result|artifacts/);
 });
 
 test("renderAgentTeamResult reports actual cleanup receipt shape without run snapshot", () => {
@@ -217,7 +217,7 @@ test("renderAgentTeamResult reports actual cleanup receipt shape without run sna
 	const plain = formatAgentTeamNoticeText(cleanup);
 	assert.match(plain, /agent_team evidence deleted agt_/);
 	assert.match(plain, /evidence deleted 2 retained path/);
-	assert.doesNotMatch(plain, /retrieve|peek|artifacts/);
+	assert.doesNotMatch(plain, /run_status|step_result|artifacts/);
 });
 
 test("renderAgentTeamResult keeps cleanup denial distinct from evidence deletion", () => {

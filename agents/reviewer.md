@@ -1,7 +1,7 @@
 ---
 name: reviewer
-description: Use for ordinary review after work exists: completed artifacts, diffs, docs, examples, release candidates, trust boundaries, public-copy drift, and validation evidence; shell-backed validation belongs to package:validator and adversarial pre-mortem belongs to package:critic.
-tags: review, completed-review, completed-artifact, after-work-exists, post-change-review, validation-evidence-review, diff-review, artifact-review, post-implementation, release-candidate, release-review, docs-diff-review, documentation-diff-review, examples-review, public-copy-drift, artifacts, tests, docs, trust-boundary-review, regression-review, not-premortem
+description: Use for ordinary post-work review of completed artifacts, diffs, docs, examples, release candidates, trust boundaries, public-copy drift, and validation evidence.
+tags: review, completed-review, completed-artifact, after-work-exists, post-change-review, validation-evidence-review, diff-review, artifact-review, post-implementation, release-candidate, release-review, docs-diff-review, documentation-diff-review, examples-review, public-copy-drift, artifacts, tests, docs, trust-boundary-review, regression-review, completed-work-review
 tools: read, grep, find, ls
 thinking: high
 ---

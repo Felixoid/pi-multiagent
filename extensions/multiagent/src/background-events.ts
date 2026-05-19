@@ -1,6 +1,6 @@
-/** Bounded event store with retrieve cursors for detached runs. */
+/** Bounded event store with run_status cursors for detached runs. */
 
-import { isMaterialRetrieveWaitEvent } from "./material-wait-events.ts";
+import { isMaterialRunStatusWaitEvent } from "./material-wait-events.ts";
 import type { BackgroundEvent, EventType } from "./types.ts";
 import { EVENT_PREVIEW_CHARS, MAX_EVENTS_PER_RUN } from "./types.ts";
 
@@ -33,7 +33,7 @@ export class BackgroundEventStore {
 
 	hasMaterialAfter(cursor: string | undefined, stepId: string | undefined, sinkStepIds: readonly string[]): boolean {
 		const after = parseCursor(cursor);
-		return this.events.some((event) => event.seq > after && isMaterialRetrieveWaitEvent(event, { stepId, sinkStepIds }));
+		return this.events.some((event) => event.seq > after && isMaterialRunStatusWaitEvent(event, { stepId, sinkStepIds }));
 	}
 
 	delta(cursor: string | undefined, stepId: string | undefined, maxBytes: number): { events: BackgroundEvent[]; cursor: string } {

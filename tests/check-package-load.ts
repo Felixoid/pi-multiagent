@@ -61,11 +61,11 @@ async function loadPackageRoot(root: string, label: string): Promise<void> {
 		});
 		const tool = tools.find((candidate) => candidate.name === "agent_team");
 		assert.ok(tool, `${label}: ${extensionPath} should register agent_team`);
-		assert.match(tool.description ?? "", /peek.*one step/);
+		assert.match(tool.description ?? "", /step_result.*one step/);
 		assert.equal((tool.description ?? "").length < 1400, true, `${label}: agent_team description should stay compact`);
 		assert.equal((tool.promptGuidelines ?? []).join("\n").length < 3600, true, `${label}: agent_team prompt guidelines should stay within model-facing budget`);
-		assert.match(tool.promptSnippet ?? "", /catalog.*start.*retrieve.*peek.*message.*cancel.*cleanup/);
-		assert.equal(tool.promptGuidelines?.some((line) => /Action decision tree/.test(line) && /peek with stepId for exactly one step/.test(line)), true, `${label}: agent_team should expose a compact action decision tree`);
+		assert.match(tool.promptSnippet ?? "", /catalog.*start.*run_status.*step_result.*message.*cancel.*cleanup/);
+		assert.equal(tool.promptGuidelines?.some((line) => /Action decision tree/.test(line) && /step_result.*exactly one step/.test(line)), true, `${label}: agent_team should expose a compact action decision tree`);
 		const catalog = await tool.execute(
 			`${label}-catalog`,
 			{ action: "catalog", library: { sources: ["package"], query: "review" } },

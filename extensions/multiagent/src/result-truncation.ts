@@ -2,7 +2,7 @@
 
 export const DEFAULT_MAX_LINES = 2000;
 export const DEFAULT_MAX_BYTES = 50 * 1024;
-const TRUNCATION_NOTICE = "[agent_team output truncated; use peek or artifact paths for full text.]";
+const TRUNCATION_NOTICE = "[agent_team output truncated; use step_result or artifact paths for full text.]";
 
 export function formatTruncatedModelContent(content: string): string {
 	const truncation = truncateHead(content);

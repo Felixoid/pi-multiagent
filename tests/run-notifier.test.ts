@@ -35,7 +35,7 @@ test("RunNotifier coalesces milestones inside minInterval and preserves terminal
 		events,
 		runtimeOptions: runtimeOptions((details) => notices.push(details)),
 		isTerminal: () => false,
-		details: (notice) => ({ kind: "agent_team", action: "retrieve", ok: true, diagnostics: [], error: undefined, library: undefined, catalog: [], extensionTools: [], run: undefined, cursor: undefined, events: [], steps: [], outputs: [], message: undefined, cleanup: undefined, notice }),
+		details: (notice) => ({ kind: "agent_team", action: "run_status", ok: true, diagnostics: [], error: undefined, library: undefined, catalog: [], extensionTools: [], run: undefined, cursor: undefined, events: [], steps: [], outputs: [], message: undefined, cleanup: undefined, notice }),
 	});
 	notifier.queueMilestone("sink first succeeded");
 	notifier.queueMilestone("step second failed");

@@ -1,4 +1,4 @@
-/** Snapshot helpers for detached run status surfaces. */
+/** Snapshot helpers for detached-run surfaces. */
 
 import { isTerminalRunStatus } from "./detached-output.ts";
 import type { StepState } from "./detached-state.ts";

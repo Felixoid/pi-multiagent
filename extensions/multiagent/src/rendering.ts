@@ -91,8 +91,8 @@ function formatCall(args: AgentTeamInput, theme: Theme): string {
 	const stepId = stringProperty(args, "stepId");
 	const channel = stringProperty(args, "channel");
 	if (action === "start") return `${title} ${theme.fg("accent", "launch")} ${theme.fg("dim", startTarget(args))}`;
-	if (action === "retrieve") return `${title} ${theme.fg("accent", args.debugEvents === true ? "status debug" : "status")} ${theme.fg("dim", shortRunId(runId))}`;
-	if (action === "peek") return `${title} ${theme.fg("accent", "inspect step")} ${theme.fg("dim", `${shortRunId(runId)} ${stepId ?? ""}`.trim())}`;
+	if (action === "run_status") return `${title} ${theme.fg("accent", args.debugEvents === true ? "status debug" : "status")} ${theme.fg("dim", shortRunId(runId))}`;
+	if (action === "step_result") return `${title} ${theme.fg("accent", "inspect step")} ${theme.fg("dim", `${shortRunId(runId)} ${stepId ?? ""}`.trim())}`;
 	if (action === "message") return `${title} ${theme.fg("accent", "send note")} ${theme.fg("dim", `${stepId ?? "step"} ${channel ?? ""}`.trim())}`;
 	if (action === "cancel") return `${title} ${theme.fg("accent", "stop run")} ${theme.fg("dim", shortRunId(runId))}`;
 	if (action === "cleanup") return `${title} ${theme.fg("accent", "delete evidence")} ${theme.fg("dim", shortRunId(runId))}`;
@@ -123,7 +123,7 @@ function formatAgentTeamPlainCard(details: AgentTeamDetails): string[] {
 	if (pending.length > 0) lines.push(`queued next ${pendingSummary(pending)}`);
 	const tail = formatPlainResultTail(details);
 	if (tail) lines.push(tail);
-	lines.push("untrusted status evidence; retrieve/peek for artifacts");
+	lines.push("untrusted status evidence; run_status/step_result for artifacts");
 	return lines.filter((line) => line.length > 0);
 }
 
@@ -203,7 +203,7 @@ function humanResultState(details: AgentTeamDetails, run: RunSnapshot): string {
 	}
 	if (run.terminal) return humanRunStatus(run.status);
 	if (details.action === "start") return "started";
-	if (details.action === "peek") return "step snapshot";
+	if (details.action === "step_result") return "step snapshot";
 	return humanRunStatus(run.status);
 }
 

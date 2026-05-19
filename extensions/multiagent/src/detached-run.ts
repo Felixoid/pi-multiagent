@@ -23,7 +23,7 @@ import { createStepOutputArtifact } from "./step-output-artifact.ts";
 import { stalledStepBlockerMessage } from "./stalled-step-diagnostics.ts";
 import { collectUpstreamOutputs } from "./upstream-outputs.ts";
 import type { AgentDiagnostic, AgentTeamDetails, CleanupReceipt, LibraryOptions, MessageChannel, MessageReceipt, ResolvedGraph, RunSnapshot, RunStatus, StepStatus, TeamStepSpec } from "./types.ts";
-import { DEFAULT_RETRIEVE_MAX_BYTES } from "./types.ts";
+import { DEFAULT_RESULT_PREVIEW_MAX_BYTES } from "./types.ts";
 
 export class DetachedRun {
 	readonly id: string;
@@ -52,7 +52,7 @@ export class DetachedRun {
 		this.library = library;
 		this.diagnostics = [...graph.diagnostics];
 		this.artifactStore = createRunArtifactStore();
-		this.notifier = new RunNotifier({ runId: id, notify: graph.options.notify, runtimeOptions: options, recordDiagnostic: (code, label, message) => this.recordDiagnostic(code, label, message), isTerminal: () => this.snapshot().terminal, details: (notice) => this.details("retrieve", { notice }) });
+		this.notifier = new RunNotifier({ runId: id, notify: graph.options.notify, runtimeOptions: options, recordDiagnostic: (code, label, message) => this.recordDiagnostic(code, label, message), isTerminal: () => this.snapshot().terminal, details: (notice) => this.details("run_status", { notice }) });
 		for (const step of graph.steps) this.states.set(step.id, createPendingStepState(step));
 	}
 
@@ -89,7 +89,7 @@ export class DetachedRun {
 			return receipt;
 		};
 		const state = this.states.get(stepId);
-		if (!state || !state.controller || state.status !== "running" || this.status !== "running") return settle(this.messageReceipt(stepId, channel, clientMessageId, false, "Step is not live or messageable."));
+		if (!state || !state.controller || state.status !== "running" || this.status !== "running") return settle(this.messageReceipt(stepId, channel, clientMessageId, false, "Step not live or messageable."));
 		let receipt: MessageReceipt;
 		try {
 			const ack = await state.controller.message(channel, text);
@@ -126,8 +126,8 @@ export class DetachedRun {
 
 	details(action: AgentTeamDetails["action"], options: DetachedRunDetailsOptions = {}): AgentTeamDetails {
 		const includeEvents = options.includeEvents === true;
-		const delta = includeEvents ? this.events.delta(options.cursor, options.stepId, options.maxBytes ?? DEFAULT_RETRIEVE_MAX_BYTES) : { events: [], cursor: this.events.currentCursor() };
-		return makeDetails(action, options.ok ?? true, this.diagnostics, this.options, { library: this.library, run: this.snapshot(), cursor: delta.cursor, events: delta.events, steps: this.stepSnapshots(), outputs: selectOutputsForAction(action, options.stepId, options.maxBytes ?? DEFAULT_RETRIEVE_MAX_BYTES, options.preview === true, this.states.values(), this.sinkStepIds()), message: options.message, cleanup: options.cleanup, notice: options.notice }, options.error);
+		const delta = includeEvents ? this.events.delta(options.cursor, options.stepId, options.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES) : { events: [], cursor: this.events.currentCursor() };
+		return makeDetails(action, options.ok ?? true, this.diagnostics, this.options, { library: this.library, run: this.snapshot(), cursor: delta.cursor, events: delta.events, steps: this.stepSnapshots(), outputs: selectOutputsForAction(action, options.stepId, options.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES, options.preview === true, this.states.values(), this.sinkStepIds()), message: options.message, cleanup: options.cleanup, notice: options.notice }, options.error);
 	}
 
 	snapshot(): RunSnapshot {
@@ -280,7 +280,7 @@ export class DetachedRun {
 		this.touch();
 		this.appendEvent({ type: "run", label: "expired", preview: "maxRunSeconds exceeded", status: "error" });
 		for (const state of this.states.values()) {
-			if (state.status === "pending") this.finishState(state, "canceled", "Run expired before start.");
+			if (state.status === "pending") this.finishState(state, "canceled", "Run expired pre-start.");
 			else if (state.status === "running" && state.controller) state.controller.cancel("Run expired.");
 			else if (state.status === "running") this.finishState(state, "timed_out", "Expired before launch.");
 		}
@@ -355,7 +355,7 @@ export class DetachedRun {
 
 	private touch() {
 		this.updatedAt = now();
-		const errorMessage = safeRuntimeCallback(() => this.options.onRunUpdate?.(this.details("retrieve")), "agent_team live UI update failed");
+		const errorMessage = safeRuntimeCallback(() => this.options.onRunUpdate?.(this.details("run_status")), "agent_team UI failed");
 		if (errorMessage) this.recordDiagnostic("run-ui-callback-failed", "run-ui", errorMessage);
 	}
 }

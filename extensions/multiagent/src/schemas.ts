@@ -9,7 +9,7 @@ import {
 	DEFAULT_NOTIFY_MAX_NOTICES,
 	DEFAULT_NOTIFY_MIN_INTERVAL_SECONDS,
 	DEFAULT_NOTIFY_MODE,
-	DEFAULT_RETRIEVE_MAX_BYTES,
+	DEFAULT_RESULT_PREVIEW_MAX_BYTES,
 	DEFAULT_TERMINAL_RETENTION_SECONDS,
 	DEFAULT_TIMEOUT_SECONDS_PER_STEP,
 	EXTENSION_SOURCE_ORIGIN_VALUES,
@@ -23,8 +23,8 @@ import {
 	MAX_NOTIFY_MIN_INTERVAL_SECONDS,
 	MAX_PARENT_MESSAGE_CHARS,
 	MAX_PATH_FIELD_CHARS,
-	MAX_RETRIEVE_MAX_BYTES,
-	MAX_RETRIEVE_WAIT_SECONDS,
+	MAX_RESULT_PREVIEW_BYTES,
+	MAX_RUN_STATUS_WAIT_SECONDS,
 	MAX_SHORT_TEXT_FIELD_CHARS,
 	MAX_STEPS,
 	MAX_TERMINAL_RETENTION_SECONDS,
@@ -56,7 +56,7 @@ function sourceQualifiedLibraryRef(description: string) {
 
 const LibrarySchema = Type.Object(
 	{
-		sources: Type.Optional(Type.Array(StringEnum(LIBRARY_SOURCE_VALUES), { description: 'Catalog-only sources. Default ["package", "user"]. For start, use graph.library.sources.', minItems: 1, maxItems: 3 })),
+		sources: Type.Optional(Type.Array(StringEnum(LIBRARY_SOURCE_VALUES), { description: 'Catalog-only sources. Default ["package"]. For start, use graph.library.sources; user/project catalog rows require matching start sources.', minItems: 1, maxItems: 3 })),
 		query: Type.Optional(Type.String({ description: "Catalog-only routing search. Exact phrases and non-stopword query terms are matched against refs, descriptions, tags, sources, default tools, model, and path.", minLength: 1, maxLength: MAX_SHORT_TEXT_FIELD_CHARS })),
 		projectAgents: Type.Optional(StringEnum(PROJECT_AGENTS_POLICY_VALUES, { description: 'Catalog project-agent policy. Default "deny". Use "allow" only when trusted; "confirm" requires UI.', default: "deny" })),
 	},
@@ -159,7 +159,7 @@ const NotifyOptionsSchema = Type.Object(
 const StartOptionsSchema = Type.Object(
 	{
 		maxRunSeconds: Type.Optional(Type.Number({ description: "Maximum live run seconds before expiry cancellation.", minimum: 1, maximum: MAX_MAX_RUN_SECONDS, multipleOf: 1, default: DEFAULT_MAX_RUN_SECONDS })),
-		terminalRetentionSeconds: Type.Optional(Type.Number({ description: "Seconds to retain terminal run state for retrieve/cleanup.", minimum: 1, maximum: MAX_TERMINAL_RETENTION_SECONDS, multipleOf: 1, default: DEFAULT_TERMINAL_RETENTION_SECONDS })),
+		terminalRetentionSeconds: Type.Optional(Type.Number({ description: "Seconds to retain terminal run state for run_status/cleanup.", minimum: 1, maximum: MAX_TERMINAL_RETENTION_SECONDS, multipleOf: 1, default: DEFAULT_TERMINAL_RETENTION_SECONDS })),
 		notify: Type.Optional(NotifyOptionsSchema),
 	},
 	StrictObjectOptions,
@@ -167,18 +167,18 @@ const StartOptionsSchema = Type.Object(
 
 export const AgentTeamSchema = Type.Object(
 	{
-		action: StringEnum(AGENT_TEAM_ACTION_VALUES, { description: 'Action decision: "catalog" discovers refs/provenance, "start" launches a detached graph, "retrieve" reads compact run/sink state or performs a bounded wait/read with waitSeconds, "peek" inspects exactly one step, "message" queues one live clarification/scope repair, "cancel" stops a live run only when stopping is explicitly more valuable than completion, and "cleanup" deletes terminal artifacts when retained evidence is no longer needed.' }),
+		action: StringEnum(AGENT_TEAM_ACTION_VALUES, { description: 'Action decision: "catalog" discovers refs/provenance, "start" launches a detached graph, "run_status" reads compact run/sink state or performs a bounded wait/read with waitSeconds, "step_result" inspects exactly one step, "message" queues one live clarification/scope repair, "cancel" stops a live run only when stopping is explicitly more valuable than completion, and "cleanup" deletes terminal artifacts when retained evidence is no longer needed.' }),
 		library: Type.Optional(LibrarySchema),
 		graph: Type.Optional(GraphSchema),
 		graphFile: Type.Optional(nonEmptyText("Start-only relative path to a pure detached graph JSON file.", MAX_PATH_FIELD_CHARS)),
 		options: Type.Optional(StartOptionsSchema),
 		runId: Type.Optional(Type.String({ description: "Detached run bearer capability returned by start.", minLength: 28, maxLength: 100, pattern: RUN_ID_PATTERN })),
-		cursor: Type.Optional(Type.String({ description: "Retrieve cursor returned by a prior retrieve call.", minLength: 1, maxLength: 128 })),
-		stepId: Type.Optional(publicId("Step id for retrieve wait/debug targeting only, or the required target for peek/message. Retrieve stepId does not select step text; use peek for one-step output.")),
-		waitSeconds: Type.Optional(Type.Number({ description: "Retrieve-only bounded wait/read control. Before returning the same compact retrieve snapshot, wait until a material parent-visible event occurs or this timeout expires: run terminal/cancel/expiry, sink or targeted step finish, failed/blocked/timed-out/canceled step, or error diagnostic. Routine assistant/tool activity does not wake retrieve.", minimum: 1, maximum: MAX_RETRIEVE_WAIT_SECONDS, multipleOf: 1 })),
-		maxBytes: Type.Optional(Type.Number({ description: "Retrieve/peek-only aggregate child-output preview byte cap used only when preview:true, and for debug events; not valid for catalog or start.", minimum: 1, maximum: MAX_RETRIEVE_MAX_BYTES, multipleOf: 1, default: DEFAULT_RETRIEVE_MAX_BYTES })),
-		preview: Type.Optional(Type.Boolean({ description: "Retrieve/peek-only opt-in to include bounded assistant text previews. Default false returns status, diagnostics, step rows, artifact indexes, and artifact paths without child final text.", default: false })),
-		debugEvents: Type.Optional(Type.Boolean({ description: "Retrieve-only opt-in to include raw background event records. Default false.", default: false })),
+		cursor: Type.Optional(Type.String({ description: "run_status cursor returned by a prior run_status call.", minLength: 1, maxLength: 128 })),
+		stepId: Type.Optional(publicId("Step id for run_status wait/debug targeting only, or the required target for step_result/message. run_status stepId does not select step text; use step_result for one-step output.")),
+		waitSeconds: Type.Optional(Type.Number({ description: "run_status-only bounded wait/read control. Before returning the same compact run_status snapshot, wait until a material parent-visible event occurs or this timeout expires: run terminal/cancel/expiry, sink or targeted step finish, failed/blocked/timed-out/canceled step, or error diagnostic. Routine assistant/tool activity does not wake run_status.", minimum: 1, maximum: MAX_RUN_STATUS_WAIT_SECONDS, multipleOf: 1 })),
+		maxBytes: Type.Optional(Type.Number({ description: "run_status/step_result-only aggregate child-output preview byte cap used only when preview:true, and for debug events; not valid for catalog or start.", minimum: 1, maximum: MAX_RESULT_PREVIEW_BYTES, multipleOf: 1, default: DEFAULT_RESULT_PREVIEW_MAX_BYTES })),
+		preview: Type.Optional(Type.Boolean({ description: "run_status/step_result-only opt-in to include bounded assistant text previews. Default false returns status, diagnostics, step rows, artifact indexes, and artifact paths without child final text.", default: false })),
+		debugEvents: Type.Optional(Type.Boolean({ description: "run_status-only opt-in to include raw background event records. Default false.", default: false })),
 		channel: Type.Optional(StringEnum(MESSAGE_CHANNEL_VALUES, { description: 'Message-only child RPC channel. "steer" queues after the current assistant turn/tool batch before the next LLM call; "follow_up" defers a live follow-up until the child is quiescent before terminalization, if still messageable. It is not post-terminal chat and must not be used to force premature finals.' })),
 		text: Type.Optional(nonEmptyText("Parent message text for a live step; use for bounded clarification or scope repair, not impatience.", MAX_PARENT_MESSAGE_CHARS)),
 		clientMessageId: Type.Optional(Type.String({ description: "Optional idempotency key for message.", minLength: 1, maxLength: MAX_CLIENT_MESSAGE_ID_CHARS })),

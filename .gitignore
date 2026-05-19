@@ -7,6 +7,7 @@ node_modules/
 # Local Pi state, agent notes, and control-plane files
 .pi/
 CONTINUE.md
+meta_study.md
 PLAN.md
 HANDOFF.md
 TODO.md

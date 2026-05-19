@@ -12,7 +12,7 @@
           "read"
         ]
       },
-      "task": "Assess whether README teaches inline agents, retrieve, peek, and retained-artifact handling clearly. Return three findings and two fixes."
+      "task": "Assess whether README teaches inline agents, run_status, step_result, and retained-artifact handling clearly. Return three findings and two fixes."
     },
     {
       "id": "read-skill",

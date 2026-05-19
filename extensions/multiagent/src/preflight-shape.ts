@@ -37,8 +37,8 @@ interface ActionRule {
 const ACTION_RULES: Record<ExecutionAction, ActionRule> = {
 	catalog: { allowed: ["action", "library"], controlCode: "catalog-control-fields-denied" },
 	start: { allowed: ["action", "graph", "graphFile", "options"], controlCode: "start-control-fields-denied" },
-	retrieve: { allowed: ["action", "runId", "cursor", "stepId", "waitSeconds", "maxBytes", "preview", "debugEvents"], controlCode: "retrieve-control-fields-denied" },
-	peek: { allowed: ["action", "runId", "stepId", "maxBytes", "preview"], controlCode: "peek-control-fields-denied" },
+	run_status: { allowed: ["action", "runId", "cursor", "stepId", "waitSeconds", "maxBytes", "preview", "debugEvents"], controlCode: "run_status-control-fields-denied" },
+	step_result: { allowed: ["action", "runId", "stepId", "maxBytes", "preview"], controlCode: "step_result-control-fields-denied" },
 	message: { allowed: ["action", "runId", "stepId", "channel", "text", "clientMessageId"], controlCode: "message-control-fields-denied" },
 	cancel: { allowed: ["action", "runId", "reason"], controlCode: "cancel-control-fields-denied" },
 	cleanup: { allowed: ["action", "runId"], controlCode: "cleanup-control-fields-denied" },
@@ -77,8 +77,8 @@ const GRAPH_BODY_FIELDS = new Set<PreflightField>(["objective", "steps", "limits
 export function validatePreflightShape(rawInput: unknown): AgentDiagnostic[] {
 	const input = isRecord(rawInput) ? rawInput : {};
 	const action = stringField(input, "action");
-	if (!action) return [diagnostic("action-required", 'agent_team requires action:"catalog", "start", "retrieve", "peek", "message", "cancel", or "cleanup".', "/action", undefined, undefined, "Set action to one of catalog, start, retrieve, peek, message, cancel, or cleanup.")];
-	if (!isExecutionAction(action)) return [diagnostic("action-invalid", `Unknown agent_team action: ${action}.`, "/action", undefined, undefined, 'Set action to one of catalog, start, retrieve, peek, message, cancel, or cleanup. Use action:"start" for detached graph execution.')];
+	if (!action) return [diagnostic("action-required", 'agent_team requires action:"catalog", "start", "run_status", "step_result", "message", "cancel", or "cleanup".', "/action", undefined, undefined, "Set action to one of catalog, start, run_status, step_result, message, cancel, or cleanup.")];
+	if (!isExecutionAction(action)) return [diagnostic("action-invalid", `Unknown agent_team action: ${action}.`, "/action", undefined, undefined, 'Set action to one of catalog, start, run_status, step_result, message, cancel, or cleanup. Use action:"start" for detached graph execution.')];
 
 	const diagnostics: AgentDiagnostic[] = [];
 	const rule = ACTION_RULES[action];
@@ -94,10 +94,10 @@ function validateRequiredControls(action: ExecutionAction, input: Record<string,
 		const hasGraphFile = fieldPresent(input, "graphFile");
 		if (hasGraph === hasGraphFile) diagnostics.push(diagnostic("start-graph-required", "Start requires exactly one of graph or graphFile.", "/", action, ["graph", "graphFile"], 'Pass a pure graph under graph, or pass graphFile for a trusted relative JSON graph file. Do not put graph body fields at the tool-input top level.'));
 	}
-	if (action === "retrieve" && !stringField(input, "runId")) diagnostics.push(diagnostic("run-id-required", "retrieve requires runId.", "/runId", action, ["runId"], "Use the runId returned by start."));
-	if (action === "peek") {
-		if (!stringField(input, "runId")) diagnostics.push(diagnostic("run-id-required", "peek requires runId.", "/runId", action, ["runId"], "Use the runId returned by start."));
-		if (!stringField(input, "stepId")) diagnostics.push(diagnostic("peek-step-required", "Peek requires exactly one stepId.", "/stepId", action, ["stepId"], "Use one concrete step id from the graph or retrieve snapshot; use retrieve for run-level or sink-only summaries."));
+	if (action === "run_status" && !stringField(input, "runId")) diagnostics.push(diagnostic("run-id-required", "run_status requires runId.", "/runId", action, ["runId"], "Use the runId returned by start."));
+	if (action === "step_result") {
+		if (!stringField(input, "runId")) diagnostics.push(diagnostic("run-id-required", "step_result requires runId.", "/runId", action, ["runId"], "Use the runId returned by start."));
+		if (!stringField(input, "stepId")) diagnostics.push(diagnostic("step_result-step-required", "step_result requires exactly one stepId.", "/stepId", action, ["stepId"], "Use one concrete step id from the graph or run_status snapshot; use run_status for run-level or sink-only summaries."));
 	}
 	if (action === "message") {
 		if (!stringField(input, "runId")) diagnostics.push(diagnostic("run-id-required", "message requires runId.", "/runId", action, ["runId"], "Use the runId returned by start."));
@@ -108,7 +108,7 @@ function validateRequiredControls(action: ExecutionAction, input: Record<string,
 		if (!nonEmptyStringField(input, "text")) diagnostics.push(diagnostic("message-text-required", "Message requires non-empty text.", "/text", action, ["text"], "Send one bounded clarification or scope repair. Do not request premature finals just because the parent is waiting."));
 	}
 	if (action === "cancel" && !stringField(input, "runId")) diagnostics.push(diagnostic("run-id-required", "cancel requires runId.", "/runId", action, ["runId"], "Use the runId returned by start."));
-	if (action === "cleanup" && !stringField(input, "runId")) diagnostics.push(diagnostic("run-id-required", "cleanup requires runId.", "/runId", action, ["runId"], "Use cleanup only after terminal retrieve/peek evidence is preserved."));
+	if (action === "cleanup" && !stringField(input, "runId")) diagnostics.push(diagnostic("run-id-required", "cleanup requires runId.", "/runId", action, ["runId"], "Use cleanup only after terminal run_status/step_result evidence is preserved."));
 }
 
 function misplacedFields(input: Record<string, unknown>, allowedFields: readonly PreflightField[]): string[] {
@@ -119,14 +119,14 @@ function misplacedFields(input: Record<string, unknown>, allowedFields: readonly
 function repairFor(action: ExecutionAction, fields: string[]): string {
 	const fieldSet = new Set(fields);
 	if (action === "start" && fields.some((field) => GRAPH_BODY_FIELDS.has(field as PreflightField))) return 'Move graph body fields under graph: {"action":"start","graph":{"objective":"...","steps":[...]}}. Put start sources in graph.library; top-level library is catalog-only.';
-	if (action === "catalog" && fieldSet.has("maxBytes")) return "Remove maxBytes; use library.query to narrow catalog results. maxBytes is valid only for retrieve and peek previews.";
-	if (fieldSet.has("preview")) return "Use preview only on retrieve or peek; it defaults to false and opts into bounded assistant text previews.";
+	if (action === "catalog" && fieldSet.has("maxBytes")) return "Remove maxBytes; use library.query to narrow catalog results. maxBytes is valid only for run_status and step_result previews.";
+	if (fieldSet.has("preview")) return "Use preview only on run_status or step_result; it defaults to false and opts into bounded assistant text previews.";
 	if (action === "message" && fieldSet.has("kind")) return 'Replace kind with channel:"steer" or channel:"follow_up"; accepted means queued/delivered to Pi, not child compliance.';
-	if (fieldSet.has("waitSeconds")) return "Use waitSeconds only on retrieve for a bounded wait/read snapshot that wakes on material parent-visible events or timeout.";
-	if (fieldSet.has("debugEvents")) return "Use debugEvents only on retrieve when raw background events are needed.";
-	if (fieldSet.has("cursor")) return "Use cursor only on retrieve for debug/backfill pagination.";
+	if (fieldSet.has("waitSeconds")) return "Use waitSeconds only on run_status for a bounded wait/read snapshot that wakes on material parent-visible events or timeout.";
+	if (fieldSet.has("debugEvents")) return "Use debugEvents only on run_status when raw background events are needed.";
+	if (fieldSet.has("cursor")) return "Use cursor only on run_status for debug/backfill pagination.";
 	if (fieldSet.has("library") && action === "start") return "Move start library source selection to graph.library; top-level library is catalog-only.";
-	return 'Use action-specific controls: catalog {library}; start exactly one of {graph,graphFile} plus options; retrieve {runId,cursor?,stepId?,waitSeconds?,preview?,maxBytes?,debugEvents?}; peek {runId,stepId,preview?,maxBytes?}; message {runId,stepId,channel,text,clientMessageId?}; cancel {runId,reason?}; cleanup {runId}.';
+	return 'Use action-specific controls: catalog {library}; start exactly one of {graph,graphFile} plus options; run_status {runId,cursor?,stepId?,waitSeconds?,preview?,maxBytes?,debugEvents?}; step_result {runId,stepId,preview?,maxBytes?}; message {runId,stepId,channel,text,clientMessageId?}; cancel {runId,reason?}; cleanup {runId}.';
 }
 
 function isExecutionAction(action: string): action is ExecutionAction {

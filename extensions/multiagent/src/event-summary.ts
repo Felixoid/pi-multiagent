@@ -1,4 +1,4 @@
-/** Human summaries for compact run status cards. */
+/** Human summaries for compact detached-run cards. */
 
 import type { BackgroundEvent } from "./types.ts";
 import { summarizeStepActivity } from "./step-activity.ts";

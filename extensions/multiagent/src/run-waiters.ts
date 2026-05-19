@@ -1,6 +1,6 @@
-/** Bounded retrieve waiters for detached run material events. */
+/** Bounded run_status waiters for detached run material events. */
 
-import { isMaterialRetrieveWaitEvent } from "./material-wait-events.ts";
+import { isMaterialRunStatusWaitEvent } from "./material-wait-events.ts";
 import { unrefTimer } from "./runtime-options.ts";
 import type { BackgroundEvent } from "./types.ts";
 
@@ -32,7 +32,7 @@ export class RunWaiters {
 
 	notify(event: BackgroundEvent): void {
 		for (const waiter of [...this.waiters]) {
-			if (!isMaterialRetrieveWaitEvent(event, waiter)) continue;
+			if (!isMaterialRunStatusWaitEvent(event, waiter)) continue;
 			this.waiters.delete(waiter);
 			waiter.resolve();
 		}

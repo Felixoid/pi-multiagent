@@ -40,22 +40,22 @@ test("validatePreflightShape enforces detached action fields", () => {
 	const oldStartWithPreview = validatePreflightShape({ action: "start", objective: "old", steps: [], preview: true });
 	assert.match(oldStartWithPreview.find((item) => item.code === "start-control-fields-denied")?.repair ?? "", /Move graph body fields under graph/);
 	assert.equal(validatePreflightShape({ action: "start", graph: graphInput(), cursor: "1" }).some((item) => item.code === "start-control-fields-denied"), true);
-	assert.equal(validatePreflightShape({ action: "retrieve", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", graph: graphInput() }).some((item) => item.code === "retrieve-control-fields-denied"), true);
+	assert.equal(validatePreflightShape({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", graph: graphInput() }).some((item) => item.code === "run_status-control-fields-denied"), true);
 	assert.equal(validatePreflightShape({ action: "cancel", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", maxBytes: 1 }).some((item) => item.code === "cancel-control-fields-denied"), true);
 	assert.equal(validatePreflightShape({ action: "cleanup", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", reason: "x" }).some((item) => item.code === "cleanup-control-fields-denied"), true);
-	assert.equal(validatePreflightShape({ action: "retrieve", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", debugEvents: true }).length, 0);
-	assert.equal(validatePreflightShape({ action: "retrieve", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", waitSeconds: 1 }).length, 0);
-	const missingPeekStep = validatePreflightShape({ action: "peek", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" });
-	assert.equal(missingPeekStep.some((item) => item.code === "peek-step-required"), true);
-	assert.match(missingPeekStep.find((item) => item.code === "peek-step-required")?.repair ?? "", /one concrete step id/);
-	assert.match(missingPeekStep.find((item) => item.code === "peek-step-required")?.repair ?? "", /retrieve for run-level/);
-	assert.equal(validatePreflightShape({ action: "peek", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", maxBytes: 100 }).length, 0);
-	assert.equal(validatePreflightShape({ action: "peek", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", debugEvents: true }).some((item) => item.code === "peek-control-fields-denied"), true);
+	assert.equal(validatePreflightShape({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", debugEvents: true }).length, 0);
+	assert.equal(validatePreflightShape({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", waitSeconds: 1 }).length, 0);
+	const missingStepResultStep = validatePreflightShape({ action: "step_result", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" });
+	assert.equal(missingStepResultStep.some((item) => item.code === "step_result-step-required"), true);
+	assert.match(missingStepResultStep.find((item) => item.code === "step_result-step-required")?.repair ?? "", /one concrete step id/);
+	assert.match(missingStepResultStep.find((item) => item.code === "step_result-step-required")?.repair ?? "", /run_status for run-level/);
+	assert.equal(validatePreflightShape({ action: "step_result", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", maxBytes: 100 }).length, 0);
+	assert.equal(validatePreflightShape({ action: "step_result", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", debugEvents: true }).some((item) => item.code === "step_result-control-fields-denied"), true);
 	assert.equal(validatePreflightShape({ action: "message", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", text: "x", channel: "steer" }).some((item) => item.code === "message-step-required"), true);
 	const staleKind = validatePreflightShape({ action: "message", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", text: "x", stepId: "one", kind: "steer" });
 	assert.equal(staleKind.some((item) => item.code === "message-control-fields-denied"), true);
 	assert.equal(staleKind.some((item) => item.code === "message-channel-required"), true);
-	assert.equal(validatePreflightShape({ action: "peek", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", waitSeconds: 1 }).some((item) => item.code === "peek-control-fields-denied"), true);
+	assert.equal(validatePreflightShape({ action: "step_result", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", waitSeconds: 1 }).some((item) => item.code === "step_result-control-fields-denied"), true);
 });
 
 test("resolveDetachedGraph rejects blank-after-trim graph objective and inline system prompts", async () => {

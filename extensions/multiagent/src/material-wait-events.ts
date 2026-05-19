@@ -1,4 +1,4 @@
-/** Parent-visible events that should wake retrieve(waitSeconds). */
+/** Parent-visible events that should wake run_status(waitSeconds). */
 
 import type { BackgroundEvent } from "./types.ts";
 
@@ -7,7 +7,7 @@ interface MaterialWaitTarget {
 	sinkStepIds: readonly string[];
 }
 
-export function isMaterialRetrieveWaitEvent(event: BackgroundEvent, target: MaterialWaitTarget): boolean {
+export function isMaterialRunStatusWaitEvent(event: BackgroundEvent, target: MaterialWaitTarget): boolean {
 	if (isRunLifecycleEvent(event)) return true;
 	if (event.type === "diagnostic" && event.status === "error") return event.stepId === undefined || target.stepId === undefined || event.stepId === target.stepId;
 	if (target.stepId !== undefined && event.stepId !== target.stepId) return false;

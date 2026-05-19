@@ -117,10 +117,10 @@ const runId = started.details.run?.runId ?? "";
 assert.match(runId, /^agt_/);
 assert.equal(started.details.run?.terminal, false);
 
-let terminal = await tool.execute("smoke-retrieve-0", { action: "retrieve", runId, preview: true }, undefined, undefined, makeCtx(true));
+let terminal = await tool.execute("smoke-run_status-0", { action: "run_status", runId, preview: true }, undefined, undefined, makeCtx(true));
 for (let attempt = 0; !terminal.details.run?.terminal && attempt < 20; attempt += 1) {
 	await new Promise((resolve) => setTimeout(resolve, 5));
-	terminal = await tool.execute(`smoke-retrieve-${attempt + 1}`, { action: "retrieve", runId, cursor: terminal.details.cursor, preview: true }, undefined, undefined, makeCtx(true));
+	terminal = await tool.execute(`smoke-run_status-${attempt + 1}`, { action: "run_status", runId, cursor: terminal.details.cursor, preview: true }, undefined, undefined, makeCtx(true));
 }
 assert.equal(terminal.details.run?.status, "succeeded");
 assert.equal(terminal.details.steps[0]?.status, "succeeded");
@@ -128,8 +128,8 @@ assert.equal(terminal.details.events.length, 0);
 assert.equal(terminal.details.outputs[0]?.filePath !== undefined, true);
 assert.equal(terminal.content[0].text.includes("smoke-ok"), true);
 
-const peek = await tool.execute("smoke-peek", { action: "peek", runId, stepId: "step", preview: true }, undefined, undefined, makeCtx(true));
-assert.equal(peek.details.outputs[0]?.text, "smoke-ok");
+const step_result = await tool.execute("smoke-step_result", { action: "step_result", runId, stepId: "step", preview: true }, undefined, undefined, makeCtx(true));
+assert.equal(step_result.details.outputs[0]?.text, "smoke-ok");
 assert.equal(tasks[0]?.includes("smoke task"), true);
 assert.equal(customMessages.length, 1);
 assertNotice(customMessages[0]);
@@ -145,10 +145,10 @@ await writeFile(join(graphFileRoot, "graph.json"), JSON.stringify({ objective: "
 const graphFileStarted = await tool.execute("smoke-graph-file-start", { action: "start", graphFile: "graph.json", options: { terminalRetentionSeconds: 30, notify: { mode: "none" } } }, undefined, undefined, makeCtx(true, async () => false, graphFileRoot));
 const graphFileRunId = graphFileStarted.details.run?.runId ?? "";
 assert.match(graphFileRunId, /^agt_/);
-let graphFileTerminal = await tool.execute("smoke-graph-file-retrieve-0", { action: "retrieve", runId: graphFileRunId, preview: true }, undefined, undefined, makeCtx(true, async () => false, graphFileRoot));
+let graphFileTerminal = await tool.execute("smoke-graph-file-run_status-0", { action: "run_status", runId: graphFileRunId, preview: true }, undefined, undefined, makeCtx(true, async () => false, graphFileRoot));
 for (let attempt = 0; !graphFileTerminal.details.run?.terminal && attempt < 20; attempt += 1) {
 	await new Promise((resolve) => setTimeout(resolve, 5));
-	graphFileTerminal = await tool.execute(`smoke-graph-file-retrieve-${attempt + 1}`, { action: "retrieve", runId: graphFileRunId, cursor: graphFileTerminal.details.cursor, preview: true }, undefined, undefined, makeCtx(true, async () => false, graphFileRoot));
+	graphFileTerminal = await tool.execute(`smoke-graph-file-run_status-${attempt + 1}`, { action: "run_status", runId: graphFileRunId, cursor: graphFileTerminal.details.cursor, preview: true }, undefined, undefined, makeCtx(true, async () => false, graphFileRoot));
 }
 assert.equal(graphFileTerminal.details.run?.status, "succeeded");
 assert.equal(graphFileTerminal.details.outputs[0]?.text, "smoke-ok");
@@ -168,10 +168,10 @@ assert.match(holdRunId, /^agt_/);
 assert.equal(holdStarted.details.run?.status, "running");
 assert.equal(shutdownHandlers.length, 1);
 shutdownHandlers[0]({ reason: "smoke reload" });
-let canceled = await tool.execute("smoke-retrieve-hold-0", { action: "retrieve", runId: holdRunId }, undefined, undefined, makeCtx(true));
+let canceled = await tool.execute("smoke-run_status-hold-0", { action: "run_status", runId: holdRunId }, undefined, undefined, makeCtx(true));
 for (let attempt = 0; !canceled.details.run?.terminal && attempt < 20; attempt += 1) {
 	await new Promise((resolve) => setTimeout(resolve, 5));
-	canceled = await tool.execute(`smoke-retrieve-hold-${attempt + 1}`, { action: "retrieve", runId: holdRunId, cursor: canceled.details.cursor }, undefined, undefined, makeCtx(true));
+	canceled = await tool.execute(`smoke-run_status-hold-${attempt + 1}`, { action: "run_status", runId: holdRunId, cursor: canceled.details.cursor }, undefined, undefined, makeCtx(true));
 }
 assert.equal(canceled.details.run?.status, "canceled");
 assert.equal(canceled.details.steps[0]?.errorMessage?.includes("smoke reload"), true);
@@ -239,7 +239,7 @@ function assertNotice(notice: { message: unknown; options: unknown } | undefined
 	assert.match(notice.message.content, /agent_team succeeded smoke run/);
 	assert.match(notice.message.content, /runId=agt_/);
 	assert.match(notice.message.content, /final evidence step succeeded .*\.md/);
-	assert.match(notice.message.content, /untrusted status evidence; retrieve\/peek for artifacts/);
+	assert.match(notice.message.content, /untrusted status evidence; run_status\/step_result for artifacts/);
 	assert.doesNotMatch(notice.message.content, /# agent_team terminal notice|Objective:|Run:|Exceptional controls|artifact=|\/tmp\/|Next:|cleanup|cursor|debugEvents|smoke-ok/i);
 	assert.equal(isRecord(notice.message.details), true);
 	const details = notice.message.details;

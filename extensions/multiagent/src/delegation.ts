@@ -12,7 +12,7 @@ import { finalizeDetails, hasDiagnosticError, makeDetails, type AgentTeamRuntime
 import { catalogParentExtensionToolDiagnostics } from "./tool-policy.ts";
 import { AgentTeamSchema, type AgentTeamInput, type GraphSpec } from "./schemas.ts";
 import type { AgentDiagnostic, AgentTeamDetails, RunSnapshot } from "./types.ts";
-import { AGENT_TEAM_ACTION_VALUES, DEFAULT_GRAPH_LIBRARY_SOURCES, DEFAULT_RETRIEVE_MAX_BYTES, MAX_LIVE_DETACHED_RUNS, MAX_RETAINED_DETACHED_RUNS, type ExecutionAction } from "./types.ts";
+import { AGENT_TEAM_ACTION_VALUES, DEFAULT_GRAPH_LIBRARY_SOURCES, DEFAULT_RESULT_PREVIEW_MAX_BYTES, MAX_LIVE_DETACHED_RUNS, MAX_RETAINED_DETACHED_RUNS, type ExecutionAction } from "./types.ts";
 
 const validateAgentTeamInput = Compile(AgentTeamSchema);
 
@@ -29,8 +29,8 @@ export async function runAgentTeam(rawInput: unknown, options: AgentTeamRuntimeO
 	const input = inputForValidation as AgentTeamInput;
 	if (input.action === "catalog") return finalizeDetails(catalog(input, options, diagnostics));
 	if (input.action === "start") return finalizeDetails(start(input, options, diagnostics));
-	if (input.action === "retrieve") return finalizeDetails(await retrieve(input, options, diagnostics));
-	if (input.action === "peek") return finalizeDetails(peek(input, options, diagnostics));
+	if (input.action === "run_status") return finalizeDetails(await run_status(input, options, diagnostics));
+	if (input.action === "step_result") return finalizeDetails(step_result(input, options, diagnostics));
 	if (input.action === "message") return finalizeDetails(await message(input, options, diagnostics));
 	if (input.action === "cancel") return finalizeDetails(cancel(input, options, diagnostics));
 	if (input.action === "cleanup") return finalizeDetails(cleanup(input, options, diagnostics));
@@ -60,19 +60,19 @@ function start(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnost
 	return run.details("start");
 }
 
-async function retrieve(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): Promise<AgentTeamDetails> {
+async function run_status(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): Promise<AgentTeamDetails> {
 	const run = getDetachedRun(input.runId);
-	if (!run) return makeDetails("retrieve", false, diagnostics, options, undefined, runNotFoundError());
-	if (input.stepId && !run.hasStep(input.stepId)) return run.details("retrieve", { stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RETRIEVE_MAX_BYTES, preview: input.preview === true, ok: false, error: { code: "step-not-found", message: "No step in the retained detached run matches stepId." } });
+	if (!run) return makeDetails("run_status", false, diagnostics, options, undefined, runNotFoundError());
+	if (input.stepId && !run.hasStep(input.stepId)) return run.details("run_status", { stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES, preview: input.preview === true, ok: false, error: { code: "step-not-found", message: "No step in the retained detached run matches stepId." } });
 	if (input.waitSeconds !== undefined) await run.waitForChange({ stepId: input.stepId, cursor: input.cursor, seconds: input.waitSeconds });
-	return run.details("retrieve", { cursor: input.cursor, stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RETRIEVE_MAX_BYTES, preview: input.preview === true, includeEvents: input.debugEvents === true });
+	return run.details("run_status", { cursor: input.cursor, stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES, preview: input.preview === true, includeEvents: input.debugEvents === true });
 }
 
-function peek(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): AgentTeamDetails {
+function step_result(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): AgentTeamDetails {
 	const run = getDetachedRun(input.runId);
-	if (!run) return makeDetails("peek", false, diagnostics, options, undefined, runNotFoundError());
-	if (!input.stepId || !run.hasStep(input.stepId)) return run.details("peek", { stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RETRIEVE_MAX_BYTES, preview: input.preview === true, ok: false, error: { code: "step-not-found", message: "No step in the retained detached run matches stepId." } });
-	return run.details("peek", { stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RETRIEVE_MAX_BYTES, preview: input.preview === true });
+	if (!run) return makeDetails("step_result", false, diagnostics, options, undefined, runNotFoundError());
+	if (!input.stepId || !run.hasStep(input.stepId)) return run.details("step_result", { stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES, preview: input.preview === true, ok: false, error: { code: "step-not-found", message: "No step in the retained detached run matches stepId." } });
+	return run.details("step_result", { stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES, preview: input.preview === true });
 }
 
 async function message(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): Promise<AgentTeamDetails> {
@@ -92,7 +92,7 @@ function cancel(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnos
 function cleanup(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): AgentTeamDetails {
 	const run = getDetachedRun(input.runId);
 	if (!run) return makeDetails("cleanup", false, diagnostics, options, undefined, runNotFoundError());
-	if (!run.snapshot().terminal) return run.details("cleanup", { ok: false, error: { code: "cleanup-run-live", message: "Cleanup is denied while the run is live; let healthy work finish, or cancel only when stopping is explicit, then retrieve terminal state first." } });
+	if (!run.snapshot().terminal) return run.details("cleanup", { ok: false, error: { code: "cleanup-run-live", message: "Cleanup is denied while the run is live; let healthy work finish, or cancel only when stopping is explicit, then run_status terminal state first." } });
 	try {
 		const receipt = run.cleanup();
 		forgetDetachedRun(run.id);
@@ -115,7 +115,7 @@ function detachedRunCapacityError(): { code: string; message: string } | undefin
 export function detachedRunCapacityErrorForSnapshots(snapshots: RunSnapshot[]): { code: string; message: string } | undefined {
 	const liveRuns = snapshots.filter((run) => !run.terminal);
 	const terminalRuns = snapshots.filter((run) => run.terminal);
-	if (liveRuns.length >= MAX_LIVE_DETACHED_RUNS) return { code: "detached-run-live-cap-reached", message: `Too many live detached runs (${liveRuns.length}); retrieve and preserve evidence, then cancel only runs that are stuck, obsolete, unsafe, or explicitly lower value than the new work. Maximum live runs: ${MAX_LIVE_DETACHED_RUNS}. Live runs: ${summarizeRunCapacity(liveRuns)}.` };
+	if (liveRuns.length >= MAX_LIVE_DETACHED_RUNS) return { code: "detached-run-live-cap-reached", message: `Too many live detached runs (${liveRuns.length}); run_status and preserve evidence, then cancel only runs that are stuck, obsolete, unsafe, or explicitly lower value than the new work. Maximum live runs: ${MAX_LIVE_DETACHED_RUNS}. Live runs: ${summarizeRunCapacity(liveRuns)}.` };
 	if (snapshots.length >= MAX_RETAINED_DETACHED_RUNS) return { code: "detached-run-retained-cap-reached", message: `Too many retained detached runs (${snapshots.length}); free capacity by cleaning up terminal runs only after preserving needed artifacts, or by canceling live runs only when they are stuck, obsolete, unsafe, or explicitly lower value than the new work. Maximum retained runs: ${MAX_RETAINED_DETACHED_RUNS}. Live runs (${liveRuns.length}): ${summarizeRunCapacity(liveRuns)}. Terminal runs (${terminalRuns.length}): ${summarizeRunCapacity(terminalRuns)}.` };
 	return undefined;
 }
@@ -140,12 +140,12 @@ function validateInputSchema(input: unknown): AgentDiagnostic[] {
 
 function schemaRepair(input: unknown, path: string): string {
 	if (isRecord(input)) {
-		if (path === "/maxBytes" || input.maxBytes !== undefined) return "maxBytes must be between 1 and 200000 and is valid only for retrieve and peek previews; catalog narrowing uses library.query.";
-		if (path === "/preview" || input.preview !== undefined) return "preview must be true or false and is valid only for retrieve and peek; previews default to false.";
+		if (path === "/maxBytes" || input.maxBytes !== undefined) return "maxBytes must be between 1 and 200000 and is valid only for run_status and step_result previews; catalog narrowing uses library.query.";
+		if (path === "/preview" || input.preview !== undefined) return "preview must be true or false and is valid only for run_status and step_result; previews default to false.";
 		if (path === "/channel" || input.channel !== undefined) return 'Use channel:"steer" or channel:"follow_up" for message.';
 		if (path === "/text" || input.text !== undefined) return "Message text must be a non-empty string.";
 	}
-	return "Use the action-specific control set: catalog uses library; start uses graph/graphFile plus options; retrieve/peek use runId and preview controls; message uses runId, stepId, channel, text, and optional clientMessageId.";
+	return "Use the action-specific control set: catalog uses library; start uses graph/graphFile plus options; run_status/step_result use runId and preview controls; message uses runId, stepId, channel, text, and optional clientMessageId.";
 }
 
 function detailsAction(input: unknown): ExecutionAction | "missing/invalid" {

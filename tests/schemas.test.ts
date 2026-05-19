@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Compile } from "typebox/compile";
 import { AgentTeamSchema } from "../extensions/multiagent/src/schemas.ts";
-import { DEFAULT_MAX_RUN_SECONDS, DEFAULT_NOTIFY_MAX_NOTICES, DEFAULT_NOTIFY_MIN_INTERVAL_SECONDS, DEFAULT_RETRIEVE_MAX_BYTES, DEFAULT_TERMINAL_RETENTION_SECONDS, DEFAULT_TIMEOUT_SECONDS_PER_STEP, MAX_CLIENT_MESSAGE_ID_CHARS, MAX_MAX_RUN_SECONDS, MAX_PARENT_MESSAGE_CHARS, MAX_PATH_FIELD_CHARS, MAX_RETRIEVE_MAX_BYTES, MAX_RETRIEVE_WAIT_SECONDS, MAX_STEPS, MAX_TERMINAL_RETENTION_SECONDS, MAX_TEXT_FIELD_CHARS, MAX_TIMEOUT_SECONDS_PER_STEP } from "../extensions/multiagent/src/types.ts";
+import { DEFAULT_MAX_RUN_SECONDS, DEFAULT_NOTIFY_MAX_NOTICES, DEFAULT_NOTIFY_MIN_INTERVAL_SECONDS, DEFAULT_RESULT_PREVIEW_MAX_BYTES, DEFAULT_TERMINAL_RETENTION_SECONDS, DEFAULT_TIMEOUT_SECONDS_PER_STEP, MAX_CLIENT_MESSAGE_ID_CHARS, MAX_MAX_RUN_SECONDS, MAX_PARENT_MESSAGE_CHARS, MAX_PATH_FIELD_CHARS, MAX_RESULT_PREVIEW_BYTES, MAX_RUN_STATUS_WAIT_SECONDS, MAX_STEPS, MAX_TERMINAL_RETENTION_SECONDS, MAX_TEXT_FIELD_CHARS, MAX_TIMEOUT_SECONDS_PER_STEP } from "../extensions/multiagent/src/types.ts";
 
 const validate = Compile(AgentTeamSchema);
 
@@ -12,11 +12,12 @@ const graph = {
 };
 
 test("AgentTeamSchema exposes detached-only action set and rejects run", () => {
-	for (const action of ["catalog", "start", "retrieve", "peek", "message", "cancel", "cleanup"]) {
-		const input = action === "start" ? { action, graph } : action === "peek" ? { action, runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one" } : action === "message" ? { action, runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", channel: "steer", text: "continue" } : action === "catalog" ? { action } : { action, runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" };
+	for (const action of ["catalog", "start", "run_status", "step_result", "message", "cancel", "cleanup"]) {
+		const input = action === "start" ? { action, graph } : action === "step_result" ? { action, runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one" } : action === "message" ? { action, runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", channel: "steer", text: "continue" } : action === "catalog" ? { action } : { action, runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" };
 		assert.equal(validate.Check(input), true, action);
 	}
-	assert.equal(validate.Check({ action: "run", objective: "old", steps: [] }), false);
+	assert.equal(validate.Check({ action: "run", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one" }), false, "run must stay absent");
+	assert.equal(validate.Check({ action: "unknown", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one" }), false, "unknown actions must stay absent");
 });
 
 test("AgentTeamSchema preserves public field bounds and defaults", () => {
@@ -28,9 +29,9 @@ test("AgentTeamSchema preserves public field bounds and defaults", () => {
 	assert.equal(root.graphFile.maxLength, MAX_PATH_FIELD_CHARS);
 	assert.equal(root.text.maxLength, MAX_PARENT_MESSAGE_CHARS);
 	assert.equal(root.clientMessageId.maxLength, MAX_CLIENT_MESSAGE_ID_CHARS);
-	assert.equal(root.maxBytes.maximum, MAX_RETRIEVE_MAX_BYTES);
+	assert.equal(root.maxBytes.maximum, MAX_RESULT_PREVIEW_BYTES);
 	assert.equal(root.maxBytes.multipleOf, 1);
-	assert.equal(root.waitSeconds.maximum, MAX_RETRIEVE_WAIT_SECONDS);
+	assert.equal(root.waitSeconds.maximum, MAX_RUN_STATUS_WAIT_SECONDS);
 	assert.equal(root.waitSeconds.multipleOf, 1);
 	assert.equal(startOptions.maxRunSeconds.default, DEFAULT_MAX_RUN_SECONDS);
 	assert.equal(startOptions.maxRunSeconds.maximum, MAX_MAX_RUN_SECONDS);
@@ -55,9 +56,9 @@ test("AgentTeamSchema preserves public field bounds and defaults", () => {
 	assert.match(root.action.description, /Action decision/);
 	assert.match(root.library.properties.sources.description, /Catalog-only sources/);
 	assert.match(graphSchema.properties.library.properties.sources.description, /Start-only library sources/);
-	assert.match(root.stepId.description, /retrieve wait\/debug targeting/);
+	assert.match(root.stepId.description, /run_status wait\/debug targeting/);
 	assert.match(root.stepId.description, /does not select step text/);
-	assert.match(root.maxBytes.description, /Retrieve\/peek-only/);
+	assert.match(root.maxBytes.description, /run_status\/step_result-only/);
 	assert.match(root.text.description, /not impatience/);
 });
 
@@ -73,15 +74,15 @@ test("AgentTeamSchema keeps start graph pure and bounded", () => {
 	assert.equal(validate.Check({ action: "start", graph, options: { terminalRetentionSeconds: 1.5 } }), false);
 	assert.equal(validate.Check({ action: "start", graph, options: { notify: { minIntervalSeconds: 0.5 } } }), false);
 	assert.equal(validate.Check({ action: "start", graph: { ...graph, limits: { timeoutSecondsPerStep: 1.5 } } }), false);
-	assert.equal(validate.Check({ action: "retrieve", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", maxBytes: 1.5 }), false);
+	assert.equal(validate.Check({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", maxBytes: 1.5 }), false);
 });
 
-test("AgentTeamSchema bounds retrieve and message controls", () => {
+test("AgentTeamSchema bounds run_status and message controls", () => {
 	const runId = "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_";
-	assert.equal(validate.Check({ action: "retrieve", runId, maxBytes: DEFAULT_RETRIEVE_MAX_BYTES, debugEvents: true }), true);
-	assert.equal(validate.Check({ action: "retrieve", runId, stepId: "one", waitSeconds: 1 }), true);
-	assert.equal(validate.Check({ action: "retrieve", runId, waitSeconds: MAX_RETRIEVE_WAIT_SECONDS + 1 }), false);
-	assert.equal(validate.Check({ action: "peek", runId, stepId: "one" }), true);
+	assert.equal(validate.Check({ action: "run_status", runId, maxBytes: DEFAULT_RESULT_PREVIEW_MAX_BYTES, debugEvents: true }), true);
+	assert.equal(validate.Check({ action: "run_status", runId, stepId: "one", waitSeconds: 1 }), true);
+	assert.equal(validate.Check({ action: "run_status", runId, waitSeconds: MAX_RUN_STATUS_WAIT_SECONDS + 1 }), false);
+	assert.equal(validate.Check({ action: "step_result", runId, stepId: "one" }), true);
 	assert.equal(validate.Check({ action: "message", runId, stepId: "one", channel: "follow_up", text: "x", clientMessageId: "m" }), true);
 	assert.equal(validate.Check({ action: "message", runId, stepId: "one", channel: "chat", text: "x" }), false);
 	assert.equal(validate.Check({ action: "message", runId, stepId: "one", channel: "steer", text: "", }), false);
