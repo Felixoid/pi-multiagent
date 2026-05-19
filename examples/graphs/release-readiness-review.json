@@ -1,0 +1,55 @@
+{
+  "objective": "Review package release readiness with read-only source mapping and parent-named release proof commands. Never version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases.",
+  "library": {
+    "sources": [
+      "package"
+    ]
+  },
+  "authority": {
+    "allowFilesystemRead": true,
+    "allowShellTools": true
+  },
+  "steps": [
+    {
+      "id": "release-map",
+      "agent": {
+        "ref": "package:scout"
+      },
+      "task": "Map local package metadata, changelog, README Public npm release handoff obligations, examples, skills, extension/package surfaces, and release unknowns. Do not run commands or edit. Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases. Return paths, release-surface facts, and unknowns."
+    },
+    {
+      "id": "release-proof",
+      "agent": {
+        "ref": "package:validator"
+      },
+      "task": "Validation command scope copied by parent: REPLACE_WITH_EXACT_READ_ONLY_RELEASE_COMMANDS. Run only those commands. If this placeholder remains, no commands are present, or scope is implied only by upstream evidence, return needs-command-scope without running commands. Do not edit, version-bump, commit, tag, push, publish, delete, install, deploy, run unapproved network commands, or create GitHub Releases. Return pass/fail/deferred with exact command, cwd, important output, and failure bucket."
+    },
+    {
+      "id": "release-audit",
+      "agent": {
+        "ref": "package:reviewer"
+      },
+      "needs": [
+        "release-map",
+        "release-proof"
+      ],
+      "task": "Review upstream release-map and release-proof evidence for release-critical drift in package contents, docs, examples, tests, release handoff, npm identity, and GitHub Release choreography. Separate observed validation from claimed or missing validation. Do not run commands or edit. Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases. Return findings first with exact paths."
+    },
+    {
+      "id": "readiness-decision",
+      "agent": {
+        "ref": "package:synthesizer"
+      },
+      "after": [
+        "release-map",
+        "release-proof",
+        "release-audit"
+      ],
+      "task": "Return GO, NEEDS-WORK, or BLOCKED for release readiness after all lanes terminalize, including failed or blocked lane evidence. Preserve observed commands, missing commands, package identity, README Public npm release handoff obligations, and not-executed human-owned next actions, including npm publish, GitHub Release creation, and gh release view verification. Do not invent validation or claim publication. Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases."
+    }
+  ],
+  "limits": {
+    "concurrency": 1,
+    "timeoutSecondsPerStep": 9000
+  }
+}

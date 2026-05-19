@@ -126,6 +126,22 @@ test("resolveDetachedGraph rejects inherited catalog defaults capped to no tools
 	assert.deepEqual(explicitEmptyTools.steps[0]?.agent.tools, READONLY_CHILD_TOOL_NAMES);
 });
 
+test("resolveDetachedGraph reports inline missing read authority without catalog-default wording", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-inline-no-read-${Date.now()}`), { recursive: true });
+	for (const agent of [{ system: "x" }, { system: "x", tools: [] }, { system: "x", tools: ["read"] }]) {
+		const graph = resolveDetachedGraph(
+			{ objective: "inline no read", steps: [{ id: "one", agent, task: "x" }] },
+			[],
+			[],
+			{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+			undefined,
+		);
+		assert.equal(graph.diagnostics.some((item) => item.code === "filesystem-read-authority-required"), true);
+		assert.equal(graph.diagnostics.some((item) => item.code === "catalog-default-tools-denied"), false);
+		assert.deepEqual(graph.steps, []);
+	}
+});
+
 test("findProjectSettingsFile ignores the user-global Pi settings file", async () => {
 	const home = await mkdir(join(tmpdir(), `pi-multiagent-plan-global-pi-${Date.now()}`), { recursive: true });
 	const globalPi = join(home, ".pi");

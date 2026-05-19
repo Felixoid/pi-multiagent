@@ -71,6 +71,7 @@ test("mutation-capable graph examples repeat authorization and validation gates"
 	assert.match(stepMutationScope(docsAlignment, "docs-editor"), /not path-confined/);
 	assert.match(stepTask(docsAlignment, "docs-editor"), /docs, examples, and directly affected docs\/example tests or fixtures/);
 	assert.match(stepTask(docsAlignment, "docs-editor"), /placeholder, missing, or broader/);
+	assert.match(stepTask(docsAlignment, "validation-review"), /REPLACE_WITH_EXACT_DOCS_EXAMPLES_VALIDATION_COMMANDS/);
 	assert.match(stepTask(docsAlignment, "validation-review"), /tests\/examples\.test\.ts/);
 	assert.match(stepTask(docsAlignment, "validation-review"), /tests\/check-public-docs\.ts/);
 
@@ -80,7 +81,8 @@ test("mutation-capable graph examples repeat authorization and validation gates"
 	assert.match(stepMutationScope(releaseFoundry, "release-fix-worker"), /Explicit exclusions/);
 	assert.match(stepMutationScope(releaseFoundry, "release-fix-worker"), /not a sandbox/);
 	assert.match(stepMutationScope(releaseFoundry, "release-fix-worker"), /not path-confined/);
-	for (const stepId of ["release-scope", "release-fix-worker"]) assert.match(stepTask(releaseFoundry, stepId), /Do not version-bump, commit, tag, push, publish, or create GitHub Releases/);
+	assert.match(stepMutationScope(releaseFoundry, "release-fix-worker"), /version bump, commit, tag, push, publish, delete, install, deploy, GitHub Release creation/);
+	for (const stepId of ["release-map", "release-probes", "artifact-audit", "release-fix-worker", "release-validation", "ship-decision"]) assert.match(stepTask(releaseFoundry, stepId), /Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases/);
 });
 
 test("mutation examples with authorization placeholders fail closed", async () => {
@@ -121,6 +123,7 @@ test("review graph examples keep authority with parent-authored tasks", async ()
 
 	const readOnlyFanout = await readGraphExample("read-only-audit-fanout.json");
 	assert.equal(stepAgentRef(readOnlyFanout, "docs-audit"), "package:docs-auditor");
+	assert.match(stepTask(readOnlyFanout, "scope-map"), /NEEDS-SCOPE/);
 	assert.doesNotMatch(stepTask(readOnlyFanout, "contract-audit"), new RegExp("validation " + "proof"));
 	assert.match(stepTask(readOnlyFanout, "contract-audit"), /validation gaps or claimed proof/);
 });
@@ -136,9 +139,11 @@ test("packaged graph examples resolve against bundled catalog with expected sink
 		["human-gated-plan-only.json", ["final-decision"]],
 		["implementation-review-gate.json", ["final-decision"]],
 		["inline-read-only-fanin.json", ["summary"]],
+		["map-reduce-audit-fanout.json", ["reduce-decision"]],
 		["model-facing-docs-audit.json", ["final-opportunities"]],
 		["public-release-foundry.json", ["ship-decision"]],
 		["read-only-audit-fanout.json", ["final-decision"]],
+		["release-readiness-review.json", ["readiness-decision"]],
 		["research-to-change-gated-loop.json", ["final-report"]],
 		["single-specialist-read-only.json", ["inspect"]],
 	]);
@@ -161,11 +166,41 @@ test("packaged graph examples resolve against bundled catalog with expected sink
 });
 
 test("research and release examples expose later authorization and command scope", async () => {
+	const mapReduce = await readGraphExample("map-reduce-audit-fanout.json");
+	assert.match(String(mapReduce.objective), /local evidence surfaces/);
+	assert.equal(stepAgentRef(mapReduce, "map-tests"), "package:scout");
+	assert.match(stepTask(mapReduce, "map-runtime"), /concrete delegated question/);
+	assert.match(stepTask(mapReduce, "map-runtime"), /NEEDS-SCOPE/);
+	assert.match(stepTask(mapReduce, "map-runtime"), /surface, owner or canonical path, evidence, risk or mismatch, validation gap, and smallest next action/);
+	assert.match(stepTask(mapReduce, "map-docs"), /model-facing copy/);
+	assert.match(stepTask(mapReduce, "reduce-decision"), /reducer packet/);
+	assert.match(stepTask(mapReduce, "reduce-decision"), /observed validation versus claimed validation/);
+	assert.match(stepTask(mapReduce, "reduce-decision"), /Do not invent validation or mutation authority/);
+	assert.deepEqual(sinkStepIds(mapReduce), ["reduce-decision"]);
 	const research = await readGraphExample("research-to-change-gated-loop.json");
+	assert.match(String(research.objective), /loop iteration/);
+	assert.match(stepTask(research, "evidence-scout"), /NEEDS-SCOPE/);
+	assert.match(stepTask(research, "final-report"), /gated loop iteration/);
 	assert.match(stepTask(research, "final-report"), /exact human approval question/);
 	assert.match(stepTask(research, "final-report"), /concrete mutationScope/);
+	const releaseReadiness = await readGraphExample("release-readiness-review.json");
+	assert.equal(isRecord(releaseReadiness.authority) && releaseReadiness.authority.allowFilesystemRead === true, true);
+	assert.equal(isRecord(releaseReadiness.authority) && releaseReadiness.authority.allowShellTools === true, true);
+	assert.equal(isRecord(releaseReadiness.authority) && releaseReadiness.authority.allowMutationTools === true, false);
+	assert.equal(JSON.stringify(releaseReadiness).includes("mutationScope"), false);
+	assert.match(stepTask(releaseReadiness, "release-proof"), /REPLACE_WITH_EXACT_READ_ONLY_RELEASE_COMMANDS/);
+	assert.match(stepTask(releaseReadiness, "release-proof"), /needs-command-scope/);
+	assert.equal(isRecord(releaseReadiness.limits) && releaseReadiness.limits.concurrency === 1, true);
+	assert.match(stepTask(releaseReadiness, "readiness-decision"), /npm publish, GitHub Release creation, and gh release view verification/);
 	const release = await readGraphExample("public-release-foundry.json");
+	assert.match(String(release.objective), /release-readiness-review\.json/);
+	assert.equal(stepAgentRef(release, "release-map"), "package:scout");
+	assert.equal(stepAgentRef(release, "release-probes"), "package:validator");
+	assert.match(stepTask(release, "release-probes"), /REPLACE_WITH_EXACT_RELEASE_PROBE_COMMANDS/);
+	assert.match(stepTask(release, "release-probes"), /needs-command-scope/);
+	assert.deepEqual(stepNeeds(release, "artifact-audit"), ["release-map", "release-probes"]);
 	assert.match(stepTask(release, "release-validation"), /REPLACE_WITH_EXACT_RELEASE_COMMANDS/);
+	assert.match(stepTask(release, "release-validation"), /Reserve pnpm run check:release for a clean release commit/);
 	assert.match(stepTask(release, "release-validation"), /needs-command-scope/);
 	const approved = await readGraphExample("approved-plan-implementation.json");
 	assert.match(stepTask(approved, "approval-check"), /prior plan artifact paths/);
@@ -177,6 +212,36 @@ test("research and release examples expose later authorization and command scope
 	assert.match(stepTask(chained, "artifact-review"), /prior run\/artifact paths/);
 	assert.match(stepTask(chained, "artifact-review"), /cleanup may have deleted needed evidence/);
 	assert.match(stepTask(chained, "final-decision"), /preserve needed artifacts before cleanup/);
+});
+
+test("validator graph steps require parent-copied command scope", async () => {
+	const files = (await readdir(examplesDir)).filter((file) => file.endsWith(".json")).sort();
+	for (const file of files) {
+		const graph = await readGraphExample(file);
+		for (const step of graphSteps(graph)) {
+			if (!isRecord(step.agent) || step.agent.ref !== "package:validator") continue;
+			const task = typeof step.task === "string" ? step.task : "";
+			assert.match(task, /Validation command scope copied by parent:/, `${file}:${String(step.id)} must name parent command scope`);
+			assert.match(task, /Run only those commands/, `${file}:${String(step.id)} must not infer commands from upstream evidence`);
+			assert.match(task, /placeholder remains/, `${file}:${String(step.id)} must fail closed on placeholders`);
+			assert.match(task, /needs-command-scope/, `${file}:${String(step.id)} must return needs-command-scope when commands are absent`);
+			assert.match(task, /scope is implied only by upstream evidence/, `${file}:${String(step.id)} must reject upstream-implied command scope`);
+		}
+	}
+});
+
+test("read-only reusable skeletons fail closed when parent scope is missing", async () => {
+	for (const [file, stepId] of [
+		["single-specialist-read-only.json", "inspect"],
+		["read-only-audit-fanout.json", "scope-map"],
+		["map-reduce-audit-fanout.json", "map-runtime"],
+		["research-to-change-gated-loop.json", "evidence-scout"],
+		["human-gated-plan-only.json", "scope-map"],
+	] as const) {
+		const graph = await readGraphExample(file);
+		assert.match(stepTask(graph, stepId), /NEEDS-SCOPE/, `${file}:${stepId} must fail closed without concrete parent scope`);
+		assert.match(stepTask(graph, stepId), /without broad repo search/, `${file}:${stepId} must avoid broad fallback search`);
+	}
 });
 
 test("public Markdown agent_team JSON snippets are schema-valid", async () => {
@@ -208,6 +273,12 @@ async function readGraphExample(file: string): Promise<Record<string, unknown>> 
 	return parsed;
 }
 
+function graphSteps(graph: Record<string, unknown>): Record<string, unknown>[] {
+	const steps = graph.steps;
+	if (!Array.isArray(steps)) throw new Error("graph must contain steps");
+	return steps.filter((step): step is Record<string, unknown> => isRecord(step));
+}
+
 function sinkStepIds(graph: Record<string, unknown>): string[] {
 	const steps = graph.steps;
 	if (!Array.isArray(steps)) throw new Error("graph must contain steps");
@@ -232,6 +303,12 @@ function stepAgentRef(graph: Record<string, unknown>, id: string): string {
 	const step = findStep(graph, id);
 	if (!isRecord(step.agent) || typeof step.agent.ref !== "string") throw new Error(`step ${id} must have agent.ref`);
 	return step.agent.ref;
+}
+
+function stepNeeds(graph: Record<string, unknown>, id: string): string[] {
+	const step = findStep(graph, id);
+	if (!Array.isArray(step.needs)) return [];
+	return step.needs.filter((need): need is string => typeof need === "string");
 }
 
 function stepMutationScope(graph: Record<string, unknown>, id: string): string {

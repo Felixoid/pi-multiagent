@@ -31,7 +31,13 @@ test("attachRpcJsonlReader caps each record after splitting batched chunks", () 
 	const overlongErrors: string[] = [];
 	attachRpcJsonlReader(overlong, () => undefined, (message) => overlongErrors.push(message), 20);
 	overlong.write(`${JSON.stringify({ type: "response", id: "a" })}\n`);
-	assert.equal(overlongErrors.some((message) => message.includes("record exceeded 20")), true);
+	assert.equal(overlongErrors.some((message) => message.includes("record exceeded 20 bytes")), true);
+
+	const multibyte = new PassThrough();
+	const multibyteErrors: string[] = [];
+	attachRpcJsonlReader(multibyte, () => undefined, (message) => multibyteErrors.push(message), 15);
+	multibyte.write(`${JSON.stringify({ text: "éééé" })}\n`);
+	assert.equal(multibyteErrors.some((message) => message.includes("record exceeded 15 bytes")), true);
 });
 
 test("attachRpcJsonlReader rejects unterminated and non-object records", async () => {

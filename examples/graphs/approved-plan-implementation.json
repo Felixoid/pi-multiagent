@@ -37,7 +37,7 @@
       "needs": [
         "implementation-worker"
       ],
-      "task": "Run only validation commands explicitly copied here by the parent: REPLACE_WITH_EXACT_APPROVED_VALIDATION_COMMANDS. If this placeholder remains, no commands are present, or scope is only implied by upstream evidence, return needs-command-scope without running commands. Do not edit, install, publish, deploy, delete, or run network commands."
+      "task": "Validation command scope copied by parent: REPLACE_WITH_EXACT_APPROVED_VALIDATION_COMMANDS. Run only those commands. If this placeholder remains, no commands are present, or scope is implied only by upstream evidence, return needs-command-scope without running commands. Do not edit, install, publish, deploy, delete, or run network commands."
     },
     {
       "id": "final-review",

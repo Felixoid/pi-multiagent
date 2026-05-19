@@ -256,6 +256,11 @@ async function waitForChildren(harness: RpcHarness, count: number): Promise<void
 	assert.equal(harness.children.length >= count, true, `expected at least ${count} child process(es)`);
 }
 
+function assertLateChildErrorsDoNotThrow(child: FakeChild | undefined): void {
+	assert.ok(child);
+	for (const target of [child.stdout, child.stderr, child.stdin, child] as const) assert.doesNotThrow(() => target.emit("error", new Error("late forced closeout error")));
+}
+
 async function addProjectSettings(root: string): Promise<void> {
 	await mkdir(join(root, ".pi"), { recursive: true });
 	await writeFile(join(root, ".pi", "settings.json"), "{}");
@@ -367,6 +372,7 @@ test("empty assistant final fails the step instead of succeeding with an empty a
 	assert.ok(terminalNotice);
 	assert.equal(terminalNotice.run?.status, "failed");
 	assert.equal(terminalNotice.notice?.reasons.includes("terminal:failed"), true);
+	assert.equal(terminalNotice.notice?.reasons.includes("step one failed"), true);
 	const cleanup = await runAgentTeam({ action: "cleanup", runId }, options);
 	assert.equal(cleanup.details.cleanup?.runId, runId);
 });
@@ -713,6 +719,62 @@ test("rpc stdin stream errors fail the step instead of crashing the parent", asy
 	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
+test("rpc stdout and stderr stream errors fail deterministically", async () => {
+	for (const streamName of ["stdout", "stderr"] as const) {
+		const root = await mkdir(join(tmpdir(), `pi-multiagent-${streamName}-error-${Date.now()}`), { recursive: true });
+		const harness = rpcHarness("hold");
+		const options = makeOptions(root, harness.spawn);
+		const started = await runAgentTeam(graph(), options);
+		const runId = started.details.run?.runId ?? "";
+		await waitForChildren(harness, 1);
+		harness.children[0][streamName].emit("error", new Error("stream boom"));
+		harness.children[0][streamName].emit("error", new Error("late duplicate stream boom"));
+		const terminal = await waitTerminal(root, runId, options);
+		assert.equal(terminal.details.run?.status, "failed");
+		assert.match(terminal.details.steps[0]?.errorMessage ?? "", new RegExp(`RPC ${streamName} stream error: stream boom`));
+		await runAgentTeam({ action: "cleanup", runId }, options);
+	}
+});
+
+test("rpc stdout and stderr stream errors after terminalization do not crash", async () => {
+	for (const streamName of ["stdout", "stderr"] as const) {
+		const root = await mkdir(join(tmpdir(), `pi-multiagent-late-${streamName}-error-${Date.now()}`), { recursive: true });
+		const harness = rpcHarness("exit-no-close-after-terminal");
+		const options = makeOptions(root, harness.spawn);
+		const started = await runAgentTeam(graph(), options);
+		const runId = started.details.run?.runId ?? "";
+		await waitForChildren(harness, 1);
+		const child = harness.children[0];
+		for (let attempt = 0; child.killSignals.length === 0 && attempt < 40; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+		assert.deepEqual(child.killSignals, ["SIGTERM"]);
+		child[streamName].emit("error", new Error("late stream boom"));
+		const terminal = await waitTerminal(root, runId, options, 80, false);
+		assert.equal(terminal.details.run?.status, "succeeded");
+		await runAgentTeam({ action: "cleanup", runId }, options);
+	}
+});
+
+test("rpc child listeners detach after terminal closeout", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-listener-detach-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("auto");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "succeeded");
+	const child = harness.children[0];
+	assert.ok(child);
+	assert.equal(child.stdout.listenerCount("data"), 0);
+	assert.equal(child.stdout.listenerCount("end"), 0);
+	assert.equal(child.stdout.listenerCount("error"), 0);
+	assert.equal(child.stderr.listenerCount("data"), 0);
+	assert.equal(child.stderr.listenerCount("error"), 0);
+	assert.equal(child.stdin.listenerCount("error"), 0);
+	assert.equal(child.listenerCount("exit"), 0);
+	assert.equal(child.listenerCount("close"), 0);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
 test("multiple detached runs progress independently", async () => {
 	const root = await mkdir(join(tmpdir(), `pi-multiagent-concurrent-runs-${Date.now()}`), { recursive: true });
 	const harness = rpcHarness("hold");
@@ -806,6 +868,34 @@ test("cleanup is denied while live without removing retained state", async () =>
 	assert.equal(terminal.details.outputs[0]?.text, "done after denied cleanup");
 	const cleanup = await runAgentTeam({ action: "cleanup", runId }, options);
 	assert.equal(cleanup.details.cleanup?.runId, runId);
+	assert.equal(cleanup.details.run, undefined);
+	assert.deepEqual(cleanup.details.steps, []);
+	assert.deepEqual(cleanup.details.outputs, []);
+	const afterCleanup = await runAgentTeam({ action: "retrieve", runId }, options);
+	assert.equal(afterCleanup.details.ok, false);
+	assert.equal(afterCleanup.details.error?.code, "run-not-found");
+});
+
+test("cleanup artifact failure keeps terminal run retained", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-cleanup-failure-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("hold");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	for (let attempt = 0; harness.children.length === 0 && attempt < 20; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+	harness.release("done before cleanup failure");
+	const terminal = await waitTerminal(root, runId, options);
+	const artifactPath = terminal.details.outputs[0]?.filePath;
+	if (!artifactPath) throw new Error("terminal artifact path required for cleanup failure test");
+	await rm(dirname(artifactPath), { recursive: true, force: true });
+	const cleanup = await runAgentTeam({ action: "cleanup", runId }, options);
+	assert.equal(cleanup.details.ok, false);
+	assert.equal(cleanup.details.error?.code, "cleanup-artifacts-failed");
+	assert.equal(cleanup.details.run?.runId, runId);
+	const retained = await runAgentTeam({ action: "retrieve", runId, preview: true }, options);
+	assert.equal(retained.details.ok, true);
+	assert.equal(retained.details.run?.terminal, true);
+	assert.equal(retained.details.outputs[0]?.text, "done before cleanup failure");
 });
 
 test("milestone notifications push sink progress and terminal notices", async () => {
@@ -937,6 +1027,25 @@ test("message writes bounded live channel messages to a running step only", asyn
 	const afterDenied = await runAgentTeam({ action: "retrieve", runId }, options);
 	assert.match(afterDenied.details.steps[0]?.lastActivity ?? "", /step finished/);
 	assert.doesNotMatch(afterDenied.details.steps[0]?.lastActivity ?? "", /parent follow_up denied/);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("message clientMessageId caches post-terminal denials", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-terminal-message-denial-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("auto");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	await waitTerminal(root, runId, options);
+	const first = await runAgentTeam({ action: "message", runId, stepId: "one", channel: "follow_up", text: "too late", clientMessageId: "late-denial" }, options);
+	const second = await runAgentTeam({ action: "message", runId, stepId: "one", channel: "follow_up", text: "too late", clientMessageId: "late-denial" }, options);
+	assert.equal(first.details.message?.accepted, false);
+	assert.equal(first.details.message?.reused, false);
+	assert.equal(second.details.message?.accepted, false);
+	assert.equal(second.details.message?.reused, true);
+	assert.equal(first.details.message?.undeliveredReason, second.details.message?.undeliveredReason);
+	const debug = await runAgentTeam({ action: "retrieve", runId, debugEvents: true }, options);
+	assert.equal(debug.details.events.filter((event) => event.type === "parent_message" && event.status === "error" && event.stepId === "one").length, 1);
 	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
@@ -1115,6 +1224,7 @@ test("cancel closeout resolves even when child close never arrives", async () =>
 	assert.equal(terminal.details.events.length, 0);
 	const debug = await runAgentTeam({ action: "retrieve", runId, debugEvents: true }, options);
 	assert.equal(debug.details.events.some((event) => event.label === "SIGKILL" && event.preview?.includes("closeout forced")), true);
+	assertLateChildErrorsDoNotThrow(harness.children[0]);
 	const cleanup = await runAgentTeam({ action: "cleanup", runId }, options);
 	assert.equal(cleanup.details.cleanup?.runId, runId);
 });
@@ -1130,6 +1240,7 @@ test("forced shutdown cancel sends SIGKILL without waiting for unref escalation 
 	assert.deepEqual(harness.children[0]?.killSignals, ["SIGTERM", "SIGKILL"]);
 	const terminal = await waitTerminal(root, runId, options);
 	assert.equal(terminal.details.run?.status, "canceled");
+	assertLateChildErrorsDoNotThrow(harness.children[0]);
 	const debug = await runAgentTeam({ action: "retrieve", runId, debugEvents: true }, options);
 	assert.equal(debug.details.events.some((event) => event.label === "SIGKILL" && event.preview === "shutdown"), true);
 	await runAgentTeam({ action: "cleanup", runId }, options);

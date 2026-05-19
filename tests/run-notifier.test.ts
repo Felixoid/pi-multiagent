@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { BackgroundEventStore } from "../extensions/multiagent/src/background-events.ts";
-import { RunNotifier } from "../extensions/multiagent/src/run-notifier.ts";
-import type { AgentDiagnostic, AgentTeamDetails } from "../extensions/multiagent/src/types.ts";
+import { RunNotifier, terminalStepNoticeReasons } from "../extensions/multiagent/src/run-notifier.ts";
+import type { AgentDiagnostic, AgentTeamDetails, StepSnapshot } from "../extensions/multiagent/src/types.ts";
 
 function runtimeOptions(onNotice: (details: AgentTeamDetails) => void) {
 	return {
@@ -50,3 +50,31 @@ test("RunNotifier coalesces milestones inside minInterval and preserves terminal
 	assert.equal(notices[2].notice?.terminal, true);
 	assert.deepEqual(notices[2].notice?.reasons, ["terminal:mixed"]);
 });
+
+test("terminalStepNoticeReasons names failed blocked and timed out steps only", () => {
+	const steps: StepSnapshot[] = [
+		step("ok", "succeeded"),
+		step("bad", "failed"),
+		step("blocked", "blocked"),
+		step("slow", "timed_out"),
+		step("stopped", "canceled"),
+	];
+	assert.deepEqual(terminalStepNoticeReasons(steps), ["step bad failed", "step blocked blocked", "step slow timed_out"]);
+});
+
+function step(id: string, status: StepSnapshot["status"]): StepSnapshot {
+	return {
+		id,
+		status,
+		agentRef: "inline",
+		effectiveTools: ["read", "grep", "find", "ls"],
+		extensionTools: [],
+		callerSkills: [],
+		needs: [],
+		after: [],
+		startedAt: undefined,
+		endedAt: undefined,
+		lastActivity: undefined,
+		errorMessage: undefined,
+	};
+}

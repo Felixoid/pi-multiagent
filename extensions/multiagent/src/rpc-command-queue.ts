@@ -9,11 +9,14 @@ export interface RpcCommandAck {
 interface PendingRpcCommand {
 	command: string;
 	resolve: (ack: RpcCommandAck) => void;
-	timer: ReturnType<typeof setTimeout>;
+	timer: ReturnType<typeof setTimeout> | undefined;
+	cleanup: (() => void) | undefined;
 }
 
 interface RpcCommandWriter {
-	write: (line: string) => unknown;
+	write: (line: string) => boolean;
+	once: ((event: "drain", listener: () => void) => RpcCommandWriter) & ((event: "error", listener: (error: Error) => void) => RpcCommandWriter);
+	off: ((event: "drain", listener: () => void) => RpcCommandWriter) & ((event: "error", listener: (error: Error) => void) => RpcCommandWriter);
 }
 
 export class RpcCommandQueue {
@@ -35,20 +38,14 @@ export class RpcCommandQueue {
 		const commandName = typeof command.type === "string" ? command.type : "unknown";
 		const payload = { id, ...command };
 		const ack = new Promise<RpcCommandAck>((resolve) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				resolve({ success: false, error: `RPC command ${commandName} timed out waiting for response.` });
-			}, this.timeoutMs);
-			timer.unref?.();
-			this.pending.set(id, { command: commandName, resolve, timer });
+			this.pending.set(id, { command: commandName, resolve, timer: undefined, cleanup: undefined });
 		});
 		try {
-			stdin.write(serializeRpcJsonLine(payload));
+			const flushed = stdin.write(serializeRpcJsonLine(payload));
+			if (flushed) this.startAckTimer(id, commandName);
+			else this.waitForDrain(stdin, id, commandName);
 		} catch (error) {
-			const pending = this.pending.get(id);
-			if (pending) clearTimeout(pending.timer);
-			this.pending.delete(id);
-			return Promise.resolve({ success: false, error: `RPC stdin write failed: ${error instanceof Error ? error.message : String(error)}` });
+			this.resolvePending(id, { success: false, error: `RPC stdin write failed: ${error instanceof Error ? error.message : String(error)}` });
 		}
 		return ack;
 	}
@@ -65,16 +62,55 @@ export class RpcCommandQueue {
 			onDiagnostic({ command, message: `Unexpected RPC response id ${id}.` });
 			return;
 		}
-		clearTimeout(pending.timer);
-		this.pending.delete(id);
-		pending.resolve({ success: record.success === true, error: record.success === true ? undefined : stringField(record.error) ?? `RPC command ${command} failed.` });
+		this.resolvePending(id, { success: record.success === true, error: record.success === true ? undefined : stringField(record.error) ?? `RPC command ${command} failed.` });
 	}
 
 	closeWith(errorForCommand: (command: string) => string): void {
-		for (const pending of this.pending.values()) {
-			clearTimeout(pending.timer);
-			pending.resolve({ success: false, error: errorForCommand(pending.command) });
-		}
-		this.pending.clear();
+		for (const [id, pending] of this.pending.entries()) this.resolvePending(id, { success: false, error: errorForCommand(pending.command) });
+	}
+
+	private waitForDrain(stdin: RpcCommandWriter, id: string, commandName: string): void {
+		const onDrain = () => {
+			const pending = this.pending.get(id);
+			if (!pending) return;
+			if (pending.timer) clearTimeout(pending.timer);
+			pending.timer = undefined;
+			pending.cleanup?.();
+			pending.cleanup = undefined;
+			this.startAckTimer(id, commandName);
+		};
+		const onError = (error: Error) => {
+			this.resolvePending(id, { success: false, error: `RPC stdin write failed before drain: ${error.message}` });
+		};
+		const pending = this.pending.get(id);
+		if (!pending) return;
+		pending.cleanup = () => {
+			stdin.off("drain", onDrain);
+			stdin.off("error", onError);
+		};
+		pending.timer = setTimeout(() => {
+			this.resolvePending(id, { success: false, error: `RPC stdin write did not drain before timeout for command ${commandName}.` });
+		}, this.timeoutMs);
+		pending.timer.unref?.();
+		stdin.once("drain", onDrain);
+		stdin.once("error", onError);
+	}
+
+	private startAckTimer(id: string, commandName: string): void {
+		const pending = this.pending.get(id);
+		if (!pending || pending.timer) return;
+		pending.timer = setTimeout(() => {
+			this.resolvePending(id, { success: false, error: `RPC command ${commandName} timed out waiting for response.` });
+		}, this.timeoutMs);
+		pending.timer.unref?.();
+	}
+
+	private resolvePending(id: string, ack: RpcCommandAck): void {
+		const pending = this.pending.get(id);
+		if (!pending) return;
+		if (pending.timer) clearTimeout(pending.timer);
+		pending.cleanup?.();
+		this.pending.delete(id);
+		pending.resolve(ack);
 	}
 }

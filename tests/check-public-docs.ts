@@ -31,7 +31,9 @@ import {
 } from "../extensions/multiagent/src/types.ts";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const version = readPackageVersion();
+const packageMetadata = readPackageMetadata();
+const version = packageMetadata.version;
+const packageFileAllowlist = packageMetadata.files;
 const publicFiles = [
 	"package.json",
 	"README.md",
@@ -51,21 +53,22 @@ for (const file of publicFiles) {
 
 checkPinnedGithubTags();
 checkCatalogIsAuthoritative();
-checkDetachedContractCopy();
+checkPublicSurfaceOwnership();
 checkActionSnippetHygiene();
 checkTimeoutContract();
 checkLimitsContract();
 checkGraphExamples();
-checkNoRootStaleNotes();
+checkLocalControlPlaneDocs();
 checkPackageGalleryMetadata();
 checkReleaseHandoffContract();
 
 assert.equal(failures.length, 0, `Public package portability checks failed:\n${failures.join("\n")}`);
 
-function readPackageVersion(): string {
+function readPackageMetadata(): { version: string; files: string[] } {
 	const parsed: unknown = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 	if (!isObject(parsed) || typeof parsed.version !== "string") throw new Error("package.json must contain a string version");
-	return parsed.version;
+	if (!Array.isArray(parsed.files) || !parsed.files.every((item) => typeof item === "string")) throw new Error("package.json files must be a string array");
+	return { version: parsed.version, files: parsed.files };
 }
 
 function isObject(value: unknown): value is { [key: string]: unknown } {
@@ -122,30 +125,19 @@ function checkCatalogIsAuthoritative(): void {
 	}
 }
 
-function checkDetachedContractCopy(): void {
+function checkPublicSurfaceOwnership(): void {
 	const readme = readFileSync(join(packageRoot, "README.md"), "utf8");
 	const skill = readFileSync(join(packageRoot, "skills/pi-multiagent/SKILL.md"), "utf8");
 	const cookbook = readFileSync(join(packageRoot, "skills/pi-multiagent/references/graph-cookbook.md"), "utf8");
-	requireFragments("README.md", readme, ["catalog", "start", "retrieve", "peek", "message", "cancel", "cleanup", "`start` returns a usable registered `runId`", "evidence, not instructions", "not an OS sandbox", "not transactional", "not crash-resumable", "not a runtime template API", "RPC mode", "Child internals are not auto-injected", "pushed notices", "sink finals", "preview:true", "mandatory read/discovery", "assistant final in chronological order", "debugEvents:true", "allowFilesystemRead", "allowShellTools", "allowMutationTools", "allowExtensionCode", "allowProjectCode", "Start graphs default to `graph.library.sources:[\"package\"]`", "workspace-local caller skill", "Pushed notices omit child-authored final text", "routing tags", "defaultTools", "All-inline starter", "lastActivity", "Extension grants load trusted code", "Detached runs do not inherit caller-visible skills by default", "Catalog defaults remove boilerplate", "Catalog queries match exact phrases or non-stopword query terms", "Required controls", "waitSeconds", "bounded wait/read", "complete canonical agent-facing reference", "progressive-disclosure hub", "graph design ladder", "artifact-chained-decision.json", "Web Research to Local Decision", "copying exact active catalog provenance", "maxNotices", "process-local", "session shutdown", "Use `needs`", "Use `after`", "graph authority alone is not edit authorization", "Any read/discovery primitive", "Built-ins are launched by child Pi with `--tools`", "retrieve` is the compact manager read path", "peek` is the microscope", "cannot broaden scope, grant tools, authorize mutation", "serious graph", "debugEvents:true` only for package debugging", "preserve terminal artifacts", "cleanup is appropriate", "requires manual cancellation", "never reaches its sink final", "NEEDS-WORK rather than GO", "catalog-default-tools-denied", "package:web-researcher", "Tool profile quick matrix", "minimum read-only run", "Use catalog before start only when", "Pseudo-schema, by action", "effective tools", "Cleanup is evidence deletion, not routine hygiene", "not a sandbox", "not path-confined", "copy a needed artifact path", "reuse the original receipt", "whether accepted, denied, or timed out", "fresh corrective retry"]);
-	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["Action controls are strict", "returns a compact bounded wait/read snapshot", "retrieve", "peek", "message", "cleanup", "waitSeconds", "bounded wait/read", "preview:true", "mandatory read/discovery", "assistant final in chronological order", "debugEvents:true", "catalog profile capped by graph authority", "routing tags", "Catalog queries match exact phrases or non-stopword query terms", "graph authority alone is not edit authorization", "Start graphs default to `graph.library.sources:[\"package\"]`", "workspace-local caller skill", "Pushed notices omit child-authored final text", "maxNotices", "process-local", "session shutdown", "use `needs`", "`after`", "All-inline fan-in starter", "lastActivity", "Detached runs do not inherit caller skills by default", "Any read/discovery primitive", "Built-in child tools are launched by child Pi with `--tools`", "cannot broaden scope, grant tools, authorize mutation", "Action branch resolver", "Graph design ladder", "Artifact-Chained Decision", "Web Research to Local Decision", "complete canonical agent-facing package entrypoint", "progressive-disclosure hub", "Improving this package", "serious graph", "debugEvents:true` only for package debugging", "terminal sink final", "Preserve artifacts before cleanup", "manual cancellation", "missing sink final", "NEEDS-WORK, not GO", "catalog-default-tools-denied", "package:web-researcher", "Tool profile decision matrix", "minimum read-only run", "Use catalog before start only when", "Pseudo-schema, by action", "Retrieve `stepId` targets wait/debug events only", "effective tools", "Cleanup is evidence deletion, not routine hygiene", "not a sandbox", "not path-confined", "copy a needed artifact path", "reuse the original receipt", "whether accepted, denied, or timed out", "fresh corrective retry"]);
-	requireFragments("skills/pi-multiagent/references/graph-cookbook.md", cookbook, ["detached", "not a runtime template API", "Choose a graph shape first", "Graph design ladder", "Single specialist", "Artifact-Chained Decision", "artifact-chained-decision.json", "Web Research to Local Decision", "copy exact active catalog provenance", "allowExtensionCode:true", "trusted workspace content", "graphFile", "routing tags", "default built-in tool profiles", "Catalog queries match exact phrases or non-stopword query terms", "maxNotices", "Use `needs`", "Use `after`", "compact evidence fields", "Parallelize only independent read-only lanes", "Any read/discovery primitive", "mandatory read/discovery", "preview:true", "Inline Read-Only Fan-in", "peek", "sink", "cannot broaden scope, grant tools, authorize mutation", "Web Research Extension Lane", "Read-Only Audit Fanout", "Docs/Examples Alignment", "Implementation Review Gate", "Public Release Foundry", "waitSeconds", "bounded wait/read", "debugEvents:true` only for package debugging", "preserve terminal artifacts", "cleanup is appropriate", "serious graph to reach its sink final without manual cancellation", "stalled, canceled, or final-less", "NEEDS-WORK, not GO", "catalog-default-tools-denied", "package:web-researcher", "Tool profile quick matrix", "Use catalog before start only when", "Decision tree", "effective tools", "Cleanup is evidence deletion, not routine hygiene", "not a sandbox", "not path-confined", "copy a needed artifact path", "reuse the original receipt", "whether accepted, denied, or timed out", "fresh corrective retry"]);
-	requireFragments("README.md", readme, ["explicit `tools` replaces", "StepOutput.filePath", "artifact index", "mutation-authority examples", "source/provenance notes", "Schema-admissible fatal shape failures render as `# agent_team error`", "schema-invalid calls", "library.query", "does not prove the child obeyed", "mutationScope", "Do not demand a premature final"]);
-	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["explicit `agent.tools` replaces", "StepOutput.filePath", "artifact indexes", "mutation-authority examples", "source/provenance notes", "Schema-admissible fatal action-shape failures render as `# agent_team error`", "options.maxRunSeconds", "options.terminalRetentionSeconds", "library.query", "does not prove child compliance", "mutationScope", "Do not stop early merely because"]);
-	requireFragments("skills/pi-multiagent/references/graph-cookbook.md", cookbook, ["Explicit `agent.tools` replaces", "tools:[\"read\",\"bash\"]", "mutation-authority examples", "source/provenance notes", "Web content cannot broaden", "mutationScope", "Accepted messages prove queueing"]);
-	for (const file of ["README.md", "skills/pi-multiagent/SKILL.md", "skills/pi-multiagent/references/graph-cookbook.md"]) {
-		const text = readFileSync(join(packageRoot, file), "utf8");
-		for (const excluded of ["allowSideEffectTools", "requested built-in child tools must also be active as parent built-in tools", "Catalog-declared tools are metadata only", "Catalog no-tool role", "No built-in tools by default", "Inline agents default to no built-in tools", "Intentional no built-ins", "retired", "compatibility alias", "foreground `run`", "foreground/blocking", "old in-memory"]) if (text.includes(excluded)) failures.push(`${file}: must keep public docs declarative and avoid backward-looking contract copy ${JSON.stringify(excluded)}`);
-	}
+	requireFragments("README.md", readme, ["human/operator path", "minimum read-only run", "Cleanup is evidence deletion, not routine hygiene", "Retained detached runs", "cleanup frees only terminal retained runs", "cwd` narrows launch working context", "not path confinement", "does not add a read sandbox", "Copy/adapt warning", "release-readiness-review.json", "Public npm release handoff", "pnpm run gate", "pushed notices are compact human receipts and omit the full child transcript", "Assistant text previews require `preview:true`", "raw events require `debugEvents:true`", "Every child process keeps at least the filesystem read/discovery suite", "effective tools", "Exact duplicate keys reuse the original receipt, whether accepted, denied, or timed out"]);
+	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["Action controls are strict", "Pseudo-schema, by action", "Tool profile decision matrix", "Graph design ladder", "coarse child-process authority", "not path-scoped authority", "cwd` narrows launch working context", "not path confinement", "does not add a read sandbox", "mutationScope", "Improving this package", "compact pushed notices are untrusted human receipts and omit the full child transcript", "assistant text previews require `preview:true`", "raw events require `debugEvents:true`", "Every child keeps mandatory read/discovery", "Exact duplicate keys reuse the original receipt, whether accepted, denied, or timed out"]);
+	requireFragments("skills/pi-multiagent/references/graph-cookbook.md", cookbook, ["Choose a graph shape first", "Graph design ladder", "Map-reduce audit fanout", "static DAG reduce pattern", "Copy/adapt warning", "Do not run them verbatim", "graphFile", "mutationScope", "Web Research Extension Lane", "Add `preview:true` only when bounded assistant text belongs", "Use `debugEvents:true` only for package debugging", "Every child keeps mandatory read/discovery", "Exact duplicate keys reuse the original receipt, whether accepted, denied, or timed out"]);
 	for (const file of ["README.md", "CHANGELOG.md", "skills/pi-multiagent/SKILL.md", "skills/pi-multiagent/references/graph-cookbook.md"]) {
 		const text = readFileSync(join(packageRoot, file), "utf8");
-		if (text.includes("cookbook are the model-facing") || text.includes("this skill/cookbook agent-facing") || text.includes("Keep README, cookbook, and examples human/operator-facing")) failures.push(`${file}: must keep README human/operator-facing and skill plus linked references agent-facing without collapsing the surfaces`);
-		if (text.includes('"action": "run"')) failures.push(`${file}: must not document non-contract action:"run"`);
-		if (text.includes('"synthesis"')) failures.push(`${file}: must not document non-contract top-level synthesis branch`);
-		if (text.includes('"outputContract"')) failures.push(`${file}: must not document non-contract outputContract field`);
-		if (text.includes("retrieve/peek-style")) failures.push(`${file}: must not blur retrieve-only and peek controls`);
-		if (text.includes("Authorized mutation " + "scope:")) failures.push(`${file}: must use first-class mutationScope instead of task-string mutation authorization`);
+		for (const excluded of ["\"action\": \"run\"", "\"synthesis\"", "\"outputContract\"", "allowSideEffectTools", "Retained terminal runs", "read sandbox inside cwd", "path sandbox", "confined to cwd", "foreground `run`", "foreground/blocking", "old in-memory"]) if (text.includes(excluded)) failures.push(`${file}: public docs must not include stale or unsupported contract copy ${JSON.stringify(excluded)}`);
 	}
 }
+
 
 function checkActionSnippetHygiene(): void {
 	for (const file of ["README.md", "skills/pi-multiagent/references/graph-cookbook.md"]) {
@@ -178,8 +170,8 @@ function checkLimitsContract(): void {
 		`1 to ${MAX_MAX_RUN_SECONDS} seconds; default ${DEFAULT_MAX_RUN_SECONDS} seconds`,
 		`1 to ${MAX_TERMINAL_RETENTION_SECONDS} seconds; default ${DEFAULT_TERMINAL_RETENTION_SECONDS} seconds`,
 		`\`waitSeconds\` max ${MAX_RETRIEVE_WAIT_SECONDS} seconds`,
-		`| Live detached runs | ${MAX_LIVE_DETACHED_RUNS} per extension process |`,
-		`| Retained terminal runs | ${MAX_RETAINED_DETACHED_RUNS} per extension process |`,
+		`| Live detached runs | ${MAX_LIVE_DETACHED_RUNS} live runs per extension process; completion or cancel frees live capacity |`,
+		`| Retained detached runs | ${MAX_RETAINED_DETACHED_RUNS} retained runs per extension process, including live and terminal runs; cleanup frees only terminal retained runs |`,
 		`default \`${DEFAULT_NOTIFY_MODE}\`; max ${MAX_NOTIFY_MAX_NOTICES} non-terminal notices; default ${DEFAULT_NOTIFY_MAX_NOTICES}; minimum interval default ${DEFAULT_NOTIFY_MIN_INTERVAL_SECONDS} seconds, max ${MAX_NOTIFY_MIN_INTERVAL_SECONDS}`,
 		`Relative \`.json\` file inside cwd; ${MAX_GRAPH_FILE_BYTES / 1024} KiB max`,
 		`| Agent file input | ${MAX_AGENT_FILE_BYTES / 1024} KiB per library agent Markdown file |`,
@@ -201,6 +193,9 @@ function checkGraphExamples(): void {
 		}
 		for (const denied of ["action", "agents", "synthesis", "outputContract", "runId", "graphFile"]) if (parsed[denied] !== undefined) failures.push(`${file}: graph example must be pure detached graph; remove ${denied}`);
 		if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) failures.push(`${file}: graph example must include steps`);
+		if (file === "examples/graphs/release-readiness-review.json") checkReleaseReadinessExample(file, parsed);
+		if (file === "examples/graphs/public-release-foundry.json") checkReleaseFoundryExample(file, parsed);
+		if (file === "examples/graphs/map-reduce-audit-fanout.json") checkMapReduceExample(file, parsed);
 	}
 	const graphFilePackagePathPattern = /"graphFile"\s*:\s*"examples\/graphs\//;
 	for (const file of ["README.md", "skills/pi-multiagent/references/graph-cookbook.md"]) {
@@ -209,26 +204,119 @@ function checkGraphExamples(): void {
 	}
 }
 
-function checkNoRootStaleNotes(): void {
-	for (const file of ["AGENTS.md", "ARCH.md", "CONTINUE.md", "HANDOFF.md", "PLAN.md", "TODO.md", "VISION.md"]) {
-		if (existsSync(join(packageRoot, file))) failures.push(`${file}: root stale notes/control-plane files must not exist in this package; use current source/docs/tests as truth`);
+function checkReleaseReadinessExample(file: string, graph: { [key: string]: unknown }): void {
+	const authority = graph.authority;
+	if (!isObject(authority) || authority.allowFilesystemRead !== true || authority.allowShellTools !== true || authority.allowMutationTools === true) failures.push(`${file}: release-readiness graph must be read/shell only with no mutation authority`);
+	if (!isObject(graph.limits) || graph.limits.concurrency !== 1) failures.push(`${file}: release-readiness graph must serialize shell proof lanes`);
+	const graphText = JSON.stringify(graph);
+	if (graphText.includes("mutationScope")) failures.push(`${file}: release-readiness graph must not contain mutationScope`);
+	if (stepAgentRef(file, graph, "release-map") !== "package:scout") failures.push(`${file}: release-map must use package:scout for file-only release mapping`);
+	if (stepAgentRef(file, graph, "release-proof") !== "package:validator") failures.push(`${file}: release-proof must use package:validator for command-backed release proof`);
+	const auditNeeds = stepStringArray(file, graph, "release-audit", "needs");
+	if (auditNeeds.join(",") !== "release-map,release-proof") failures.push(`${file}: release-audit must depend on both release-map and release-proof`);
+	const decisionAfter = stepStringArray(file, graph, "readiness-decision", "after");
+	if (decisionAfter.join(",") !== "release-map,release-proof,release-audit") failures.push(`${file}: readiness-decision must preserve terminal evidence from every release lane`);
+	const proofTask = stepTask(file, graph, "release-proof");
+	if (!proofTask.includes("REPLACE_WITH_EXACT_READ_ONLY_RELEASE_COMMANDS") || !proofTask.includes("needs-command-scope") || !proofTask.includes("Do not edit")) failures.push(`${file}: release-proof must fail closed on missing parent-copied command scope`);
+}
+
+function checkReleaseFoundryExample(file: string, graph: { [key: string]: unknown }): void {
+	if (stepAgentRef(file, graph, "release-map") !== "package:scout") failures.push(`${file}: release-map must use package:scout for file-only release mapping`);
+	if (stepAgentRef(file, graph, "release-probes") !== "package:validator") failures.push(`${file}: release-probes must use package:validator for command-backed release proof`);
+	const needs = stepStringArray(file, graph, "artifact-audit", "needs");
+	if (needs.join(",") !== "release-map,release-probes") failures.push(`${file}: artifact-audit must depend on both release-map and release-probes`);
+	const probesTask = stepTask(file, graph, "release-probes");
+	if (!probesTask.includes("REPLACE_WITH_EXACT_RELEASE_PROBE_COMMANDS") || !probesTask.includes("needs-command-scope") || !probesTask.includes("Run only those commands")) failures.push(`${file}: release-probes must fail closed on missing parent-copied command scope`);
+	for (const stepId of ["release-map", "release-probes", "artifact-audit", "release-fix-worker", "release-validation", "ship-decision"]) {
+		if (!stepTask(file, graph, stepId).includes("Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases")) failures.push(`${file}:${stepId} must carry the full release-action denial list`);
 	}
+	const workerScope = exampleStep(file, graph, "release-fix-worker").mutationScope;
+	if (typeof workerScope !== "string" || !workerScope.includes("version bump, commit, tag, push, publish, delete, install, deploy, GitHub Release creation")) failures.push(`${file}: release-fix-worker mutationScope must carry the full release-action denial list`);
+	if (!String(graph.objective).includes("release-readiness-review.json")) failures.push(`${file}: release foundry objective must point to the default non-mutating readiness graph`);
+}
+
+function checkMapReduceExample(file: string, graph: { [key: string]: unknown }): void {
+	if (!String(graph.objective).includes("local evidence surfaces")) failures.push(`${file}: map-reduce objective must stay generally reusable`);
+	for (const stepId of ["map-runtime", "map-docs", "map-tests"]) {
+		const task = stepTask(file, graph, stepId);
+		if (!task.includes("concrete delegated question")) failures.push(`${file}:${stepId} must reference the concrete delegated question, not package-specific surfaces`);
+		if (!task.includes("NEEDS-SCOPE") || !task.includes("without broad repo search")) failures.push(`${file}:${stepId} must fail closed when copied without concrete parent scope`);
+		if (!task.includes("surface, owner or canonical path, evidence, risk or mismatch, validation gap, and smallest next action")) failures.push(`${file}:${stepId} must preserve mapper output packet fields`);
+	}
+	const reduceTask = stepTask(file, graph, "reduce-decision");
+	if (!reduceTask.includes("reducer packet") || !reduceTask.includes("observed validation versus claimed validation")) failures.push(`${file}: reducer must preserve decision packet fields and validation distinction`);
+}
+
+function stepAgentRef(file: string, graph: { [key: string]: unknown }, id: string): string {
+	const step = exampleStep(file, graph, id);
+	return isObject(step.agent) && typeof step.agent.ref === "string" ? step.agent.ref : "";
+}
+
+function stepTask(file: string, graph: { [key: string]: unknown }, id: string): string {
+	const task = exampleStep(file, graph, id).task;
+	return typeof task === "string" ? task : "";
+}
+
+function stepStringArray(file: string, graph: { [key: string]: unknown }, id: string, key: string): string[] {
+	const value = exampleStep(file, graph, id)[key];
+	return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function exampleStep(file: string, graph: { [key: string]: unknown }, id: string): { [key: string]: unknown } {
+	const steps = graph.steps;
+	if (!Array.isArray(steps)) return {};
+	const step = steps.find((candidate): candidate is { [key: string]: unknown } => isObject(candidate) && candidate.id === id);
+	if (!step) failures.push(`${file}: missing graph step ${id}`);
+	return step ?? {};
+}
+
+function checkLocalControlPlaneDocs(): void {
+	for (const file of ["ARCH.md", "TODO.md", "VISION.md"]) {
+		if (existsSync(join(packageRoot, file))) failures.push(`${file}: root public-planning notes are not package source; keep package truth in current source/docs/tests or classify the local note explicitly before relying on it`);
+	}
+	for (const file of ["AGENTS.md", "CONTINUE.md", "HANDOFF.md", "PLAN.md"]) {
+		if (!existsSync(join(packageRoot, file))) continue;
+		if (publicFiles.includes(file) || packageAllowlistCouldIncludeRootFile(file)) failures.push(`${file}: local control-plane docs may exist in the workspace but package.json files must not include or broadly admit them`);
+	}
+}
+
+function packageAllowlistCouldIncludeRootFile(file: string): boolean {
+	return packageFileAllowlist.some((pattern) => rootPackagePatternMatches(pattern, file));
+}
+
+function rootPackagePatternMatches(pattern: string, file: string): boolean {
+	if (pattern === file || pattern === "." || pattern === "*" || pattern === "**" || pattern === "**/*") return true;
+	if (pattern.includes("/")) return false;
+	if (!pattern.includes("*")) return false;
+	return globSegmentPattern(pattern).test(file);
+}
+
+function globSegmentPattern(pattern: string): RegExp {
+	const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*");
+	return new RegExp(`^${escaped}$`);
 }
 
 function checkReleaseHandoffContract(): void {
 	const readme = readFileSync(join(packageRoot, "README.md"), "utf8");
+	const releaseReadiness = readFileSync(join(packageRoot, "examples/graphs/release-readiness-review.json"), "utf8");
 	const publicReleaseFoundry = readFileSync(join(packageRoot, "examples/graphs/public-release-foundry.json"), "utf8");
 	const parsed: unknown = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 	if (!isObject(parsed)) {
 		failures.push("package.json: release handoff contract requires object metadata");
 		return;
 	}
-	for (const fragment of ["Public npm release handoff", "pnpm run check:release", "npm publish --dry-run --json", "npm whoami", "npm publish", "GitHub Release creation", "gh release create v<version>", "gh release view v<version>", "npm view pi-multiagent@<version>", "pi install npm:pi-multiagent@<version>", "https://unpkg.com/pi-multiagent@<version>/assets/pi-multiagent-gallery.webp", "human-owned", "not required", "`npm pack --dry-run --json` creates no `.tgz`", "deterministic local and dry-run release checks", "Optional real-runtime smoke", "explicit operator approval", "otherwise record it as deferred"]) {
+	for (const fragment of ["Public npm release handoff", "pnpm run check:release", "npm publish --dry-run --json", "npm whoami", "npm publish", "GitHub Release creation", "gh release create v<version>", "gh release view v<version>", "npm view pi-multiagent@<version>", "pi install npm:pi-multiagent@<version>", "https://unpkg.com/pi-multiagent@<version>/assets/pi-multiagent-gallery.webp", "human-owned", "not required", "`npm pack --dry-run --json` creates no `.tgz`", "deterministic local and dry-run release checks", "release lineage guard", "HEAD:package.json", "clean release commit", "Optional real-runtime smoke", "explicit operator approval", "otherwise record it as deferred"]) {
 		if (!readme.includes(fragment)) failures.push(`README.md: missing release handoff copy ${JSON.stringify(fragment)}`);
 	}
+	const handoff = readme.slice(readme.indexOf("## Public npm release handoff"));
+	if (handoff.includes("Review, stage, commit, tag, and push")) failures.push("README.md: release handoff must not tag/push before clean-commit release guards");
+	const cleanCommitGuard = handoff.indexOf("pnpm run check:release");
+	const tagPush = handoff.indexOf("After the clean-commit guards pass, tag and push");
+	if (cleanCommitGuard === -1 || tagPush === -1 || tagPush < cleanCommitGuard) failures.push("README.md: release handoff must place tag/push after clean-commit check:release and dry-runs");
 	const smokeCommandIndex = readme.indexOf("PI_MULTIAGENT_REAL_SMOKE=1 PI_MULTIAGENT_REAL_SMOKE_TIMEOUT_MS=180000 pnpm run smoke:pi");
 	const smokeApprovalIndex = readme.indexOf("Run it only with explicit operator approval");
 	if (smokeCommandIndex === -1 || smokeApprovalIndex === -1 || Math.abs(smokeCommandIndex - smokeApprovalIndex) > 300) failures.push("README.md: release handoff real-runtime smoke command must keep explicit operator approval caveat adjacent");
+	if (!releaseReadiness.includes("not-executed human-owned next actions") || !releaseReadiness.includes("npm publish") || !releaseReadiness.includes("GitHub Release creation") || !releaseReadiness.includes("gh release view verification")) failures.push("examples/graphs/release-readiness-review.json: readiness decision must preserve publish/GitHub Release steps as not-executed human-owned actions");
 	if (!publicReleaseFoundry.includes("README Public npm release handoff") || !publicReleaseFoundry.includes("not-executed human-owned next actions") || !publicReleaseFoundry.includes("GitHub Release creation") || !publicReleaseFoundry.includes("gh release view verification")) failures.push("examples/graphs/public-release-foundry.json: release synthesis must point at README handoff and preserve publish/GitHub Release steps as not-executed human-owned actions");
 	if (parsed.packageManager !== "pnpm@11.1.2") failures.push("package.json: packageManager must pin the release package manager used by this repository");
 	if (!isObject(parsed.engines) || typeof parsed.engines.node !== "string") failures.push("package.json: engines.node must document supported runtime floor");

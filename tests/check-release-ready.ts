@@ -15,6 +15,10 @@ assert.match(packageJson.version, /^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)
 assert.equal(typeof packageJson.packageManager, "string", "package.json must record packageManager for release reproducibility");
 assert.equal(isRecord(packageJson.engines) && typeof packageJson.engines.node === "string", true, "package.json must record supported Node engine");
 assert.equal(isRecord(packageJson.publishConfig) && packageJson.publishConfig.access === "public", true, "package.json publishConfig.access must be public");
+const headPackageJson = readHeadPackageJson();
+assert.equal(headPackageJson.name, packageJson.name, "HEAD package.json package name must match the working release package");
+assert.equal(headPackageJson.version, packageJson.version, "HEAD package.json version must match the working release version; commit intended release files before publish");
+assert.equal(gitStdout(["status", "--porcelain"]).trim(), "", "release source tree must be clean; commit intended changes before publish");
 
 const unreleased = sectionBody(changelog, "Unreleased");
 assert.equal(unreleased.trim(), "", "CHANGELOG.md Unreleased must be empty before npm publish");
@@ -30,6 +34,19 @@ function readPackageJson(): Record<string, unknown> {
 	const parsed: unknown = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 	if (!isRecord(parsed)) throw new Error("package.json must parse to an object");
 	return parsed;
+}
+
+function readHeadPackageJson(): Record<string, unknown> {
+	const parsed: unknown = JSON.parse(gitStdout(["show", "HEAD:package.json"]));
+	if (!isRecord(parsed)) throw new Error("HEAD:package.json must parse to an object");
+	return parsed;
+}
+
+function gitStdout(args: string[]): string {
+	const result = spawnSync("git", args, { cwd: packageRoot, encoding: "utf8" });
+	if (result.stderr.length > 0) process.stderr.write(result.stderr);
+	assert.equal(result.status, 0, result.error?.message ?? result.stderr);
+	return result.stdout;
 }
 
 function npmPublishedVersions(name: unknown): string[] {

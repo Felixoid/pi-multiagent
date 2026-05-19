@@ -88,6 +88,7 @@ test("extension grant resolution denies project and workspace-local sources with
 	});
 	assert.equal(projectDenied, undefined);
 	assert.equal(projectDiagnostics.some((item) => item.code === "extension-tool-project-denied"), true);
+	assert.equal(projectDiagnostics.some((item) => item.message.includes("allowProjectCode:true")), true);
 	assert.equal(projectDiagnostics.some((item) => item.code.includes("confirm")), false);
 
 	const localDiagnostics: AgentDiagnostic[] = [];
@@ -102,7 +103,12 @@ test("extension grant resolution denies project and workspace-local sources with
 	});
 	assert.equal(localDenied, undefined);
 	assert.equal(localDiagnostics.some((item) => item.code === "extension-tool-local-denied"), true);
+	assert.equal(localDiagnostics.some((item) => item.message.includes("allowProjectCode:true")), true);
 	assert.equal(localDiagnostics.some((item) => item.code.includes("confirm")), false);
+
+	const catalog = catalogParentExtensionTools(inventory([projectTool, localTool]), workspace);
+	assert.equal(catalog.find((item) => item.name === "project_search")?.requiresProjectCode, true);
+	assert.equal(catalog.find((item) => item.name === "local_search")?.requiresProjectCode, true);
 
 	const allowedDiagnostics: AgentDiagnostic[] = [];
 	const allowed = resolveAgentToolAccess({

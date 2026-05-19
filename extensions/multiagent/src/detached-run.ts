@@ -12,15 +12,17 @@ import { validateLaunchCwd } from "./launch-cwd.ts";
 import { findStepLaunchDenial } from "./launch-denial.ts";
 import { createMessageReceiptCache } from "./message-idempotency.ts";
 import { RpcChildController, type RpcStepResult } from "./rpc-child-controller.ts";
-import { RunNotifier, stepNoticeReasons } from "./run-notifier.ts";
+import { RunNotifier, stepNoticeReasons, terminalStepNoticeReasons } from "./run-notifier.ts";
+import type { DetachedRunDetailsOptions, DetachedRunEventInput } from "./detached-run-options.ts";
 import { terminalRunStatus } from "./run-terminal-status.ts";
 import { RunWaiters } from "./run-waiters.ts";
 import { safeRuntimeCallback } from "./runtime-diagnostics.ts";
 import { makeDetails, type AgentTeamRuntimeOptions, unrefTimer } from "./runtime-options.ts";
 import { buildRunSnapshot, buildStepSnapshots, countStepStatuses, findSinkStepIds } from "./run-snapshot.ts";
 import { createStepOutputArtifact } from "./step-output-artifact.ts";
+import { stalledStepBlockerMessage } from "./stalled-step-diagnostics.ts";
 import { collectUpstreamOutputs } from "./upstream-outputs.ts";
-import type { AgentDiagnostic, AgentTeamDetails, AgentTeamNotice, CleanupReceipt, EventType, LibraryOptions, MessageChannel, MessageReceipt, ResolvedGraph, RunSnapshot, RunStatus, StepStatus, TeamStepSpec } from "./types.ts";
+import type { AgentDiagnostic, AgentTeamDetails, CleanupReceipt, LibraryOptions, MessageChannel, MessageReceipt, ResolvedGraph, RunSnapshot, RunStatus, StepStatus, TeamStepSpec } from "./types.ts";
 import { DEFAULT_RETRIEVE_MAX_BYTES } from "./types.ts";
 
 export class DetachedRun {
@@ -72,19 +74,22 @@ export class DetachedRun {
 		await this.waiters.add({ stepId: input.stepId, sinkStepIds: sinks, milliseconds: input.seconds * 1000 });
 	}
 
-	async message(stepId: string, channel: MessageChannel, text: string, clientMessageId: string | undefined): Promise<MessageReceipt> {
-		const existing = this.messageReceipts.lookup(stepId, channel, text, clientMessageId);
-		if (existing === "conflict") return this.messageReceipt(stepId, channel, clientMessageId, false, "Conflicting clientMessageId");
-		if (existing) return existing;
-		const state = this.states.get(stepId);
-		if (!state || !state.controller || state.status !== "running" || this.status !== "running") return this.messageReceipt(stepId, channel, clientMessageId, false, "Step is not live or messageable.");
-		let resolvePending: (receipt: MessageReceipt) => void = () => {};
-		const pending = new Promise<MessageReceipt>((resolve) => {
-			resolvePending = resolve;
-		});
+	async message(stepId: string, channel: MessageChannel, text: string, clientMessageId: string | undefined) {
+		const hit = this.messageReceipts.lookup(stepId, channel, text, clientMessageId);
+		if (hit === "conflict") return this.messageReceipt(stepId, channel, clientMessageId, false, "Conflicting clientMessageId");
+		if (hit) return hit;
+		let done: (receipt: MessageReceipt) => void = () => {};
+		const pending = new Promise<MessageReceipt>((resolve) => { done = resolve; });
 		const reserved = this.messageReceipts.reserve(stepId, channel, text, clientMessageId, pending);
 		if (reserved === "conflict") return this.messageReceipt(stepId, channel, clientMessageId, false, "Conflicting clientMessageId");
 		if (reserved) return reserved;
+		const settle = (receipt: MessageReceipt) => {
+			this.messageReceipts.settle(stepId, channel, text, clientMessageId, receipt);
+			done(receipt);
+			return receipt;
+		};
+		const state = this.states.get(stepId);
+		if (!state || !state.controller || state.status !== "running" || this.status !== "running") return settle(this.messageReceipt(stepId, channel, clientMessageId, false, "Step is not live or messageable."));
 		let receipt: MessageReceipt;
 		try {
 			const ack = await state.controller.message(channel, text);
@@ -92,9 +97,7 @@ export class DetachedRun {
 		} catch (error) {
 			receipt = this.messageReceipt(stepId, channel, clientMessageId, false, error instanceof Error ? error.message : String(error));
 		}
-		this.messageReceipts.settle(stepId, channel, text, clientMessageId, receipt);
-		resolvePending(receipt);
-		return receipt;
+		return settle(receipt);
 	}
 
 	cancel(reason?: string, options: { forceKill?: boolean } = {}) {
@@ -121,7 +124,7 @@ export class DetachedRun {
 		return { runId: this.id, deletedPaths };
 	}
 
-	details(action: AgentTeamDetails["action"], options: { cursor?: string; stepId?: string; maxBytes?: number; preview?: boolean; message?: MessageReceipt; cleanup?: CleanupReceipt; ok?: boolean; error?: { code: string; message: string }; includeEvents?: boolean; notice?: AgentTeamNotice } = {}): AgentTeamDetails {
+	details(action: AgentTeamDetails["action"], options: DetachedRunDetailsOptions = {}): AgentTeamDetails {
 		const includeEvents = options.includeEvents === true;
 		const delta = includeEvents ? this.events.delta(options.cursor, options.stepId, options.maxBytes ?? DEFAULT_RETRIEVE_MAX_BYTES) : { events: [], cursor: this.events.currentCursor() };
 		return makeDetails(action, options.ok ?? true, this.diagnostics, this.options, { library: this.library, run: this.snapshot(), cursor: delta.cursor, events: delta.events, steps: this.stepSnapshots(), outputs: selectOutputsForAction(action, options.stepId, options.maxBytes ?? DEFAULT_RETRIEVE_MAX_BYTES, options.preview === true, this.states.values(), this.sinkStepIds()), message: options.message, cleanup: options.cleanup, notice: options.notice }, options.error);
@@ -266,7 +269,7 @@ export class DetachedRun {
 		this.touch();
 		if (this.maxRunTimer) clearTimeout(this.maxRunTimer);
 		this.appendEvent({ type: "run", label: "terminal", preview: this.status, status: "done" });
-		this.notifier.sendTerminal(this.status);
+		this.notifier.sendTerminal(this.status, terminalStepNoticeReasons(snapshots));
 		this.scheduleRetention();
 	}
 
@@ -302,7 +305,7 @@ export class DetachedRun {
 
 	private blockStalledPendingSteps() {
 		for (const state of this.states.values()) {
-			if (state.status === "pending") this.finishState(state, "blocked", "No runnable steps remain.");
+			if (state.status === "pending") this.finishState(state, "blocked", stalledStepBlockerMessage(state.spec, (id) => this.states.get(id)?.status ?? "missing"));
 		}
 	}
 
@@ -322,22 +325,10 @@ export class DetachedRun {
 		unrefTimer(this.retentionTimer);
 	}
 
-	private sinkStepIds() {
-		return findSinkStepIds(this.graph.steps);
-	}
-
-	private lastEventSummary() {
-		return summarizeBackgroundEvent(this.events.last());
-	}
-
-	private stepSnapshots() {
-		return buildStepSnapshots(this.states.values(), this.stepActivity);
-	}
-
-	private counts() {
-		return countStepStatuses(this.states.values());
-	}
-
+	private sinkStepIds() { return findSinkStepIds(this.graph.steps); }
+	private lastEventSummary() { return summarizeBackgroundEvent(this.events.last()); }
+	private stepSnapshots() { return buildStepSnapshots(this.states.values(), this.stepActivity); }
+	private counts() { return countStepStatuses(this.states.values()); }
 
 	private messageReceipt(stepId: string, channel: MessageChannel, clientMessageId: string | undefined, accepted: boolean, undeliveredReason: string | undefined, recordEvent = true) {
 		const receipt = { runId: this.id, stepId, channel, clientMessageId, accepted, undeliveredReason, reused: false };
@@ -345,7 +336,7 @@ export class DetachedRun {
 		return receipt;
 	}
 
-	private appendEvent(input: { stepId?: string; type: EventType; label?: string; preview?: string; status?: string }) {
+	private appendEvent(input: DetachedRunEventInput) {
 		const event = this.events.append(input);
 		this.stepActivity.record(event);
 		this.waiters.notify(event);

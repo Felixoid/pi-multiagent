@@ -3,7 +3,7 @@
 import { safeRuntimeCallback } from "./runtime-diagnostics.ts";
 import type { AgentTeamRuntimeOptions } from "./runtime-options.ts";
 import { unrefTimer } from "./runtime-options.ts";
-import type { AgentTeamDetails, AgentTeamNotice, NotifyOptions, RunStatus, StepStatus } from "./types.ts";
+import type { AgentTeamDetails, AgentTeamNotice, NotifyOptions, RunStatus, StepSnapshot, StepStatus } from "./types.ts";
 
 interface RunNotifierOptions {
 	runId: string;
@@ -19,6 +19,10 @@ export function stepNoticeReasons(input: { stepId: string; status: StepStatus; s
 	if (input.sinkStepIds.includes(input.stepId)) reasons.push(`sink ${input.stepId} ${input.status}`);
 	if (input.status === "failed" || input.status === "blocked" || input.status === "timed_out" || input.status === "canceled") reasons.push(`step ${input.stepId} ${input.status}`);
 	return reasons;
+}
+
+export function terminalStepNoticeReasons(steps: StepSnapshot[]): string[] {
+	return steps.filter((step) => step.status === "failed" || step.status === "blocked" || step.status === "timed_out").map((step) => `step ${step.id} ${step.status}`);
 }
 
 /** Coalesce non-terminal milestones and send exactly one enabled terminal notice. */
@@ -56,12 +60,12 @@ export class RunNotifier {
 		unrefTimer(this.timer);
 	}
 
-	sendTerminal(status: RunStatus): void {
+	sendTerminal(status: RunStatus, stepReasons: string[] = []): void {
 		if (this.terminalSent || this.options.notify.mode === "none") return;
 		this.terminalSent = true;
 		this.pendingReasons.clear();
 		this.cancelTimers();
-		this.send(true, [`terminal:${status}`]);
+		this.send(true, [`terminal:${status}`, ...stepReasons]);
 	}
 
 	private flushMilestone(): void {

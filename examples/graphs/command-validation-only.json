@@ -15,7 +15,7 @@
       "agent": {
         "ref": "package:validator"
       },
-      "task": "Run only the parent-named read-only validation commands copied into this task: REPLACE with exact commands before running this graph, or return needs-command-scope without running anything. Report pass/fail/deferred per command with cwd, important output, and failure bucket. Do not edit, install, publish, deploy, delete, or run network commands."
+      "task": "Validation command scope copied by parent: REPLACE_WITH_EXACT_READ_ONLY_COMMANDS. Run only those commands. If this placeholder remains, no commands are present, or scope is implied only by upstream evidence, return needs-command-scope without running commands. Report pass/fail/deferred per command with cwd, important output, and failure bucket. Do not edit, install, publish, deploy, delete, or run network commands."
     },
     {
       "id": "final-proof",

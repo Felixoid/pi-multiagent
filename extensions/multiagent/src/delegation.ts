@@ -11,7 +11,7 @@ import { resolveDetachedGraph, validatePreflightShape } from "./planning.ts";
 import { finalizeDetails, hasDiagnosticError, makeDetails, type AgentTeamRuntimeOptions, unavailableTools } from "./runtime-options.ts";
 import { catalogParentExtensionToolDiagnostics } from "./tool-policy.ts";
 import { AgentTeamSchema, type AgentTeamInput, type GraphSpec } from "./schemas.ts";
-import type { AgentDiagnostic, AgentTeamDetails } from "./types.ts";
+import type { AgentDiagnostic, AgentTeamDetails, RunSnapshot } from "./types.ts";
 import { AGENT_TEAM_ACTION_VALUES, DEFAULT_GRAPH_LIBRARY_SOURCES, DEFAULT_RETRIEVE_MAX_BYTES, MAX_LIVE_DETACHED_RUNS, MAX_RETAINED_DETACHED_RUNS, type ExecutionAction } from "./types.ts";
 
 const validateAgentTeamInput = Compile(AgentTeamSchema);
@@ -96,7 +96,7 @@ function cleanup(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagno
 	try {
 		const receipt = run.cleanup();
 		forgetDetachedRun(run.id);
-		return run.details("cleanup", { cleanup: receipt });
+		return makeDetails("cleanup", true, diagnostics, options, { cleanup: receipt });
 	} catch (error) {
 		return run.details("cleanup", { ok: false, error: { code: "cleanup-artifacts-failed", message: `Cleanup failed while deleting retained artifacts: ${error instanceof Error ? error.message : String(error)}` } });
 	}
@@ -109,16 +109,18 @@ function runNotFoundError(): { code: string; message: string } {
 }
 
 function detachedRunCapacityError(): { code: string; message: string } | undefined {
-	const runs = listDetachedRuns();
-	const snapshots = runs.map((run) => run.snapshot());
+	return detachedRunCapacityErrorForSnapshots(listDetachedRuns().map((run) => run.snapshot()));
+}
+
+export function detachedRunCapacityErrorForSnapshots(snapshots: RunSnapshot[]): { code: string; message: string } | undefined {
 	const liveRuns = snapshots.filter((run) => !run.terminal);
 	const terminalRuns = snapshots.filter((run) => run.terminal);
 	if (liveRuns.length >= MAX_LIVE_DETACHED_RUNS) return { code: "detached-run-live-cap-reached", message: `Too many live detached runs (${liveRuns.length}); retrieve and preserve evidence, then cancel only runs that are stuck, obsolete, unsafe, or explicitly lower value than the new work. Maximum live runs: ${MAX_LIVE_DETACHED_RUNS}. Live runs: ${summarizeRunCapacity(liveRuns)}.` };
-	if (snapshots.length >= MAX_RETAINED_DETACHED_RUNS) return { code: "detached-run-retained-cap-reached", message: `Too many retained detached runs (${snapshots.length}); cleanup terminal runs only after preserving needed artifacts. Maximum retained runs: ${MAX_RETAINED_DETACHED_RUNS}. Terminal runs: ${summarizeRunCapacity(terminalRuns)}.` };
+	if (snapshots.length >= MAX_RETAINED_DETACHED_RUNS) return { code: "detached-run-retained-cap-reached", message: `Too many retained detached runs (${snapshots.length}); free capacity by cleaning up terminal runs only after preserving needed artifacts, or by canceling live runs only when they are stuck, obsolete, unsafe, or explicitly lower value than the new work. Maximum retained runs: ${MAX_RETAINED_DETACHED_RUNS}. Live runs (${liveRuns.length}): ${summarizeRunCapacity(liveRuns)}. Terminal runs (${terminalRuns.length}): ${summarizeRunCapacity(terminalRuns)}.` };
 	return undefined;
 }
 
-function summarizeRunCapacity(runs: ReturnType<DetachedRun["snapshot"]>[]): string {
+function summarizeRunCapacity(runs: RunSnapshot[]): string {
 	const rows = runs.slice(0, 5).map((run) => `${run.runId}:${run.status}`).join(", ");
 	if (runs.length === 0) return "none";
 	return runs.length > 5 ? `${rows}, +${runs.length - 5} more` : rows;

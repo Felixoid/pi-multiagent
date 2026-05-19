@@ -415,6 +415,7 @@ export interface CatalogExtensionToolSummary {
 	description: string | undefined;
 	from: ExtensionToolProvenanceSpec;
 	active: boolean;
+	requiresProjectCode?: boolean;
 }
 
 export interface AgentTeamDetails {

@@ -1,5 +1,5 @@
 {
-  "objective": "Research an ambiguous local package change and produce a human-gated implementation recommendation without mutation.",
+  "objective": "Run one read-only research-to-change loop iteration for an ambiguous local package change and produce a human-gated implementation recommendation without mutation.",
   "library": {
     "sources": [
       "package"
@@ -14,7 +14,7 @@
       "agent": {
         "ref": "package:scout"
       },
-      "task": "Gather current repo evidence, affected files, runtime boundaries, tests, docs, and unknowns. Do not run commands or edit."
+      "task": "Gather current repo evidence, affected files, runtime boundaries, tests, docs, and unknowns for the concrete parent-copied package change question. If no concrete question, affected surface, stop condition, or expected output fields were copied in, return NEEDS-SCOPE without broad repo search. Do not run commands or edit."
     },
     {
       "id": "change-plan",
@@ -46,7 +46,7 @@
         "change-plan",
         "gate-critique"
       ],
-      "task": "Report the proposed change, no-go conditions, exact human approval question, concrete mutationScope for a later authorized mutation run, validation plan, risks, and next action after all lanes terminalize, including failed or blocked lane evidence. Do not invent validation or imply edits were authorized."
+      "task": "Close this gated loop iteration by reporting the proposed change, no-go conditions, exact human approval question, concrete mutationScope for a later authorized mutation run, validation plan, risks, and next action after all lanes terminalize, including failed or blocked lane evidence. Do not invent validation or imply edits were authorized."
     }
   ],
   "limits": {

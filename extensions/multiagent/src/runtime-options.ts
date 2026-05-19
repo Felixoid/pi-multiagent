@@ -28,7 +28,7 @@ export interface AgentTeamRuntimeOptions {
 export function makeDetails(action: AgentTeamDetails["action"], ok: boolean, diagnostics: AgentDiagnostic[], options: AgentTeamRuntimeOptions, data: Partial<AgentTeamDetails> = {}, error?: { code: string; message: string }): AgentTeamDetails {
 	const firstError = diagnostics.find((item) => item.severity === "error");
 	const materializedError = error ?? (firstError ? { code: firstError.code, message: firstError.message } : undefined);
-	return { kind: "agent_team", action, ok: ok && firstError === undefined && materializedError === undefined, diagnostics: diagnostics.map((item) => ({ ...item, fields: item.fields ? [...item.fields] : undefined })), error: materializedError, library: data.library, catalog: data.catalog ?? [], extensionTools: catalogParentExtensionTools(options.parentTools), run: data.run, cursor: data.cursor, events: data.events ?? [], steps: data.steps ?? [], outputs: data.outputs ?? [], message: data.message, cleanup: data.cleanup, notice: data.notice };
+	return { kind: "agent_team", action, ok: ok && firstError === undefined && materializedError === undefined, diagnostics: diagnostics.map((item) => ({ ...item, fields: item.fields ? [...item.fields] : undefined })), error: materializedError, library: data.library, catalog: data.catalog ?? [], extensionTools: catalogParentExtensionTools(options.parentTools, options.cwd), run: data.run, cursor: data.cursor, events: data.events ?? [], steps: data.steps ?? [], outputs: data.outputs ?? [], message: data.message, cleanup: data.cleanup, notice: data.notice };
 }
 
 export function finalizeDetails(details: AgentTeamDetails): AgentToolResult<AgentTeamDetails> {

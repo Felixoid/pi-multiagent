@@ -72,7 +72,7 @@ function resolveStepAgent(stepId: string, spec: GraphSpec["steps"][number]["agen
 			diagnostics.push(makeDiagnostic("inline-system-required", `Inline agent ${stepId} requires non-whitespace system prompt text.`, "error", `${path}/system`));
 			return undefined;
 		}
-		const tools = resolveBuiltinToolProfile({ tools: spec.tools, explicit: spec.tools !== undefined, authority, label: `inline agent ${stepId}`, path: `${path}/tools`, diagnostics });
+		const tools = resolveBuiltinToolProfile({ tools: spec.tools, explicit: true, authority, label: `inline agent ${stepId}`, path: `${path}/tools`, diagnostics });
 		if (!tools) return undefined;
 		const toolAccess = resolveToolAccess(stepId, spec, tools, authority, diagnostics, context, path);
 		if (!toolAccess) return undefined;

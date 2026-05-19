@@ -14,7 +14,7 @@
       "agent": {
         "ref": "package:scout"
       },
-      "task": "Map the affected local surface, owners, tests, docs, risks, and unknowns. Do not run commands or edit."
+      "task": "Map the affected local surface, owners, tests, docs, risks, and unknowns for the concrete parent-copied planning question. If no concrete question, affected surface, stop condition, or expected output fields were copied in, return NEEDS-SCOPE without broad repo search. Do not run commands or edit."
     },
     {
       "id": "implementation-plan",

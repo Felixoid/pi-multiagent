@@ -95,6 +95,8 @@ test("cleanup context keeps trust notice before run-derived status and success r
 	assert.match(success, /Cleanup deleted retained run evidence/);
 	assert.match(success, /use cleanup only after evidence was preserved or intentionally discarded/);
 	assert.doesNotMatch(success, /Use peek or artifact paths for full text/);
+	assert.doesNotMatch(success, /canCleanup/);
+	assert.doesNotMatch(success, /artifact=\/tmp/);
 });
 
 test("terminal empty output is explicit rather than live-looking", () => {
@@ -127,7 +129,11 @@ test("catalog extension tools render copy-ready graph grants", () => {
 	assert.match(catalog, /extensionTools\[\]=\{"name":"exa_search","from":\{"source":"npm:pi-exa-tools","scope":"user","origin":"package"\}\}/);
 	assert.match(catalog, /steps\[\]\.agent\.extensionTools/);
 	assert.match(catalog, /allowExtensionCode:true/);
+	assert.doesNotMatch(catalog, /allowProjectCode:true/);
 	assert.doesNotMatch(catalog, /source=npm:pi-exa-tools scope=user/);
+
+	const projectCatalog = formatDetailsForModel(details("catalog", { extensionTools: [{ name: "project_search", description: "search project", active: true, from: { source: "project:search", scope: "project", origin: "top-level" }, requiresProjectCode: true }] }));
+	assert.match(projectCatalog, /allowExtensionCode:true and graph\.authority\.allowProjectCode:true/);
 });
 
 test("catalog rows with adversarial metadata keep disclaimer first", () => {

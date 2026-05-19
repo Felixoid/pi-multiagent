@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.7.2 - 2026-05-19
+
+- Improved detached-run diagnostics for retained-capacity failures, stalled pending steps, retained-run capacity buckets, terminal pushed notices, and compact failed-step reasons.
+- Hardened child RPC handling with byte-based JSONL limits, bounded stdin backpressure sends, stdout/stderr error guards, parent-message budget checks, and listener teardown.
+- Fixed cleanup result rendering so successful cleanup is receipt-only evidence deletion, denied or failed cleanup remains distinct, and plain notices never point operators back to deleted artifacts.
+- Tightened planning and policy copy for mandatory filesystem-read authority, project/local extension-tool trust via `allowProjectCode:true`, and cleanup failure retention.
+- Added fail-closed map-reduce, release-readiness, and release-fix graph examples, with validator steps requiring parent-copied command scope and release-foundry lanes denying version bump, commit, tag, push, publish, delete, install, deploy, and GitHub Release creation.
+- Clarified graphFile copy/adapt usage, catalog query patterns, skeleton `NEEDS-SCOPE` behavior, filesystem-read non-sandbox guidance, and action `run` denial across docs, skill, cookbook, examples, and tests.
+- Updated public-release handoff guidance so `pnpm run check:release` runs only from the clean release commit before tag/push, while npm publish and GitHub Release creation remain human-owned.
+- Clarified that ignored local control-plane notes stay local while public-doc and package checks use shipped source, docs, tests, and examples as package truth.
+
 ## 0.7.1 - 2026-05-17
 
 - Hardened `agent_team` usability surfaces by exposing effective child tools, reused `clientMessageId` receipts, cleanup-as-evidence-deletion copy, `follow_up` artifact-path guidance, and `mutationScope` non-sandbox warnings across runtime snapshots, model/TUI rendering, docs, examples, and tests.

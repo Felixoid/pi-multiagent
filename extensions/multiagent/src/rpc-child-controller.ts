@@ -1,14 +1,12 @@
-/** RPC subprocess controller for one detached child step. */
-
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { AssistantOutputBudget, type OutputBudgetFailure } from "./rpc-output-budget.ts";
 import { RpcCommandQueue, type RpcCommandAck } from "./rpc-command-queue.ts";
 import { combinedAssistantFinals, envelopeParentMessage, extractAgentEndErrorMessage, extractAgentEndStopReason, extractAssistantErrorMessage, extractAssistantStopReason, extractAssistantText, extractEventText, isRecord, stringField } from "./rpc-record-utils.ts";
-import type { ResolvedAgent, StepStatus, TeamLimits } from "./types.ts";
-import { MAX_PARENT_MESSAGE_CHARS_PER_STEP, MAX_PARENT_MESSAGES_PER_STEP, STDERR_PREVIEW_CHARS } from "./types.ts";
+import { STDERR_PREVIEW_CHARS, type AgentInvocationDefaults, type ResolvedAgent, type StepStatus, type TeamLimits } from "./types.ts";
 import { buildPiArgs, getPiInvocation, killProcessTree, type SpawnProcess } from "./child-launch.ts";
-import { attachRpcJsonlReader, serializeRpcJsonLine, type RpcJsonRecord } from "./rpc-jsonl.ts";
-import type { AgentInvocationDefaults } from "./types.ts";
+import { serializeRpcJsonLine, type RpcJsonRecord } from "./rpc-jsonl.ts";
+import { RpcChildListeners } from "./rpc-child-listeners.ts";
+import { ParentMessageBudget } from "./rpc-parent-message-budget.ts";
 
 const ACK_TIMEOUT_MS = 10_000;
 const EXIT_CLOSE_GRACE_MS = 500;
@@ -55,11 +53,11 @@ export class RpcChildController {
 	private readonly outputBudget = new AssistantOutputBudget();
 	private liveText = "";
 	private stderr = "";
-	private parentMessagesSent = 0;
-	private parentMessageCharsSent = 0;
+	private readonly parentMessageBudget = new ParentMessageBudget();
 	private timeoutTimer: ReturnType<typeof setTimeout> | undefined;
 	private killTimer: ReturnType<typeof setTimeout> | undefined;
 	private exitCloseTimer: ReturnType<typeof setTimeout> | undefined;
+	private readonly listeners = new RpcChildListeners();
 	private spawnProcess: SpawnProcess;
 
 	constructor(options: RpcChildControllerOptions) {
@@ -74,12 +72,7 @@ export class RpcChildController {
 		const invocation = getPiInvocation(args, this.options.cwd);
 		this.child = this.spawnProcess(invocation.command, invocation.args, { cwd: this.options.cwd, shell: false, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
 		this.options.onEvent({ type: "rpc", label: "spawn", preview: "child process spawned", status: "running" });
-		attachRpcJsonlReader(this.child.stdout, (record) => this.handleRecord(record), (message) => this.fail("failed", message));
-		this.child.stderr.on("data", (chunk: Buffer | string) => this.appendStderr(typeof chunk === "string" ? chunk : chunk.toString("utf8")));
-		this.child.stdin.on("error", (error: Error) => this.handleStdinError(error));
-		this.child.on("error", (error) => this.fail("failed", `Subagent process error: ${error.message}`));
-		this.child.on("exit", () => this.handleExit());
-		this.child.on("close", () => this.handleClose());
+		this.listeners.attach(this.child, { onRecord: (record) => this.handleRecord(record), onStdoutError: (message) => this.handleStdoutError(message), onStderrData: (text) => this.appendStderr(text), onStderrError: (error) => this.handleStderrError(error), onStdinError: (error) => this.handleStdinError(error), onChildError: (error) => this.fail("failed", `Subagent process error: ${error.message}`), onExit: () => this.handleExit(), onClose: () => this.handleClose() });
 		this.timeoutTimer = setTimeout(() => this.fail("timed_out", `Subagent exceeded timeoutSecondsPerStep=${this.options.limits.timeoutSecondsPerStep}.`), this.options.limits.timeoutSecondsPerStep * 1000);
 		this.timeoutTimer.unref?.();
 		const completion = new Promise<RpcStepResult>((resolve) => {
@@ -94,10 +87,8 @@ export class RpcChildController {
 
 	async message(channel: "steer" | "follow_up", text: string): Promise<RpcCommandAck> {
 		if (this.finalized || this.closingResult || this.terminating) return { success: false, error: "Step is not live." };
-		if (this.parentMessagesSent >= MAX_PARENT_MESSAGES_PER_STEP) return { success: false, error: `Parent message budget exceeded: attempts=${this.parentMessagesSent}/${MAX_PARENT_MESSAGES_PER_STEP}, chars=${this.parentMessageCharsSent}/${MAX_PARENT_MESSAGE_CHARS_PER_STEP}.` };
-		if (this.parentMessageCharsSent + text.length > MAX_PARENT_MESSAGE_CHARS_PER_STEP) return { success: false, error: `Parent message budget exceeded: attempts=${this.parentMessagesSent}/${MAX_PARENT_MESSAGES_PER_STEP}, chars=${this.parentMessageCharsSent + text.length}/${MAX_PARENT_MESSAGE_CHARS_PER_STEP}.` };
-		this.parentMessagesSent += 1;
-		this.parentMessageCharsSent += text.length;
+		const budgetError = this.parentMessageBudget.reserve(text);
+		if (budgetError) return { success: false, error: budgetError };
 		const commandType = channel === "steer" ? "steer" : "follow_up";
 		const ack = await this.sendCommand({ type: commandType, message: envelopeParentMessage(channel, text) });
 		this.options.onEvent({ type: "parent_message", label: channel, preview: ack.success ? "accepted/queued" : ack.error, status: ack.success ? "done" : "error" });
@@ -120,6 +111,11 @@ export class RpcChildController {
 		if (this.closingResult) this.complete(this.closingResult);
 	}
 
+	private handleStdoutError(message: string): void {
+		const normalized = message.startsWith("RPC JSONL stream error:") ? message.replace("RPC JSONL", "RPC stdout") : message;
+		this.fail("failed", normalized, normalized.includes("stream error") ? "stdout-error" : "rpc-jsonl");
+	}
+
 	private handleStdinError(error: Error): void {
 		const message = `RPC stdin stream error: ${error.message}`;
 		if (this.finalized) return;
@@ -128,6 +124,16 @@ export class RpcChildController {
 			return;
 		}
 		this.fail("failed", message, "stdin-error");
+	}
+
+	private handleStderrError(error: Error): void {
+		const message = `RPC stderr stream error: ${error.message}`;
+		if (this.finalized) return;
+		if (this.closingResult) {
+			this.options.onEvent({ type: "diagnostic", label: "stderr-error", preview: message, status: "error" });
+			return;
+		}
+		this.fail("failed", message, "stderr-error");
 	}
 
 	private sendCommand(command: RpcJsonRecord): Promise<RpcCommandAck> {
@@ -261,7 +267,7 @@ export class RpcChildController {
 		try {
 			this.child.stdin.write(serializeRpcJsonLine({ type: "extension_ui_response", id, cancelled: true }));
 		} catch {
-			// The step is already failing; closeout will report the UI denial.
+			// Closeout reports the UI denial.
 		}
 	}
 
@@ -298,6 +304,7 @@ export class RpcChildController {
 		this.options.onEvent({ type: "rpc", label: "terminalizing", preview: result.status, status: "running" });
 		if (this.timeoutTimer) clearTimeout(this.timeoutTimer);
 		this.commands.closeWith((command) => `RPC command ${command} was closed by step finalization.`);
+		this.listeners.detachIo(false, true);
 		this.terminateChild();
 		if (!this.child || this.childClosed || this.childExited || this.child.exitCode !== null) this.complete(result);
 	}
@@ -334,6 +341,7 @@ export class RpcChildController {
 		if (this.timeoutTimer) clearTimeout(this.timeoutTimer);
 		if (this.killTimer) clearTimeout(this.killTimer);
 		if (this.exitCloseTimer) clearTimeout(this.exitCloseTimer);
+		this.listeners.detachForCompletion(!!this.child && !this.childClosed);
 		this.completionResolve?.(result);
 		this.completionResolve = undefined;
 	}

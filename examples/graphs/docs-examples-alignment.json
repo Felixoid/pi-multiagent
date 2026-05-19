@@ -37,7 +37,7 @@
       "needs": [
         "docs-editor"
       ],
-      "task": "Run or inspect the targeted documentation/example validation path available in the repo, preferring `node --no-warnings --experimental-strip-types --loader ./tests/pi-peer-loader.mjs --test tests/examples.test.ts` and `node --experimental-strip-types tests/check-public-docs.ts` when applicable. Use bash only for these bounded validation probes or task-named equivalents. Return pass/fail/deferred with exact commands and remaining mismatch risk."
+      "task": "Validation command scope copied by parent: REPLACE_WITH_EXACT_DOCS_EXAMPLES_VALIDATION_COMMANDS. Run only those commands. If this placeholder remains, no commands are present, or scope is implied only by upstream evidence, return needs-command-scope without running commands. Candidate docs/example checks may include `node --no-warnings --experimental-strip-types --loader ./tests/pi-peer-loader.mjs --test tests/examples.test.ts` and `node --experimental-strip-types tests/check-public-docs.ts` only when the parent copied them here. Do not edit. Return pass/fail/deferred with exact commands and remaining mismatch risk."
     },
     {
       "id": "alignment-summary",

@@ -203,6 +203,55 @@ test("renderAgentTeamResult reports cleanup as evidence deletion", () => {
 	const plain = formatAgentTeamNoticeText(cleanup);
 	assert.match(plain, /agent_team evidence deleted/);
 	assert.match(plain, /evidence deleted 1 retained path/);
+	assert.doesNotMatch(plain, /retrieve|peek|artifacts/);
+});
+
+test("renderAgentTeamResult reports actual cleanup receipt shape without run snapshot", () => {
+	const cleanup = details("cleanup", {
+		cleanup: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", deletedPaths: ["/tmp/one-final.md", "/tmp/run"] },
+	});
+	const rendered = renderAgentTeamResult({ content: [], details: cleanup }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
+	assert.match(rendered, /agent_team evidence deleted agt_/);
+	assert.match(rendered, /evidence deleted 2 retained path/);
+	assert.doesNotMatch(rendered, /cleanup ok|no run/);
+	const plain = formatAgentTeamNoticeText(cleanup);
+	assert.match(plain, /agent_team evidence deleted agt_/);
+	assert.match(plain, /evidence deleted 2 retained path/);
+	assert.doesNotMatch(plain, /retrieve|peek|artifacts/);
+});
+
+test("renderAgentTeamResult keeps cleanup denial distinct from evidence deletion", () => {
+	const denied = details("cleanup", {
+		ok: false,
+		error: { code: "cleanup-run-live", message: "Cleanup is denied while the run is live." },
+		run: run({ objective: "detached", liveStepIds: ["one"], sinkStepIds: ["one"], lastEvent: "one: running", counts: counts({ running: 1 }) }),
+	});
+	const rendered = renderAgentTeamResult({ content: [], details: denied }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
+	assert.match(rendered, /agent_team cleanup denied agt_/);
+	assert.match(rendered, /cleanup-run-live/);
+	assert.match(rendered, /cleanup cleanup-run-live/);
+	assert.doesNotMatch(rendered, /evidence deleted/);
+	const plain = formatAgentTeamNoticeText(denied);
+	assert.match(plain, /agent_team cleanup denied agt_/);
+	assert.match(plain, /cleanup cleanup-run-live/);
+	assert.doesNotMatch(plain, /evidence deleted/);
+});
+
+test("renderAgentTeamResult keeps cleanup failure distinct from evidence deletion", () => {
+	const failed = details("cleanup", {
+		ok: false,
+		error: { code: "cleanup-artifacts-failed", message: "Cleanup failed while deleting retained artifacts: permission denied" },
+		run: run({ objective: "detached", status: "succeeded", terminal: true, liveStepIds: [], sinkStepIds: ["one"], lastEvent: "terminal: succeeded", canMessage: false, canCancel: false, canCleanup: true, counts: counts({ succeeded: 1 }) }),
+	});
+	const rendered = renderAgentTeamResult({ content: [], details: failed }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
+	assert.match(rendered, /agent_team cleanup failed agt_/);
+	assert.match(rendered, /cleanup-artifacts-failed/);
+	assert.match(rendered, /cleanup cleanup-artifacts-failed/);
+	assert.doesNotMatch(rendered, /evidence deleted/);
+	const plain = formatAgentTeamNoticeText(failed);
+	assert.match(plain, /agent_team cleanup failed agt_/);
+	assert.match(plain, /cleanup cleanup-artifacts-failed/);
+	assert.doesNotMatch(plain, /evidence deleted/);
 });
 
 function details(action: AgentTeamDetails["action"], fields: Partial<AgentTeamDetails>): AgentTeamDetails {

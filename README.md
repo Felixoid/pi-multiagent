@@ -64,40 +64,11 @@ After installing in a running Pi session, use `/reload`. Reload requests cancell
 
 README examples are `agent_team` tool inputs, not shell commands. This README is the human/operator path for install, trust boundaries, first run, lifecycle, limits, and validation. `/skill:pi-multiagent` is the complete canonical agent-facing reference and progressive-disclosure hub; its cookbook/reference assets carry deeper graph choreography for agents, while graph examples are schema-checked copyable specs.
 
-| Action | Required controls | Optional controls |
-| --- | --- | --- |
-| `catalog` | none | `library.sources`, `library.query`, `library.projectAgents` |
-| `start` | exactly one `graph` or `graphFile` | `options.maxRunSeconds`, `options.terminalRetentionSeconds`, `options.notify` |
-| `retrieve` | `runId` | `cursor`, `stepId`, `waitSeconds`, `maxBytes`, `preview`, `debugEvents` |
-| `peek` | `runId`, `stepId` | `maxBytes`, `preview` |
-| `message` | `runId`, `stepId`, `channel`, `text` | `clientMessageId` |
-| `cancel` | `runId` | `reason` |
-| `cleanup` | `runId` | none |
-
-Pseudo-schema, by action:
-
-- `catalog`: `{ action:"catalog", library?: { sources?, query?, projectAgents? } }`
-- `start`: `{ action:"start", graph, options? }` or `{ action:"start", graphFile, options? }`
-- `retrieve`: `{ action:"retrieve", runId, cursor?, stepId?, waitSeconds?, maxBytes?, preview?, debugEvents? }`
-- `peek`: `{ action:"peek", runId, stepId, maxBytes?, preview? }`
-- `message`: `{ action:"message", runId, stepId, channel:"steer"|"follow_up", text, clientMessageId? }`
-- `cancel`: `{ action:"cancel", runId, reason? }`
-- `cleanup`: `{ action:"cleanup", runId }`
-
-Do not send read-only controls such as `cursor`, `waitSeconds`, `maxBytes`, `preview`, or `debugEvents` to `catalog` or `start`. `catalog` is narrowed with `library.query`, not `maxBytes`. `preview` is retrieve/peek-only and defaults to `false`, so routine reads return status, diagnostics, step rows, effective tools, artifact indexes, and artifact paths without child final text. `waitSeconds` is retrieve-only and returns the same compact snapshot after a material parent-visible event or timeout. Schema-admissible fatal shape failures render as `# agent_team error` with misplaced fields and repair copy instead of an empty action result; schema-invalid calls may be rejected by Pi before package rendering.
+Detailed action pseudo-schema belongs in `/skill:pi-multiagent`. Operator-facing rule of thumb: `catalog` takes library controls, `start` takes exactly one graph source, `retrieve`/`peek` are artifact reads, `message` is live step steering, `cancel` is stop-only, and `cleanup` is terminal evidence deletion. Do not send read controls such as `cursor`, `waitSeconds`, `maxBytes`, `preview`, or `debugEvents` to `catalog` or `start`. `catalog` is narrowed with `library.query`, not `maxBytes`. `preview` is retrieve/peek-only and defaults to `false`, so routine reads return status, diagnostics, step rows, effective tools, artifact indexes, and artifact paths without child final text. `waitSeconds` is retrieve-only and returns the same compact snapshot after a material parent-visible event or timeout. Schema-admissible fatal shape failures render as `# agent_team error` with misplaced fields and repair copy instead of an empty action result; schema-invalid calls may be rejected by Pi before package rendering.
 
 `options.notify` defaults to `mode:"milestones"`, `maxNotices:12`, and `minIntervalSeconds:10`. `mode:"none"` disables pushed notices. `mode:"final"` sends only the terminal notice. `mode:"milestones"` coalesces milestone reasons between sends; `maxNotices` caps non-terminal notices from 0 to 100, and the terminal notice is still sent unless mode is `none`.
 
-Tool profile quick matrix:
-
-| Step type | `agent.tools` | Authority needed | Result |
-| --- | --- | --- | --- |
-| Catalog read role, omitted tools | omitted | `allowFilesystemRead:true` | Inherits and expands the role's read/discovery `defaultTools`. |
-| Catalog role, narrowed tools | explicit list | matching authority | Replaces the whole catalog profile; use `tools:["read","bash"]` for shell-backed read-only probes. |
-| Catalog role, forced read-only | `[]` | `allowFilesystemRead:true` | Replaces any non-read catalog defaults, then mandatory read/discovery is added. |
-| Inline role, omitted or read-only tools | omitted, `[]`, or `tools:["read"]` | `allowFilesystemRead:true` | Every child keeps the expanded `read`, `grep`, `find`, `ls` suite. |
-| Web research role | omitted plus `extensionTools` | `allowFilesystemRead:true`, `allowExtensionCode:true` | Use `package:web-researcher` with catalog-reported web tool provenance; read tools let it inspect delegated local artifacts. |
-| Mutation worker | omitted or write-capable explicit list | read/shell/mutation authority plus concrete first-class `mutationScope` | `mutationScope` is a planning requirement and child prompt handoff; it is not a path-level sandbox. |
+Tool-profile details belong in the skill. The durable operator rules are: every child process keeps at least the filesystem read/discovery suite, explicit `agent.tools` replaces a catalog profile rather than appending, extension grants require catalog-reported provenance, project/local extension provenance also needs `allowProjectCode:true`, and write-capable or bash-capable worker steps need concrete first-class `mutationScope`. `mutationScope` is a planning requirement and child prompt handoff; it is not a path-level sandbox.
 
 ## First success
 
@@ -255,7 +226,7 @@ A graph is a pure static DAG. Every child process keeps at least the filesystem 
 
 Synthesis is just another dependent step. Use `needs` when every listed upstream step must succeed before this step runs. Use `after` when the step should wait for upstream terminal state and consume failure or blocked evidence, such as final synthesis over partial lanes. Sink steps, not array order or completion order, define caller-facing finals; both `needs` and `after` count as dependency edges for sink detection. Do not use `synthesis`, `outputContract`, top-level agent registries, or run-level caller-skill inheritance. Multiple sinks produce multiple finals; add a dependent synthesizer when one final is desired.
 
-A step may set `cwd` to an existing directory inside the invocation cwd. Symlinked, missing, non-directory, or path-escaping `cwd` values are denied. The runtime records cwd identity at planning and revalidates it immediately before child launch; spawn still receives the path string, so this is best-effort TOCTOU hardening, not a transactional directory lock. Bash-enabled steps are also refused when the effective `cwd` tree contains `.pi/settings.json`.
+A step may set `cwd` to an existing directory inside the invocation cwd. `cwd` narrows launch working context: symlinked, missing, non-directory, or path-escaping values are denied, and the runtime records cwd identity at planning and revalidates it immediately before child launch. It is not path confinement. `allowFilesystemRead:true` grants read/discovery coarsely to the child process; `agent_team` does not add a read sandbox beyond Pi tools, the OS, and runtime behavior. Put path limits in `task`, `system`, `cwd`, and `mutationScope`, and treat them as instruction/launch-context controls, not a sandbox. Bash-enabled steps are also refused when the effective `cwd` tree contains `.pi/settings.json`.
 
 `graphFile` points to a pure graph JSON file, not an action wrapper:
 
@@ -266,7 +237,7 @@ A step may set `cwd` to an existing directory inside the invocation cwd. Symlink
 }
 ```
 
-The file must be a regular relative `.json` file inside the current working directory and is limited to 256 KiB. Symlinks, absolute paths, nested `graphFile`, and control fields such as `action` or `runId` are denied. A graph file is still an executable delegation spec: its `authority`, tools, extension grants, caller skills, and prompts are honored after validation, so load graph files only from trusted workspace content. Packaged examples are references to copy and adapt; they are not loaded by package path and are not a runtime template API.
+The file must be a regular relative `.json` file inside the current working directory and is limited to 256 KiB. Symlinks, absolute paths, nested `graphFile`, and control fields such as `action` or `runId` are denied. A graph file is still an executable delegation spec: its `authority`, tools, extension grants, caller skills, and prompts are honored after validation, so load graph files only from trusted workspace content. Packaged examples are references to copy and adapt; they are not loaded by package path and are not a runtime template API. For example, copy `examples/graphs/read-only-audit-fanout.json` into the workspace as `read-only-audit-fanout.json`, edit that workspace-local file, then use the copied filename as `graphFile`.
 
 ## Agents and catalog defaults
 
@@ -281,25 +252,11 @@ Library refs are always source-qualified:
 - `user:name`: personal prompts from `${PI_CODING_AGENT_DIR}/agents` or `~/.pi/agent/agents`.
 - `project:name`: project prompts from nearest `.pi/agents`, available only when project code is explicitly trusted.
 
-Bare names are invalid. Start graphs default to `graph.library.sources:["package"]`; opt into `user` or trusted `project` sources explicitly. Use known source-qualified bundled refs directly when the role choice is obvious and package sources are enough. Run `catalog` before start when choosing among roles, using `user:` or trusted `project:` agents, checking live descriptions/routing tags/default built-in tool profiles, or copying active parent extension-tool provenance. Catalog output is authoritative for refs, descriptions, routing tags, default built-in tool profiles, paths, SHA metadata, and active parent extension-tool provenance. Catalog queries match exact phrases or non-stopword query terms across refs, descriptions, tags, sources, default tools, model, and path; omit the query to list everything.
+Bare names are invalid. Start graphs default to `graph.library.sources:["package"]`; opt into `user` or trusted `project` sources explicitly. Use known source-qualified bundled refs directly when the role choice is obvious and package sources are enough. Run `catalog` before start when choosing among roles, using `user:` or trusted `project:` agents, checking live descriptions/routing tags/default built-in tool profiles, or copying active parent extension-tool provenance. Catalog output is authoritative for refs, descriptions, routing tags, default built-in tool profiles, paths, SHA metadata, and active parent extension-tool provenance. Catalog queries match exact phrases or non-stopword query terms across refs, descriptions, tags, sources, default tools, model, and path; omit the query to list everything. Prefer concise routing queries: one to three role or task words such as `review`, `web research`, `validation`, or `docs audit` before trying longer prose.
 
 Catalog descriptions and tags are model-facing routing contracts: prefer roles whose description or tags match the delegated job, then read the runtime `defaultTools`. Tags are routing metadata only; they do not grant tools, skills, source trust, shell, mutation, or release authority. Catalog defaults remove boilerplate, not authorization or ownership. Catalog output labels these as `defaultTools`. Structured details expose the same default built-in tool profile as `catalog[].tools`; do not confuse that metadata with step-level `agent.tools`. Omit `tools` on a library agent to inherit its catalog default profile capped by graph authority. If authority partially strips inherited defaults, start returns a `catalog-default-tools-capped` warning with the denied and effective tools; if authority would deny the mandatory read/discovery suite, start fails with `catalog-default-tools-denied` or `filesystem-read-authority-required`. Set `tools` explicitly only to narrow or override the complete profile; explicit `tools` replaces the whole catalog profile, then mandatory read/discovery is added. It does not append. Inline agents have no catalog defaults, but omitted or empty `tools` still receives mandatory read/discovery and requires `allowFilesystemRead:true`.
 
-Package role chooser, with exact current `defaultTools` still owned by live `catalog` output:
-
-| Ref | Reach for it when | Tool expectation |
-| --- | --- | --- |
-| `package:scout` | Local repo/dependency exploration: code, docs, tests, schemas, `.venv`, `node_modules`, generated clients, vendored SDKs, config, unknowns, contradictions | Default read/discovery; command-observed runtime facts require explicit `tools:["read","bash"]` plus shell authority. |
-| `package:web-researcher` | Current external web facts, official/vendor docs, public announcements, registry facts, URLs, and provenance | Default read/discovery plus explicit `extensionTools` copied from `catalog`, with `allowFilesystemRead:true` and `allowExtensionCode:true`. |
-| `package:planner` | Evidence exists and needs a scoped implementation contract | Read/discovery only. |
-| `package:critic` | A concrete plan or completed path needs adversarial second-pass/pre-mortem risk review | Read/discovery only; not the default completed-work validator. |
-| `package:docs-auditor` | Public docs, model-facing tool/skill copy, cookbook, examples, microcopy, or first-success UX need read-only clarity audit | Read/discovery only; command proof belongs to `package:validator`. |
-| `package:reviewer` | Completed work, diffs, release candidates, public-copy drift, or validation evidence need normal review | Default read/discovery; command-only proof belongs to `package:validator`. |
-| `package:validator` | Parent-named validation, status, diff, or test commands need observed shell proof without mutation | Default read/discovery plus bash; requires shell authority and concrete command scope. |
-| `package:worker` | One parent-authorized implementation must edit synchronized surfaces | Defaults to read/discovery, bash, edit, and write; graph authority alone is not edit authorization. |
-| `package:synthesizer` | Completed lanes need one decision while preserving conflicts | Default read/discovery so it can inspect upstream artifacts it receives; do not ask for fresh reconnaissance unless the task requires it. |
-
-Any read/discovery primitive in `tools` resolves to the full filesystem read/discovery suite: `read`, `grep`, `find`, and `ls`.
+Use live `catalog` for exact bundled refs, routing tags, and `defaultTools`; README intentionally does not duplicate the role taxonomy. Common package refs include `package:scout`, `package:web-researcher`, `package:planner`, `package:critic`, `package:docs-auditor`, `package:reviewer`, `package:validator`, `package:worker`, and `package:synthesizer`. Any read/discovery primitive in `tools` resolves to the full filesystem read/discovery suite: `read`, `grep`, `find`, and `ls`.
 
 ## Authority and tools
 
@@ -355,7 +312,7 @@ Example extension grant after `catalog` reports active Exa provenance. This is t
 }
 ```
 
-Extension grants load trusted code into child Pi processes with explicit `--extension` paths. This is code execution, not a tool-only sandbox. `package:web-researcher` still keeps mandatory read/discovery so it can inspect delegated local artifact paths named by the task.
+Extension grants load trusted code into child Pi processes with explicit `--extension` paths. This is code execution, not a tool-only sandbox. User/package extension provenance needs `allowExtensionCode:true`; project-scoped, temporary-scoped, or current-workspace-local extension provenance also needs `allowProjectCode:true`. `package:web-researcher` still keeps mandatory read/discovery so it can inspect delegated local artifact paths named by the task.
 
 ## Caller skills
 
@@ -416,8 +373,8 @@ Control flow comes from schemas, manager state, process state, RPC responses/eve
 | Max run time | 1 to 86400 seconds; default 86400 seconds |
 | Terminal retention | 1 to 604800 seconds; default 86400 seconds |
 | Retrieve wait | `waitSeconds` max 60 seconds |
-| Live detached runs | 16 per extension process |
-| Retained terminal runs | 64 per extension process |
+| Live detached runs | 16 live runs per extension process; completion or cancel frees live capacity |
+| Retained detached runs | 64 retained runs per extension process, including live and terminal runs; cleanup frees only terminal retained runs |
 | Pushed notices | `none`, `final`, or `milestones`; default `milestones`; max 100 non-terminal notices; default 12; minimum interval default 10 seconds, max 3600 |
 | Inline upstream handoff | 12000 chars per dependency; larger upstream sends a 2000-char preview plus artifact path |
 | Retrieve/peek model-facing output | Compact formatter cap is owned by Pi/package display; `preview` defaults false, and full artifacts are not trimmed |
@@ -432,25 +389,11 @@ Control flow comes from schemas, manager state, process state, RPC responses/eve
 
 ## Graph examples
 
-Packaged examples are pure graph specs. Choose by authority first, then copy one into the current workspace, adapt it, and call `start` with `graphFile`. Use the graph design ladder in the skill/cookbook: no delegation, single specialist, inline fan-in, read-only fanout, artifact-chained follow-up, web research lane, web-to-local decision, human-gated plan, approved mutation run, then release/readiness foundry. Default to `single-specialist-read-only.json` or one catalog role. Use fanout only when independent lanes are explicitly valuable. Use artifact-chained decisions when prior retained artifact paths must cross compaction, approval, or phase boundaries; preserve terminal artifacts before cleanup. Use the cookbook-only Web Research to Local Decision pattern for current web facts plus local repo evidence after copying exact active catalog provenance and granting `allowExtensionCode:true`. Use mutation-capable graphs only after exact current mutation authorization. Do not run mutation-authority examples unless the user's current delegation explicitly authorizes the named mutation class. The first-class step `mutationScope` is both the copy/adapt contract and the planning-time prompt handoff for write-capable steps and bash-capable `package:worker` steps; replace it with the exact allowed file set or mutation class before starting the graph. `mutationScope` rejects missing or placeholder authorization but does not path-sandbox `bash`, `edit`, or `write`. Children do not receive the parent transcript and must not infer authorization.
+Packaged examples are pure graph specs. Choose by authority first, then copy one into the current workspace, adapt it, and call `start` with `graphFile`. Copy/adapt warning: packaged examples that say "scoped question" are skeletons. Do not run them verbatim; replace the objective and tasks with the concrete boundary, affected files/components, stop condition, and expected output fields before starting the graph. Use the graph design ladder in the skill/cookbook: no delegation, single specialist, inline fan-in, read-only fanout, map-reduce audit fanout, artifact-chained follow-up, web research lane, web-to-local decision, human-gated plan, approved mutation run, release-readiness review, then authorized release-fix foundry. Default to `single-specialist-read-only.json` or one catalog role. Use fanout only when independent lanes are explicitly valuable. Use artifact-chained decisions when prior retained artifact paths must cross compaction, approval, or phase boundaries; preserve terminal artifacts before cleanup. Use the cookbook-only Web Research to Local Decision pattern for current web facts plus local repo evidence after copying exact active catalog provenance and granting `allowExtensionCode:true` plus `allowProjectCode:true` when catalog provenance is project/local. Use `release-readiness-review.json` for the default read/shell release proof path, then use mutation-capable graphs only after exact current mutation authorization. Do not run mutation-authority examples unless the user's current delegation explicitly authorizes the named mutation class. The first-class step `mutationScope` is both the copy/adapt contract and the planning-time prompt handoff for write-capable steps and bash-capable `package:worker` steps; replace it with the exact allowed file set or mutation class before starting the graph. `mutationScope` rejects missing or placeholder authorization but does not path-sandbox `bash`, `edit`, or `write`. Children do not receive the parent transcript and must not infer authorization.
 
 Before starting a mutation-capable graph, verify all four items: exact parent authorization for the mutation class, concrete `mutationScope` naming the file set or mutation class, graph authority limited to the needed read/shell/mutation grants, and no placeholder or `REPLACE` text left in mutationScope fields. `mutationScope` is not a sandbox; bash/edit/write are not path-confined, so a child must stop rather than touch anything outside the authorization. Graph gates are model-level dependencies, not human approval checkpoints; use separate runs when a human decision must occur before mutation.
 
-| Example | Use when | Authority | Can mutate? | Concurrency | Sink | Parent authorization |
-| --- | --- | --- | --- | --- | --- | --- |
-| [`single-specialist-read-only.json`](examples/graphs/single-specialist-read-only.json) | One scoped local question needs one package specialist | filesystem read | No | one step | `inspect` | Read-only delegation |
-| [`inline-read-only-fanin.json`](examples/graphs/inline-read-only-fanin.json) | Hand-authored inline lanes are faster than catalog routing | filesystem read | No | parallel read lanes | `summary` | Read-only delegation |
-| [`human-gated-plan-only.json`](examples/graphs/human-gated-plan-only.json) | A plan and human approval question are needed before any mutation | filesystem read | No | parallel/serialized read lanes | `final-decision` | Read-only planning delegation |
-| [`artifact-chained-decision.json`](examples/graphs/artifact-chained-decision.json) | Prior retained artifacts need a follow-up decision after compaction, approval, or phase separation | filesystem read | No | parallel read/review lanes | `final-decision` | Prior run id and artifact paths; preserve evidence before cleanup |
-| [`approved-plan-implementation.json`](examples/graphs/approved-plan-implementation.json) | A prior read-only plan has exact current human approval and needs one authorized mutation run | filesystem, shell, mutation | Yes | serialized | `final-decision` | Exact approval text, prior artifact paths, concrete `mutationScope`, exclusions, and command scope |
-| [`command-validation-only.json`](examples/graphs/command-validation-only.json) | Named read-only commands need observed proof without review bloat | filesystem, shell | No | serialized | `final-proof` | Read-only validation delegation with named commands |
-| [`read-only-audit-fanout.json`](examples/graphs/read-only-audit-fanout.json) | Independent contract/docs/risk review before a decision | filesystem read | No | parallel read lanes | `final-decision` | Read-only delegation |
-| [`completed-proof-review.json`](examples/graphs/completed-proof-review.json) | Completed change or release candidate needs observed proof without mutation | filesystem, shell | No | parallel review/proof lanes | `final-decision` | Read-only validation delegation with named commands |
-| [`model-facing-docs-audit.json`](examples/graphs/model-facing-docs-audit.json) | Tool/skill/cookbook/catalog model-facing clarity needs a read-only audit | filesystem read | No | parallel audit lanes | `final-opportunities` | Read-only delegation |
-| [`research-to-change-gated-loop.json`](examples/graphs/research-to-change-gated-loop.json) | Ambiguous local repo change needs evidence, plan, critique, and human-gated next action | filesystem read | No | parallel/serialized read lanes | `final-report` | Read-only planning delegation |
-| [`docs-examples-alignment.json`](examples/graphs/docs-examples-alignment.json) | Docs/examples/tests need alignment after implemented behavior changes | filesystem, shell, mutation | Yes, docs/examples/tests only | serialized | `alignment-summary` | Explicit docs mutation authorization plus concrete `mutationScope` |
-| [`implementation-review-gate.json`](examples/graphs/implementation-review-gate.json) | One scoped authorized package change needs map/plan/critique/work/review | filesystem, shell, mutation | Yes | serialized | `final-decision` | Explicit implementation authorization plus concrete `mutationScope` |
-| [`public-release-foundry.json`](examples/graphs/public-release-foundry.json) | Release-readiness review before human-owned release actions | filesystem, shell, mutation | Yes, release-readiness fixes only | serialized | `ship-decision` | Explicit release-fix authorization plus concrete `mutationScope`; never version bump, commit, tag, push, publish, or create GitHub Releases |
+The packaged example set covers single-specialist, inline fan-in, read-only audit fanout, map-reduce audit fanout, artifact-chained follow-up, human-gated planning, approved implementation, command validation, completed proof review, docs/example alignment, implementation review, release readiness, and release-fix foundry patterns. Browse [`examples/graphs`](examples/graphs) for the schema-checked JSON and the [graph cookbook](skills/pi-multiagent/references/graph-cookbook.md) for the chooser table, sink ids, and copy/adapt packets. Key split: [`release-readiness-review.json`](examples/graphs/release-readiness-review.json) is read/shell-only proof; [`public-release-foundry.json`](examples/graphs/public-release-foundry.json) is only for explicitly authorized release fixes.
 
 For current web facts, use `package:web-researcher` with the Exa extension grant pattern above, the cookbook Web Research Extension Lane, or the cookbook-only Web Research to Local Decision pattern. Require official or primary sources, fetched URLs, source/provenance notes, and exact active catalog provenance for extension grants. The research-to-change example is read-only local repository research and planning, not web research and not mutation.
 
@@ -479,13 +422,14 @@ For current web facts, use `package:web-researcher` with the Exa extension grant
 ```bash
 cd /path/to/pi-multiagent
 pnpm run gate
-pnpm run check:release
 npm pack --dry-run --json
 npm publish --dry-run --json
 git diff --check
+# From a clean release commit only:
+pnpm run check:release
 ```
 
-`pnpm run gate` runs TypeScript typechecking, unit tests, fake Pi smoke, package-content checks, package-load checks, public-doc checks, and source-size checks. `pnpm run check:release` is the release identity guard: it checks package metadata, requires an empty `CHANGELOG.md` `Unreleased` section, requires a dated changelog section for the current package version, and verifies that version is not already published on npm.
+`pnpm run gate` runs TypeScript typechecking, unit tests, fake Pi smoke, package-content checks, package-load checks, public-doc checks, and source-size checks. `pnpm run check:release` is the release identity and lineage guard: from a clean release commit, it checks package metadata, requires `HEAD:package.json` to match the working release version, requires no dirty or untracked files, requires an empty `CHANGELOG.md` `Unreleased` section, requires a dated changelog section for the current package version, and verifies that version is not already published on npm.
 
 Release candidates should also run the optional real-runtime smoke after explicit operator approval for a real Pi/model invocation:
 
@@ -499,7 +443,7 @@ For major rewrites, live integration changes, or release-readiness claims, stati
 
 ## Public npm release handoff
 
-Publishing is human-owned. Do not run `npm publish`, git commit/tag/push, or GitHub Release creation from `public-release-foundry.json` or another delegated graph. GitHub Release creation is a required release closeout step for the pushed tag; perform it only in the top-level release workflow with explicit human authorization, or list it as a not-executed human action.
+Publishing is human-owned. Use `release-readiness-review.json` for non-mutating readiness proof and `public-release-foundry.json` only for explicitly authorized release fixes. Do not run `npm publish`, git commit/tag/push, or GitHub Release creation from any delegated graph. GitHub Release creation is a required release closeout step for the pushed tag; perform it only in the top-level release workflow with explicit human authorization, or list it as a not-executed human action.
 
 Before the human publish step:
 
@@ -511,11 +455,10 @@ Before the human publish step:
 
 2. Set the chosen version in `package.json`.
 3. Move release notes from `CHANGELOG.md` `Unreleased` into `## <version> - <YYYY-MM-DD>` and leave `Unreleased` empty.
-4. Run and preserve output from the deterministic local and dry-run release checks:
+4. Run and preserve output from the deterministic local and dry-run release checks that do not require the final clean release commit yet:
 
    ```bash
    pnpm run gate
-   pnpm run check:release
    npm pack --dry-run --json
    npm publish --dry-run --json
    git diff --check
@@ -529,8 +472,20 @@ Before the human publish step:
 
 5. Inspect `npm pack --dry-run --json` for intended version, file list, size, no secrets, `pi` manifest, README, changelog, license, agents, assets, examples, skills, and extensions.
 6. Preserve release validation artifacts, runIds, and command output before any `agent_team cleanup`.
-7. Review, stage, commit, tag, and push according to the repository owner's policy so the exact published source is recoverable.
-8. Record that GitHub Release creation for `v<version>` is still required after npm publish unless it was explicitly authorized and created earlier. The release is not complete until `gh release view v<version>` succeeds for the pushed tag.
+7. Review, stage, and commit according to the repository owner's policy, but do not tag or push yet.
+8. From that clean release commit, rerun and preserve the release lineage guard and dry-runs:
+
+   ```bash
+   git status -sb
+   git show HEAD:package.json
+   pnpm run check:release
+   npm pack --dry-run --json
+   npm publish --dry-run --json
+   git diff --check
+   ```
+
+9. After the clean-commit guards pass, tag and push according to the repository owner's policy so the exact published source is recoverable.
+10. Record that GitHub Release creation for `v<version>` is still required after npm publish unless it was explicitly authorized and created earlier. The release is not complete until `gh release view v<version>` succeeds for the pushed tag.
 
 Stop here for agent-owned release prep unless the human explicitly authorizes git/GitHub release actions. The human publisher then checks npm identity and performs the publish:
 

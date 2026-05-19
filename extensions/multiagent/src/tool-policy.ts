@@ -39,7 +39,7 @@ export function childToolNames(agent: { tools: string[]; extensionTools: { name:
 	return dedupeStrings([...agent.tools, ...agent.extensionTools.map((tool) => tool.name)]);
 }
 
-export function catalogParentExtensionTools(inventory: ParentToolInventory | undefined): CatalogExtensionToolSummary[] {
+export function catalogParentExtensionTools(inventory: ParentToolInventory | undefined, cwd?: string): CatalogExtensionToolSummary[] {
 	if (!inventory?.apiAvailable) return [];
 	const activeNameCounts = countActiveToolNames(inventory.tools);
 	return inventory.tools
@@ -49,6 +49,7 @@ export function catalogParentExtensionTools(inventory: ParentToolInventory | und
 			description: tool.description,
 			from: { source: tool.sourceInfo.source, scope: tool.sourceInfo.scope, origin: tool.sourceInfo.origin },
 			active: tool.active,
+			requiresProjectCode: extensionToolRequiresProjectCode(tool.sourceInfo, cwd),
 		}))
 		.sort((left, right) => left.name.localeCompare(right.name) || left.from.source.localeCompare(right.from.source));
 }
@@ -247,7 +248,7 @@ function validateSourcePolicy(source: ResolvedExtensionSource, sourceInfo: Paren
 
 function policyDiagnostic(policy: ExtensionToolPolicy["projectExtensions"], codePrefix: string, name: string, path: string, reason: string): AgentDiagnostic | undefined {
 	if (policy === "allow") return undefined;
-	return { code: `${codePrefix}-denied`, message: `Extension tool ${name} is denied by default; ${reason}.`, path, severity: "error" };
+	return { code: `${codePrefix}-denied`, message: `Extension tool ${name} is denied by default; ${reason}. Set graph.authority.allowProjectCode:true only when this trusted project/local code should run in the child.`, path, severity: "error" };
 }
 
 function findReservedSourceCollision(tools: ParentToolInfo[], selected: ParentToolSourceInfo, selectedSource: ResolvedExtensionSource): ParentToolInfo | undefined {
@@ -262,6 +263,13 @@ function findReservedSourceCollision(tools: ParentToolInfo[], selected: ParentTo
 
 function sameParentSource(left: ParentToolSourceInfo, right: ParentToolSourceInfo): boolean {
 	return left.path === right.path && left.source === right.source && left.scope === right.scope && left.origin === right.origin && left.baseDir === right.baseDir;
+}
+
+function extensionToolRequiresProjectCode(sourceInfo: ParentToolSourceInfo, cwd: string | undefined): boolean {
+	if (sourceInfo.scope === "project" || sourceInfo.scope === "temporary") return true;
+	if (!cwd) return false;
+	const realpath = safeRealpath(sourceInfo.path);
+	return realpath !== undefined && isWorkspaceLocalSource(realpath, cwd);
 }
 
 function isWorkspaceLocalSource(realpath: string, cwd: string): boolean {
