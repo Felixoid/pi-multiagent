@@ -1,0 +1,53 @@
+{
+  "objective": "Audit three package subtrees with step cwd launch context. This teaches that cwd narrows launch context but is not path confinement or a read sandbox.",
+  "library": {
+    "sources": [
+      "package"
+    ]
+  },
+  "authority": {
+    "allowFilesystemRead": true
+  },
+  "steps": [
+    {
+      "id": "extension-audit",
+      "agent": {
+        "ref": "package:scout"
+      },
+      "cwd": "extensions/multiagent",
+      "task": "Using cwd as launch context, inspect the extension/runtime subtree for the concrete delegated question. cwd is not path confinement and agent_team does not add a read sandbox, so obey the task boundary and do not inspect outside this subtree unless an upstream artifact path requires it. If no concrete delegated question, affected surface, stop condition, or expected output fields were copied in, return NEEDS-SCOPE without broad repo search. Do not run commands or edit. Return paths, facts, risks, and unknowns."
+    },
+    {
+      "id": "skill-audit",
+      "agent": {
+        "ref": "package:docs-auditor"
+      },
+      "cwd": "skills/pi-multiagent",
+      "task": "Using cwd as launch context, inspect the skill and cookbook subtree for the concrete delegated question. cwd is not path confinement and agent_team does not add a read sandbox, so obey the task boundary and do not inspect outside this subtree unless an upstream artifact path requires it. If no concrete delegated question, affected surface, stop condition, or expected output fields were copied in, return NEEDS-SCOPE without broad repo search. Do not edit. Return docs/model-copy findings, risks, and unknowns."
+    },
+    {
+      "id": "examples-audit",
+      "agent": {
+        "ref": "package:scout"
+      },
+      "cwd": "examples/graphs",
+      "task": "Using cwd as launch context, inspect graph examples for the concrete delegated question. cwd is not path confinement and agent_team does not add a read sandbox, so obey the task boundary and do not inspect outside this subtree unless an upstream artifact path requires it. If no concrete delegated question, affected surface, stop condition, or expected output fields were copied in, return NEEDS-SCOPE without broad repo search. Do not run commands or edit. Return example paths, contract risks, and unknowns."
+    },
+    {
+      "id": "audit-decision",
+      "agent": {
+        "ref": "package:synthesizer"
+      },
+      "after": [
+        "extension-audit",
+        "skill-audit",
+        "examples-audit"
+      ],
+      "task": "Synthesize all cwd-scoped lane evidence into one decision packet. Preserve failed or blocked lane evidence. Return decision, canonical owners, conflicts, validation gaps, smallest next action, and residual risk. Re-state that cwd narrowed launch context only and did not sandbox reads. Do not invent validation or mutation authority."
+    }
+  ],
+  "limits": {
+    "concurrency": 3,
+    "timeoutSecondsPerStep": 9000
+  }
+}

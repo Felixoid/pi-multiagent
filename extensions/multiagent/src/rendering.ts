@@ -123,6 +123,7 @@ function formatAgentTeamPlainCard(details: AgentTeamDetails): string[] {
 	if (pending.length > 0) lines.push(`queued next ${pendingSummary(pending)}`);
 	const tail = formatPlainResultTail(details);
 	if (tail) lines.push(tail);
+	lines.push(...formatPlainTerminalEvidence(details));
 	lines.push("untrusted status evidence; run_status/step_result for artifacts");
 	return lines.filter((line) => line.length > 0);
 }
@@ -149,6 +150,14 @@ function formatPlainResultTail(details: AgentTeamDetails): string {
 	if (details.cleanup) return `evidence deleted ${details.cleanup.deletedPaths.length} retained path(s)`;
 	if (details.outputs.length > 0) return `final evidence ${summarizePlainOutputs(details.outputs)}`;
 	return `last update ${truncate(humanActivity(details.run?.lastEvent ?? "state changed"), VALUE_CHARS)}`;
+}
+
+function formatPlainTerminalEvidence(details: AgentTeamDetails): string[] {
+	if (!details.notice?.terminal) return [];
+	const lines: string[] = [];
+	if (details.outputs.length > 0) lines.push(`artifact paths ${summarizeFullArtifactPaths(details.outputs)}`);
+	if (details.run?.expiresAt) lines.push(`expiresAt=${details.run.expiresAt}`);
+	return lines;
 }
 
 function summarizePlainOutputs(outputs: AgentTeamDetails["outputs"]): string {
@@ -211,7 +220,7 @@ function formatResultTail(details: AgentTeamDetails, theme: Theme): string {
 	if (details.message) return `${theme.fg("muted", "message")} ${details.message.stepId} ${details.message.accepted ? theme.fg("success", "queued") : theme.fg("error", details.message.undeliveredReason ?? "denied")}`;
 	if (details.action === "cleanup" && details.error) return `${theme.fg("muted", "cleanup")} ${theme.fg("error", details.error.code)}`;
 	if (details.cleanup) return `${theme.fg("muted", "evidence deleted")} ${theme.fg("dim", `${details.cleanup.deletedPaths.length} retained path(s)`)}`;
-	if (details.notice) return `${theme.fg("muted", details.notice.terminal ? "terminal notice" : "milestone notice")} ${theme.fg("accent", summarizeNotice(details))}${details.outputs.length > 0 ? ` ${theme.fg("dim", summarizeArtifacts(details.outputs))}` : ""}`;
+	if (details.notice) return `${theme.fg("muted", details.notice.terminal ? "terminal notice" : "milestone notice")} ${theme.fg("accent", summarizeNotice(details))}${formatNoticeArtifactCopy(details, theme)}${formatNoticeExpiry(details, theme)}`;
 	if (details.outputs.length === 1) {
 		const output = details.outputs[0];
 		if (output) return `${theme.fg("muted", output.status === "running" || output.status === "pending" ? "live output" : "final output")} ${theme.fg(statusColor(output.status), `${output.stepId} ${humanStepStatus(output.status)}`)} ${theme.fg("dim", artifactName(output.filePath))}`;
@@ -273,9 +282,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
 
+function formatNoticeArtifactCopy(details: AgentTeamDetails, theme: Theme): string {
+	if (details.outputs.length === 0) return "";
+	const artifactCopy = details.notice?.terminal ? `artifactPaths=${summarizeFullArtifactPaths(details.outputs)}` : summarizeArtifacts(details.outputs);
+	return ` ${theme.fg("dim", artifactCopy)}`;
+}
+
+function formatNoticeExpiry(details: AgentTeamDetails, theme: Theme): string {
+	return details.notice?.terminal && details.run?.expiresAt ? ` ${theme.fg("dim", `expiresAt=${details.run.expiresAt}`)}` : "";
+}
+
 function summarizeArtifacts(outputs: AgentTeamDetails["outputs"]): string {
 	const visible = outputs.slice(0, MAX_IDS).map((output) => artifactName(output.filePath)).join(",");
 	return outputs.length > MAX_IDS ? `artifacts=${visible},+${outputs.length - MAX_IDS}` : `artifacts=${visible}`;
+}
+
+function summarizeFullArtifactPaths(outputs: AgentTeamDetails["outputs"]): string {
+	return outputs.map((output) => `${output.stepId}=${output.filePath ?? "no artifact"}`).join(", ");
 }
 
 function artifactName(path: string | undefined): string {

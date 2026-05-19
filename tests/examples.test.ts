@@ -135,9 +135,11 @@ test("packaged graph examples resolve against bundled catalog with expected sink
 		["artifact-chained-decision.json", ["final-decision"]],
 		["command-validation-only.json", ["final-proof"]],
 		["completed-proof-review.json", ["final-decision"]],
+		["cwd-scoped-audit-fanout.json", ["audit-decision"]],
 		["docs-examples-alignment.json", ["alignment-summary"]],
 		["human-gated-plan-only.json", ["final-decision"]],
 		["implementation-review-gate.json", ["final-decision"]],
+		["implementation-validation-gate.json", ["final-decision"]],
 		["inline-read-only-fanin.json", ["summary"]],
 		["map-reduce-audit-fanout.json", ["reduce-decision"]],
 		["model-facing-docs-audit.json", ["final-opportunities"]],
@@ -145,6 +147,7 @@ test("packaged graph examples resolve against bundled catalog with expected sink
 		["read-only-audit-fanout.json", ["final-decision"]],
 		["release-readiness-review.json", ["readiness-decision"]],
 		["research-to-change-gated-loop.json", ["final-report"]],
+		["sharded-map-reduce-audit.json", ["reduce-decision"]],
 		["single-specialist-read-only.json", ["inspect"]],
 	]);
 	const files = (await readdir(examplesDir)).filter((file) => file.endsWith(".json")).sort();
@@ -166,6 +169,22 @@ test("packaged graph examples resolve against bundled catalog with expected sink
 });
 
 test("research and release examples expose later authorization and command scope", async () => {
+	const cwdFanout = await readGraphExample("cwd-scoped-audit-fanout.json");
+	assert.equal(findStep(cwdFanout, "extension-audit").cwd, "extensions/multiagent");
+	assert.match(stepTask(cwdFanout, "extension-audit"), /cwd is not path confinement/);
+	assert.match(stepTask(cwdFanout, "extension-audit"), /does not add a read sandbox/);
+	assert.match(stepTask(cwdFanout, "extension-audit"), /NEEDS-SCOPE/);
+	assert.deepEqual(sinkStepIds(cwdFanout), ["audit-decision"]);
+	const sharded = await readGraphExample("sharded-map-reduce-audit.json");
+	assert.match(stepTask(sharded, "map-shard-a"), /REPLACE_WITH_COMPONENT_OR_ARTIFACT_A/);
+	assert.match(stepTask(sharded, "map-shard-a"), /NEEDS-SCOPE/);
+	assert.match(stepTask(sharded, "reduce-decision"), /failed or blocked shard evidence/);
+	assert.deepEqual(sinkStepIds(sharded), ["reduce-decision"]);
+	const implementationValidation = await readGraphExample("implementation-validation-gate.json");
+	assert.match(stepMutationScope(implementationValidation, "implementation-worker"), /Allowed files\/globs/);
+	assert.match(stepTask(implementationValidation, "validation-proof"), /REPLACE_WITH_EXACT_POST_WORKER_VALIDATION_COMMANDS/);
+	assert.deepEqual(stepNeeds(implementationValidation, "validation-proof"), ["implementation-worker"]);
+	assert.deepEqual(sinkStepIds(implementationValidation), ["final-decision"]);
 	const mapReduce = await readGraphExample("map-reduce-audit-fanout.json");
 	assert.match(String(mapReduce.objective), /local evidence surfaces/);
 	assert.equal(stepAgentRef(mapReduce, "map-tests"), "package:scout");
@@ -234,8 +253,10 @@ test("read-only reusable skeletons fail closed when parent scope is missing", as
 	for (const [file, stepId] of [
 		["single-specialist-read-only.json", "inspect"],
 		["read-only-audit-fanout.json", "scope-map"],
+		["cwd-scoped-audit-fanout.json", "extension-audit"],
 		["map-reduce-audit-fanout.json", "map-runtime"],
 		["research-to-change-gated-loop.json", "evidence-scout"],
+		["sharded-map-reduce-audit.json", "map-shard-a"],
 		["human-gated-plan-only.json", "scope-map"],
 	] as const) {
 		const graph = await readGraphExample(file);

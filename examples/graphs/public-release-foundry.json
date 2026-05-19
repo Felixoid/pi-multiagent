@@ -16,7 +16,7 @@
       "agent": {
         "ref": "package:scout"
       },
-      "task": "Map package metadata, changelog, docs/examples/tests, and README Public npm release handoff obligations from local files only. Do not run commands or edit. Return paths, release-surface facts, and unknowns. Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases."
+      "task": "Map package metadata, changelog, docs/examples/tests, and release-readiness surfaces from local files only. Do not inspect owner-private publish choreography unless the parent copied those local control-plane paths into scope. Do not run commands or edit. Return paths, release-surface facts, and unknowns. Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases."
     },
     {
       "id": "release-probes",
@@ -69,7 +69,7 @@
         "release-fix-worker",
         "release-validation"
       ],
-      "task": "Preserve audit findings, validation commands, package identity, block/ship recommendation, and README Public npm release handoff steps as not-executed human-owned next actions after all lanes terminalize, including GitHub Release creation and gh release view verification. Include failed or blocked lane evidence. Do not invent validation or claim publication. Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases."
+      "task": "Preserve audit findings, validation commands, package identity, block/ship recommendation, and release workflow steps as not-executed human-owned next actions after all lanes terminalize, including npm publish, GitHub Release creation, and gh release view verification. Include failed or blocked lane evidence. Do not invent validation or claim publication. Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases."
     }
   ],
   "limits": {

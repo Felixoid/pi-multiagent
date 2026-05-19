@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.8.1 - 2026-05-19
+
+- Moved maintainer-only npm publishing choreography out of the public README and into local control-plane instructions, with explicit current-source, changelog, version, clean-commit, tag, publish, GitHub Release, and artifact-verification gates.
+- Compressed the public README into a human Pi operator guide for install, trust boundaries, lifecycle, authority, examples, limits, troubleshooting, and source validation.
+- Added terminal pushed-notice receipts that expose full sink artifact paths and retention expiry when available while keeping milestone notices compact.
+- Added copyable cwd-scoped audit, implementation-validation, and sharded map-reduce graph examples, plus cookbook guidance for those patterns and the cookbook-only web-research/local-decision lane.
+
 ## 0.8.0 - 2026-05-19
 
 - Replaced the public supervision contract with `run_status` for compact run snapshots and `step_result` for single-step inspection across runtime, schema, docs, examples, and tests.
@@ -15,7 +22,7 @@
 - Tightened planning and policy copy for mandatory filesystem-read authority, project/local extension-tool trust via `allowProjectCode:true`, and cleanup failure retention.
 - Added fail-closed map-reduce, release-readiness, and release-fix graph examples, with validator steps requiring parent-copied command scope and release-foundry lanes denying version bump, commit, tag, push, publish, delete, install, deploy, and GitHub Release creation.
 - Clarified graphFile copy/adapt usage, catalog query patterns, skeleton `NEEDS-SCOPE` behavior, filesystem-read non-sandbox guidance, and action `run` denial across docs, skill, cookbook, examples, and tests.
-- Updated public-release handoff guidance so `pnpm run check:release` runs only from the clean release commit before tag/push, while npm publish and GitHub Release creation remain human-owned.
+- Tightened release-prep guardrails so `pnpm run check:release` runs only from the clean release commit before tag/push, while npm publish and GitHub Release creation remain human-owned.
 - Clarified that ignored local control-plane notes stay local while public-doc and package checks use shipped source, docs, tests, and examples as package truth.
 
 ## 0.7.1 - 2026-05-17
@@ -46,7 +53,7 @@
 - Tightened model-facing action/result copy, catalog routing metadata, graph first-success guidance, and fail-closed approved-plan implementation examples without adding new runtime knobs.
 - Reworked the interactive live `agent_team` widget, compact tool rows, and pushed notice fallback text into human operator surfaces that prioritize run health, progress, active lanes, queued work, terminal receipts, stop receipts, and attention states without model-facing control guidance.
 - Hardened project-root detection, project-agent open-time checks, blank-after-trim planning validation, run-backed error rendering, pushed notice fallbacks, and added an opt-in real Pi smoke target for release-candidate validation.
-- Added package release-readiness metadata and release handoff guidance for the human-owned npm publish boundary.
+- Added package release-readiness metadata and human-owned npm publish boundary guidance.
 - Updated README, package skill, graph cookbook, examples, catalog tests, package checks, and public-doc checks for the breaking detached-only contract and release guardrails.
 
 ## 0.6.2 - 2026-05-07

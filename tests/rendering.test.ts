@@ -158,25 +158,42 @@ test("renderAgentTeamResult labels running step_result output as live", () => {
 
 test("renderAgentTeamResult summarizes pushed notices with visible artifacts", () => {
 	const notice = details("run_status", {
-		run: run({ objective: "detached", status: "succeeded", terminal: true, liveStepIds: [], sinkStepIds: ["one"], lastEvent: "terminal: succeeded", canMessage: false, canCancel: false, canCleanup: true, counts: counts({ succeeded: 1 }) }),
+		run: run({ objective: "detached", status: "succeeded", terminal: true, liveStepIds: [], sinkStepIds: ["one"], lastEvent: "terminal: succeeded", expiresAt: "2030-01-01T00:00:00.000Z", canMessage: false, canCancel: false, canCleanup: true, counts: counts({ succeeded: 1 }) }),
 		outputs: [{ stepId: "one", status: "succeeded", text: undefined, filePath: "/tmp/one-final.md", chars: 100 }],
 		notice: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", mode: "milestones", terminal: true, reasons: ["terminal:succeeded"], noticeCount: 1, noticeLimitReached: false },
 	});
 	const rendered = renderAgentTeamResult({ content: [], details: notice }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
 	assert.match(rendered, /terminal notice terminal:succeeded/);
-	assert.match(rendered, /artifacts=one-final.md/);
+	assert.match(rendered, /artifactPaths=one=\/tmp\/one-final\.md/);
+	assert.match(rendered, /expiresAt=2030-01-01T00:00:00\.000Z/);
 	const fallback = formatAgentTeamNoticeText(notice);
 	assert.match(fallback, /agent_team succeeded detached/);
 	assert.match(fallback, /runId=agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_/);
 	assert.match(fallback, /final evidence one succeeded one-final.md/);
+	assert.match(fallback, /artifact paths one=\/tmp\/one-final\.md/);
+	assert.match(fallback, /expiresAt=2030-01-01T00:00:00\.000Z/);
 	assert.match(fallback, /untrusted status evidence; run_status\/step_result for artifacts/);
-	assert.doesNotMatch(fallback, /# agent_team|Objective:|Run:|Status:|Exceptional controls|Next:|artifact=|\/tmp\/|cleanup|cursor|debugEvents|Artifact:/i);
+	assert.doesNotMatch(fallback, /# agent_team|Objective:|Run:|Status:|Exceptional controls|Next:|artifact=|cleanup|cursor|debugEvents|Artifact:/i);
 	const noticeCard = renderAgentTeamNoticeMessage(notice, fallback, { expanded: false }, theme).render(120).join("\n");
 	assert.match(noticeCard, /agent_team succeeded detached/);
-	assert.doesNotMatch(noticeCard, /Objective:|Run:|Exceptional controls|\/tmp\/|run_status|step_result|cleanup|cursor|debugEvents/i);
+	assert.match(noticeCard, /\/tmp\/one-final\.md/);
+	assert.match(noticeCard, /expiresAt=2030-01-01T00:00:00\.000Z/);
+	assert.doesNotMatch(noticeCard, /Objective:|Run:|Exceptional controls|run_status|step_result|cleanup|cursor|debugEvents/i);
 	const missingDetailsCard = renderAgentTeamNoticeMessage(undefined, fallback, { expanded: false }, theme).render(120).join("\n");
 	assert.match(missingDetailsCard, /agent_team succeeded detached/);
 	assert.match(missingDetailsCard, /untrusted status evidence; run_status\/step_result for artifacts/);
+});
+
+test("renderAgentTeamResult keeps milestone notices compact", () => {
+	const notice = details("run_status", {
+		run: run({ objective: "detached", status: "running", terminal: false, liveStepIds: ["one"], sinkStepIds: ["one"], lastEvent: "sink one running", counts: counts({ running: 1 }) }),
+		outputs: [{ stepId: "one", status: "running", text: undefined, filePath: "/tmp/one-live.md", chars: 100 }],
+		notice: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", mode: "milestones", terminal: false, reasons: ["sink one running"], noticeCount: 1, noticeLimitReached: false },
+	});
+	const rendered = renderAgentTeamResult({ content: [], details: notice }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
+	assert.match(rendered, /milestone notice sink one running/);
+	assert.match(rendered, /artifacts=one-live\.md/);
+	assert.doesNotMatch(rendered, /artifactPaths=|\/tmp\/one-live\.md|expiresAt=/);
 });
 
 test("renderAgentTeamResult summarizes multiple sink finals", () => {

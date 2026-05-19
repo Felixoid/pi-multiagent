@@ -15,7 +15,7 @@
       "agent": {
         "ref": "package:scout"
       },
-      "task": "Map local package metadata, changelog, README Public npm release handoff obligations, examples, skills, extension/package surfaces, and release unknowns. Do not run commands or edit. Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases. Return paths, release-surface facts, and unknowns."
+      "task": "Map local package metadata, changelog, README, examples, skills, extension/package surfaces, and release unknowns. Do not inspect owner-private publish choreography unless the parent copied those local control-plane paths into scope. Do not run commands or edit. Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases. Return paths, release-surface facts, and unknowns."
     },
     {
       "id": "release-proof",
@@ -33,7 +33,7 @@
         "release-map",
         "release-proof"
       ],
-      "task": "Review upstream release-map and release-proof evidence for release-critical drift in package contents, docs, examples, tests, release handoff, npm identity, and GitHub Release choreography. Separate observed validation from claimed or missing validation. Do not run commands or edit. Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases. Return findings first with exact paths."
+      "task": "Review upstream release-map and release-proof evidence for release-critical drift in package contents, docs, examples, tests, release workflow, npm identity, and GitHub Release choreography. Separate observed validation from claimed or missing validation. Do not run commands or edit. Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases. Return findings first with exact paths."
     },
     {
       "id": "readiness-decision",
@@ -45,7 +45,7 @@
         "release-proof",
         "release-audit"
       ],
-      "task": "Return GO, NEEDS-WORK, or BLOCKED for release readiness after all lanes terminalize, including failed or blocked lane evidence. Preserve observed commands, missing commands, package identity, README Public npm release handoff obligations, and not-executed human-owned next actions, including npm publish, GitHub Release creation, and gh release view verification. Do not invent validation or claim publication. Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases."
+      "task": "Return GO, NEEDS-WORK, or BLOCKED for release readiness after all lanes terminalize, including failed or blocked lane evidence. Preserve observed commands, missing commands, package identity, and not-executed human-owned next actions, including npm publish, GitHub Release creation, and gh release view verification. Do not invent validation or claim publication. Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases."
     }
   ],
   "limits": {

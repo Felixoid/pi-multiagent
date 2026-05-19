@@ -10,7 +10,7 @@ For one local read-only question, copy the Minimal library graph below, keep `al
 
 ## Choose a graph shape first
 
-Pick the shape that matches the supervision problem before filling in roles or tools, then use the single Example chooser below for the concrete packaged graph. The shape order is the graph design ladder: single specialist, inline fan-in, read-only audit fanout, map-reduce, artifact-chained follow-up, web research, human-gated planning, approved mutation, release readiness, then authorized release-fix foundry.
+Pick the shape that matches the supervision problem before filling in roles or tools, then use the single Example chooser below for the concrete packaged graph. The shape order is the graph design ladder: single specialist, inline fan-in, read-only audit fanout, cwd-scoped fanout, map-reduce, sharded map-reduce, artifact-chained follow-up, web research, human-gated planning, approved mutation or implementation validation, release readiness, then authorized release-fix foundry.
 
 Use `needs` when a downstream step should run only after successful upstream steps. Use `after` when the downstream step should run over terminal evidence from failed or blocked lanes too. Add one explicit synthesis sink when the parent wants one final.
 
@@ -22,13 +22,15 @@ Use the lowest rung that solves the supervision problem:
 2. Single specialist for one scoped local question.
 3. Inline fan-in for one-off custom roles.
 4. Read-only audit fanout for independent docs/contract/risk lanes.
-5. Map-reduce audit fanout when mapper lanes should stay independent until one reducer dedupes owners, decisions, and next actions.
-6. Artifact-Chained Decision when prior retained artifacts must cross compaction, approval checkpoints, or phase separation.
-7. Web Research Extension Lane for current external facts with copied catalog provenance and `allowExtensionCode:true`.
-8. Web Research to Local Decision when web facts and local repo evidence must be synthesized.
-9. Human-gated plan before mutation authority exists.
-10. Approved mutation run after exact human approval and concrete `mutationScope`.
-11. Release-readiness review for non-mutating package-source proof, then authorized release-fix foundry only when current mutation approval exists.
+5. CWD-scoped audit fanout when launch context should differ by subtree while remembering cwd is not a sandbox.
+6. Map-reduce audit fanout when mapper lanes should stay independent until one reducer dedupes owners, decisions, and next actions.
+7. Sharded map-reduce when the parent has named components or retained artifacts that should produce uniform packets before reduction.
+8. Artifact-Chained Decision when prior retained artifacts must cross compaction, approval checkpoints, or phase separation.
+9. Web Research Extension Lane for current external facts with copied catalog provenance and `allowExtensionCode:true`.
+10. Web Research to Local Decision when web facts and local repo evidence must be synthesized.
+11. Human-gated plan before mutation authority exists.
+12. Approved mutation run after exact human approval and concrete `mutationScope`; use the implementation validation gate when an independent post-worker validator is needed.
+13. Release-readiness review for non-mutating package-source proof, then authorized release-fix foundry only when current mutation approval exists.
 
 ## Detached graph checklist
 
@@ -66,12 +68,15 @@ Single packaged example chooser:
 | `approved-plan-implementation.json` | A prior read-only plan has exact current human approval and needs one authorized mutation run | filesystem, shell, mutation | Yes | serialized | `final-decision` | Exact approval text, prior artifact paths, concrete `mutationScope`, exclusions, and command scope |
 | `command-validation-only.json` | Named read-only commands need observed proof without review bloat | filesystem, shell | No | serialized | `final-proof` | Read-only validation delegation with named commands |
 | `read-only-audit-fanout.json` | Independent contract/docs/risk lanes before a decision | filesystem read | No | parallel read lanes | `final-decision` | Read-only delegation |
+| `cwd-scoped-audit-fanout.json` | Independent lanes should launch from different existing subdirectories | filesystem read | No | parallel read lanes | `audit-decision` | Read-only delegation; cwd is launch context, not confinement |
 | `map-reduce-audit-fanout.json` | Independent mapper lanes need one reducer decision | filesystem read | No | parallel map lanes then reducer | `reduce-decision` | Read-only delegation |
+| `sharded-map-reduce-audit.json` | Parent has named components or retained artifacts to audit as uniform shards | filesystem read | No | parallel shard lanes then reducer | `reduce-decision` | Read-only delegation with explicit shard scopes |
 | `completed-proof-review.json` | Completed work needs observed proof without mutation | filesystem, shell | No | parallel proof/review lanes | `final-decision` | Read-only validation delegation with named commands |
 | `research-to-change-gated-loop.json` | Ambiguous local repo change needs one read-only gated loop iteration before human authorization | filesystem read | No | parallel/serialized read lanes | `final-report` | Read-only planning delegation; not web research |
 | `model-facing-docs-audit.json` | Tool/skill/cookbook/catalog invocation clarity needs audit | filesystem read | No | parallel audit lanes | `final-opportunities` | Read-only delegation |
 | `docs-examples-alignment.json` | Docs/examples/tests need alignment after implemented behavior changes | filesystem, shell, mutation | Yes, docs/examples/tests | serialized | `alignment-summary` | Explicit docs mutation authorization plus concrete `mutationScope` |
 | `implementation-review-gate.json` | One scoped authorized implementation change | filesystem, shell, mutation | Yes | serialized | `final-decision` | Explicit implementation authorization plus concrete `mutationScope` |
+| `implementation-validation-gate.json` | Authorized implementation needs an independent post-worker validator before review | filesystem, shell, mutation | Yes | serialized | `final-decision` | Explicit implementation authorization, concrete `mutationScope`, and exact validation command scope |
 | `release-readiness-review.json` | Release readiness needs read-only mapping plus parent-named proof commands | filesystem, shell | No | serialized | `readiness-decision` | Read-only release-proof command scope; no version bump, commit, tag, push, publish, delete, install, deploy, or GitHub Release creation |
 | `public-release-foundry.json` | Readiness evidence found a release-fix need and the fix is explicitly authorized | filesystem, shell, mutation | Yes, release-fix only | serialized | `ship-decision` | Explicit release-fix authorization plus concrete `mutationScope`; never version bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases |
 
@@ -261,6 +266,18 @@ Shape:
 - Independent dependent lanes for contract, docs, and risk review.
 - `final-decision` with `package:synthesizer` as a normal `after` dependent step so partial failed-lane evidence still reaches the parent.
 
+## CWD-Scoped Audit Fanout
+
+Use when each independent lane should launch from a different existing subtree, such as runtime, skill/cookbook, and examples. `cwd` narrows launch context only; it is not path confinement and `agent_team` does not add a read sandbox, so tasks must repeat the boundary and stop condition.
+
+Example: [`examples/graphs/cwd-scoped-audit-fanout.json`](../../../examples/graphs/cwd-scoped-audit-fanout.json)
+
+Shape:
+
+- Three independent read-only lanes set `cwd` to different package subdirectories.
+- Each task states the subtree boundary, the non-sandbox caveat, and `NEEDS-SCOPE` behavior for copied placeholders.
+- `audit-decision` uses `after` so failed or blocked subtree evidence still reaches the final packet.
+
 ## Map-Reduce Audit Fanout
 
 Use when several independent mapper lanes should stay separated until one reducer dedupes owners, conflicts, and the next action. This is a static DAG reduce pattern, not recursive dynamic graph generation. Before starting, replace generic scoped-question wording with the concrete boundary, affected files/components, stop condition, and expected output fields.
@@ -271,6 +288,18 @@ Shape:
 
 - `map-runtime`, `map-docs`, and `map-tests` run independently.
 - `reduce-decision` uses `after` so failed or blocked mapper evidence is still reduced into the final decision.
+
+## Sharded Map-Reduce Audit
+
+Use when the parent already knows the shards: named components, path groups, packages, retained artifact paths, or workstreams. This keeps mapper output uniform and prevents the reducer from merging vague or cross-cutting claims.
+
+Example: [`examples/graphs/sharded-map-reduce-audit.json`](../../../examples/graphs/sharded-map-reduce-audit.json)
+
+Shape:
+
+- `map-shard-a`, `map-shard-b`, and `map-shard-c` each receive one explicit parent-copied component or artifact scope.
+- Every shard task fails closed with `NEEDS-SCOPE` if placeholders remain or scope/output fields are missing.
+- `reduce-decision` dedupes owners, conflicts, failed shards, validation gaps, and the smallest next action.
 
 ## Completed Proof Review
 
@@ -325,6 +354,21 @@ Stages:
 
 This is a model-level gate, not a hard parent approval checkpoint. If the critique reports BLOCK, NO-GO, unresolved mandatory conditions, or scope/authority risk, the worker must not edit unless its task explicitly resolves the blocker and the step has an exact `mutationScope` copied from the parent's current authorization. It must explain the blocker and needed decision. Use two separate runs when a human approval checkpoint is required.
 
+## Implementation Validation Gate
+
+Use when one authorized implementation change needs an independent command-backed validator after the worker and before post-work review. This is stricter than `implementation-review-gate.json`: the validator step runs only exact parent-copied commands and returns `needs-command-scope` if command scope is missing.
+
+Example: [`examples/graphs/implementation-validation-gate.json`](../../../examples/graphs/implementation-validation-gate.json)
+
+Shape:
+
+1. Map scope and canonical owners.
+2. Plan and premortem before mutation.
+3. Run one serialized worker with concrete `mutationScope`.
+4. Run independent `validation-proof` with exact parent-copied commands only.
+5. Review worker claims against observed validation.
+6. Synthesize final status across all terminal lanes.
+
 ## Research-to-Change Gated Loop
 
 Use when root cause or product shape is ambiguous and the parent needs a read-only implementation recommendation before any mutation authority exists. This is local repository research; it does not grant Exa or other web tools and it does not edit.
@@ -347,7 +391,7 @@ Use only after readiness evidence identifies a release-fix need and the current 
 
 Example: [`examples/graphs/public-release-foundry.json`](../../../examples/graphs/public-release-foundry.json)
 
-This packaged graph is release-fix only: never let it version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases. Replace the worker `mutationScope` with the exact authorized release-fix file set or mutation class before starting the graph. Run any user-authorized external release action outside this graph under the README `Public npm release handoff` procedure. The graph may report those README handoff steps, including GitHub Release creation and `gh release view` verification, as not-executed human-owned next actions; it must not invent or claim them.
+This packaged graph is release-fix only: never let it version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases. Replace the worker `mutationScope` with the exact authorized release-fix file set or mutation class before starting the graph. Run any user-authorized external release action outside this graph under the repo owner's current release workflow. The graph may report publish, GitHub Release creation, and `gh release view` verification as not-executed human-owned next actions; it must not invent or claim them.
 
 ## Web Research Extension Lane
 
