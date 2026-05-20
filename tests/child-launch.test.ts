@@ -25,10 +25,10 @@ test("buildPiArgs rejects resolved agents missing mandatory read/discovery", () 
 	assert.throws(() => buildPiArgs(agent, { model: undefined, thinking: undefined }, "/tmp/prompt.md"), /mandatory read\/discovery/);
 });
 
-test("buildPiArgs loads explicit extension grants without ambient extension discovery", () => {
+test("buildPiArgs keeps normal extension discovery and loads explicit extension grants additively", () => {
 	const agent = { ...resolvedAgent(), extensionTools: [{ name: "exa_search", description: "Search", source: { path: "/tmp/extension.ts", realpath: "/tmp/extension.ts", source: "user:exa", scope: "user", origin: "package", baseDir: undefined, dev: 1, ino: 2, size: 3, mtimeMs: 4, sha256: "abc" } }] };
 	const args = buildPiArgs(agent, { model: undefined, thinking: undefined }, "/tmp/prompt.md");
-	assert.equal(args.includes("--no-extensions"), true);
+	assert.equal(args.includes("--no-extensions"), false);
 	assert.equal(args[args.indexOf("--extension") + 1], "/tmp/extension.ts");
 	assert.equal(args[args.indexOf("--tools") + 1], "read,grep,find,ls,exa_search");
 });

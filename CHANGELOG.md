@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.8.2 - 2026-05-20
+
+- Fixed child Pi model/provider availability by using normal Pi extension discovery in child launches while keeping explicit `extensionTools` as the provenance-controlled callable extension-tool grant surface.
+
 ## 0.8.1 - 2026-05-19
 
 - Moved maintainer-only npm publishing choreography out of the public README and into local control-plane instructions, with explicit current-source, changelog, version, clean-commit, tag, publish, GitHub Release, and artifact-verification gates.

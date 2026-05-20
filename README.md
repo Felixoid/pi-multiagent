@@ -2,7 +2,7 @@
 
 `pi-multiagent` installs one Pi extension tool, `agent_team`, plus the `/skill:pi-multiagent` agent guide and schema-checked graph examples.
 
-Use `agent_team` when independent helper context materially improves a task: local reconnaissance, current web research, critique, validation proof, implementation review, or fan-in synthesis. The parent assistant remains the lead. Child output is evidence, not instructions. Child processes do not inherit the parent transcript, session, ambient extensions, context files, prompt templates, themes, project `SYSTEM.md`, or unselected skills.
+Use `agent_team` when independent helper context materially improves a task: local reconnaissance, current web research, critique, validation proof, implementation review, or fan-in synthesis. The parent assistant remains the lead. Child output is evidence, not instructions. Child processes do not inherit the parent transcript, session, context files, prompt templates, themes, project `SYSTEM.md`, or unselected skills. Child model/provider availability follows normal Pi extension discovery for the child cwd and agent dir; explicit `extensionTools` grants are only for callable extension tools.
 
 This README is the **human/operator path** for install, trust, lifecycle, limits, first run, and source validation. The complete model-facing invocation contract lives in [`/skill:pi-multiagent`](skills/pi-multiagent/SKILL.md); graph choreography lives in the [graph cookbook](skills/pi-multiagent/references/graph-cookbook.md).
 
@@ -110,6 +110,8 @@ Graphs are static DAGs. Bind each step to either inline `agent.system` or a sour
 
 Every child process keeps at least the filesystem read/discovery suite (`read`, `grep`, `find`, `ls`), so every runnable graph needs `authority.allowFilesystemRead:true`. Omit `agent.tools` for a catalog role to inherit its catalog `defaultTools` capped by graph authority; explicit `agent.tools` replaces the whole profile and then mandatory read/discovery is added. Use `agent.tools:[]` only to drop non-read catalog defaults while keeping read/discovery.
 
+Child Pi launches use normal Pi extension discovery so extension-provided model providers are available. Ambient trusted extensions may run startup code, provider hooks, tool hooks, and resource discovery as normal Pi behavior. `--tools` remains the callable tool-name allowlist; it is not an extension-code sandbox and extension tools can shadow tool names under normal Pi semantics. Graph authority does not disable or gate this normal Pi extension discovery.
+
 Authority is graph-wide:
 
 | Graph authority | Allows |
@@ -117,8 +119,8 @@ Authority is graph-wide:
 | `allowFilesystemRead` | Filesystem read/discovery: `read`, `grep`, `find`, `ls`. |
 | `allowShellTools` | `bash`; bash can mutate through commands. |
 | `allowMutationTools` | Structured `edit` and `write`. |
-| `allowExtensionCode` | Explicit `extensionTools` grants copied from `catalog`. |
-| `allowProjectCode` | `project:` agents, project library sources, project/local extension sources, and project/temporary caller skill sources. |
+| `allowExtensionCode` | Explicit callable extension-tool grants copied from `catalog` as `extensionTools`; not a global switch for normal Pi extension discovery. |
+| `allowProjectCode` | `project:` agents, project library sources, project/local explicit `extensionTools` grants, and project/temporary caller skill sources; it does not disable normal Pi extension discovery. |
 
 Write-capable steps and bash-capable `package:worker` steps need concrete first-class `mutationScope`. `mutationScope` is a planning/prompt handoff, not path confinement; bash/edit/write are not path-confined.
 
@@ -196,7 +198,8 @@ Before starting a mutation-capable graph, verify: exact parent authorization, co
 | Project agents do not load | For start, set `graph.library.sources:["project"]` and `graph.authority.allowProjectCode:true`; for catalog, use trusted `library.sources:["project"]` plus `projectAgents:"allow"`. |
 | `graphFile` is rejected | Use a pure relative graph JSON file inside cwd; do not include `action`, `runId`, or nested `graphFile`. |
 | Built-in tool is rejected | Add `allowFilesystemRead:true`; add shell/mutation authority only when intended. |
-| Extension tool is rejected | Keep extension grants in `extensionTools` and copy source/scope/origin from `catalog`. |
+| Extension tool is rejected | Keep callable extension grants in `extensionTools` and copy source/scope/origin from `catalog`. |
+| Provider model is unavailable in a child | Install or enable the provider extension through normal Pi extension discovery for the child cwd/agent dir; one-off parent `pi -e` provider extensions are not inherited. |
 | Bash child is refused | Step cwd is inside a tree with `.pi/settings.json`; remove `bash`, change cwd, or run outside that settings tree. |
 | Message is denied or seems ignored | Target step may not be live, the run may be terminal/canceling, budget may be spent, or the accepted message may still be queued. |
 | Need upstream output | Use `step_result` for that step; add `preview:true` for bounded text or read the artifact path for full text. |

@@ -185,7 +185,7 @@ function spawnProcess(_command: string, args: string[], spawnOptions: SpawnOptio
 	assert.equal(args.includes("--mode"), true);
 	assert.equal(args.includes("rpc"), true);
 	assert.equal(args.includes("--no-session"), true);
-	assert.equal(args.includes("--no-extensions"), true);
+	assert.equal(args.includes("--no-extensions"), false);
 	assert.equal(args.includes("--no-context-files"), true);
 	const child = new FakeChild();
 	child.onKill = () => child.close(0);

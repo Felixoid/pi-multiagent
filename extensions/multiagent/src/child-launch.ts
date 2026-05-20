@@ -22,7 +22,6 @@ export function buildPiArgs(agent: ResolvedAgent, defaults: AgentInvocationDefau
 		"--mode",
 		"rpc",
 		"--no-session",
-		"--no-extensions",
 		...extensionArgs(agent),
 		"--no-context-files",
 		"--no-skills",
