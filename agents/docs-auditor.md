@@ -1,7 +1,7 @@
 ---
 name: docs-auditor
-description: Use for read-only clarity audits of docs, skill copy, tool/result microcopy, cookbook, examples, catalog routing, operator UX, and first-success flows before or without implementation.
-tags: docs-audit, documentation-audit, docs-clarity, pre-change-docs, clarity-audit, catalog-copy, routing-copy, first-success, microcopy, model-facing-copy, result-copy, tool-copy, skill-copy, cookbook, examples-clarity, public-copy-clarity, operator-ux, stale-copy, read-only
+description: Use for read-only clarity audits of docs, public copy, skill/cookbook guidance, examples, catalog routing, model-facing tool/result microcopy, operator UX, and first-success flows.
+tags: docs-audit, documentation-audit, docs-clarity, model-facing-copy, microcopy, catalog-copy, tool-copy, skill-copy, cookbook, examples-clarity, first-success, public-copy-clarity
 tools: read, grep, find, ls
 thinking: high
 ---

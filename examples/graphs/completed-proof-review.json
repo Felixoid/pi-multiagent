@@ -11,8 +11,7 @@
     {
       "id": "proof-map",
       "agent": {
-        "ref": "package:scout",
-        "tools": []
+        "ref": "package:scout"
       },
       "task": "Map the completed-work scope, claimed validation, touched public surfaces, and likely proof gaps from local files and upstream evidence. Do not run commands. Return paths, claims, unknowns, and the exact validation commands the parent named, if any."
     },

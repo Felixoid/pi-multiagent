@@ -12,9 +12,10 @@ import { finalizeDetails, hasDiagnosticError, makeDetails, type AgentTeamRuntime
 import { catalogParentExtensionToolDiagnostics } from "./tool-policy.ts";
 import { AgentTeamSchema, type AgentTeamInput, type GraphSpec } from "./schemas.ts";
 import type { AgentDiagnostic, AgentTeamDetails, RunSnapshot } from "./types.ts";
-import { AGENT_TEAM_ACTION_VALUES, DEFAULT_GRAPH_LIBRARY_SOURCES, DEFAULT_RESULT_PREVIEW_MAX_BYTES, MAX_LIVE_DETACHED_RUNS, MAX_RETAINED_DETACHED_RUNS, type ExecutionAction } from "./types.ts";
+import { AGENT_TEAM_ACTION_VALUES, BUILTIN_CHILD_TOOL_NAMES, DEFAULT_GRAPH_LIBRARY_SOURCES, DEFAULT_RESULT_PREVIEW_MAX_BYTES, MAX_LIVE_DETACHED_RUNS, MAX_RETAINED_DETACHED_RUNS, type ExecutionAction } from "./types.ts";
 
 const validateAgentTeamInput = Compile(AgentTeamSchema);
+const BUILTIN_CHILD_TOOL_SET = new Set<string>(BUILTIN_CHILD_TOOL_NAMES);
 
 export async function runAgentTeam(rawInput: unknown, options: AgentTeamRuntimeOptions): Promise<AgentToolResult<AgentTeamDetails>> {
 	const rawPreflightDiagnostics = validatePreflightShape(rawInput);
@@ -140,12 +141,26 @@ function validateInputSchema(input: unknown): AgentDiagnostic[] {
 
 function schemaRepair(input: unknown, path: string): string {
 	if (isRecord(input)) {
-		if (path === "/maxBytes" || input.maxBytes !== undefined) return "maxBytes must be between 1 and 200000 and is valid only for run_status and step_result previews; catalog narrowing uses library.query.";
+		const misplacedExtensionTool = findMisplacedExtensionToolName(input);
+		if (misplacedExtensionTool) return `agent.tools accepts only built-in child tools (${BUILTIN_CHILD_TOOL_NAMES.join(", ")}). Move extension tool ${misplacedExtensionTool} to steps[].agent.extensionTools with catalog-copied {name, from:{source, scope?, origin?}} provenance and set graph.authority.allowExtensionCode:true; do not put extension tool names in agent.tools.`;
+		if (input.authority !== undefined) return 'Move authority under graph: {"action":"start","graph":{"authority":{"allowFilesystemRead":true},"objective":"...","steps":[...]}}.';
+		if (path === "/maxBytes" || input.maxBytes !== undefined) return "maxBytes must be between 1 and 200000 and is valid only on run_status/step_result: it bounds assistant previews when preview:true and raw debug event previews when run_status debugEvents:true; catalog narrowing uses library.query.";
 		if (path === "/preview" || input.preview !== undefined) return "preview must be true or false and is valid only for run_status and step_result; previews default to false.";
+		if (path === "/debugEvents" || input.debugEvents !== undefined) return "debugEvents must be true or false and is valid only for run_status; use maxBytes there only to bound raw debug event previews.";
 		if (path === "/channel" || input.channel !== undefined) return 'Use channel:"steer" or channel:"follow_up" for message.';
 		if (path === "/text" || input.text !== undefined) return "Message text must be a non-empty string.";
 	}
 	return "Use the action-specific control set: catalog uses library; start uses graph/graphFile plus options; run_status/step_result use runId and preview controls; message uses runId, stepId, channel, text, and optional clientMessageId.";
+}
+
+function findMisplacedExtensionToolName(input: Record<string, unknown>): string | undefined {
+	const graph = input.graph;
+	if (!isRecord(graph) || !Array.isArray(graph.steps)) return undefined;
+	for (const step of graph.steps) {
+		if (!isRecord(step) || !isRecord(step.agent) || !Array.isArray(step.agent.tools)) continue;
+		for (const tool of step.agent.tools) if (typeof tool === "string" && !BUILTIN_CHILD_TOOL_SET.has(tool)) return tool;
+	}
+	return undefined;
 }
 
 function detailsAction(input: unknown): ExecutionAction | "missing/invalid" {

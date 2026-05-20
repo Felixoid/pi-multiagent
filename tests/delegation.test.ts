@@ -1536,6 +1536,17 @@ test("start fails before launching children when preflight or authority fails", 
 	assert.equal(invalidChannel.details.diagnostics.some((item) => item.code === "input-schema-invalid"), true);
 	const invalidMaxBytes = await runAgentTeam({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", maxBytes: 0 } as AgentTeamInput, options);
 	assert.equal(invalidMaxBytes.details.diagnostics.some((item) => item.code === "input-schema-invalid"), true);
+	assert.match(invalidMaxBytes.content[0].text, /preview:true/);
+	assert.match(invalidMaxBytes.content[0].text, /debugEvents:true/);
+	const misplacedAuthority = await runAgentTeam({ action: "start", authority: { allowFilesystemRead: true }, objective: "x", steps: [] }, options);
+	assert.equal(misplacedAuthority.details.diagnostics.some((item) => item.code === "start-control-fields-denied"), true);
+	assert.match(misplacedAuthority.content[0].text, /Move graph body fields under graph/);
+	assert.match(misplacedAuthority.content[0].text, /authority/);
+	const misplacedExtensionTool = await runAgentTeam({ action: "start", graph: { objective: "x", authority: { allowFilesystemRead: true, allowExtensionCode: true }, steps: [{ id: "one", agent: { system: "x", tools: ["exa_search"] }, task: "x" }] } }, options);
+	assert.equal(misplacedExtensionTool.details.diagnostics.some((item) => item.code === "input-schema-invalid"), true);
+	assert.match(misplacedExtensionTool.content[0].text, /agent\.tools accepts only built-in child tools/);
+	assert.match(misplacedExtensionTool.content[0].text, /steps\[\]\.agent\.extensionTools/);
+	assert.match(misplacedExtensionTool.content[0].text, /catalog-copied/);
 	const invalidText = await runAgentTeam({ action: "message", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", channel: "steer", text: 42 }, options);
 	assert.equal(invalidText.details.diagnostics.some((item) => item.code === "input-schema-invalid"), true);
 	const staleKind = await runAgentTeam({ action: "message", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", kind: "steer", text: "x" }, options);

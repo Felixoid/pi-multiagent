@@ -30,11 +30,11 @@
       "agent": {
         "ref": "package:reviewer"
       },
-      "needs": [
+      "after": [
         "release-map",
         "release-probes"
       ],
-      "task": "Inspect package contents and public docs for stale or missing release-critical surfaces, including GitHub Release creation and verification choreography, using upstream evidence and read/discovery tools. Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases. Return findings first with exact paths."
+      "task": "Inspect package contents and public docs for stale or missing release-critical surfaces, including GitHub Release creation and verification choreography, using terminal upstream evidence from release-map and release-probes even when a lane failed, blocked, or returned missing proof. Do not version-bump, commit, tag, push, publish, delete, install, deploy, or create GitHub Releases. Return findings first with exact paths."
     },
     {
       "id": "release-fix-worker",

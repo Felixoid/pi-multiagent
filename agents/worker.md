@@ -1,7 +1,7 @@
 ---
 name: worker
-description: Use as the worker for one concrete parent-authorized scoped implementation, fix, bugfix, repair, patch, or mutation that synchronizes code, config, docs, examples, tests, and validation evidence; default tools include bash/edit/write, but graph authority alone is not edit authorization.
-tags: implementation, fix, bugfix, repair, patch, mutation, scoped-edit, edit, write, code, docs, tests, examples, synchronized-change, authorized-change, parent-authorized, concrete-mutation-scope, dirty-tree, package-work
+description: Use as the worker for one concrete parent-authorized implementation, fix, bugfix, repair, patch, or mutation that synchronizes code, config, docs, examples, tests, and validation evidence; default tools include bash/edit/write, but graph authority alone is not edit authorization.
+tags: implementation, worker, fix, bugfix, repair, patch, mutation, scoped-edit, authorized-change, concrete-mutation-scope, dirty-tree, synchronized-change
 tools: read, grep, find, ls, bash, edit, write
 thinking: high
 ---

@@ -27,7 +27,9 @@ type PreflightField =
 	| "synthesis"
 	| "limits"
 	| "outputContract"
-	| "callerSkills";
+	| "callerSkills"
+	| "authority"
+	| "extensionTools";
 
 interface ActionRule {
 	allowed: readonly PreflightField[];
@@ -69,9 +71,11 @@ const KNOWN_FIELDS: readonly PreflightField[] = [
 	"limits",
 	"outputContract",
 	"callerSkills",
+	"authority",
+	"extensionTools",
 ];
 
-const GRAPH_BODY_FIELDS = new Set<PreflightField>(["objective", "steps", "limits", "agents", "synthesis", "outputContract", "callerSkills"]);
+const GRAPH_BODY_FIELDS = new Set<PreflightField>(["objective", "steps", "limits", "authority", "agents", "synthesis", "outputContract", "callerSkills"]);
 
 /** Return fail-closed diagnostics for controls that are invalid for the selected action. */
 export function validatePreflightShape(rawInput: unknown): AgentDiagnostic[] {
@@ -118,12 +122,13 @@ function misplacedFields(input: Record<string, unknown>, allowedFields: readonly
 
 function repairFor(action: ExecutionAction, fields: string[]): string {
 	const fieldSet = new Set(fields);
-	if (action === "start" && fields.some((field) => GRAPH_BODY_FIELDS.has(field as PreflightField))) return 'Move graph body fields under graph: {"action":"start","graph":{"objective":"...","steps":[...]}}. Put start sources in graph.library; top-level library is catalog-only.';
-	if (action === "catalog" && fieldSet.has("maxBytes")) return "Remove maxBytes; use library.query to narrow catalog results. maxBytes is valid only for run_status and step_result previews.";
-	if (fieldSet.has("preview")) return "Use preview only on run_status or step_result; it defaults to false and opts into bounded assistant text previews.";
+	if (action === "start" && fields.some((field) => GRAPH_BODY_FIELDS.has(field as PreflightField))) return 'Move graph body fields under graph: {"action":"start","graph":{"objective":"...","authority":{"allowFilesystemRead":true},"steps":[...]}}. Put start sources in graph.library; top-level library is catalog-only.';
+	if (fieldSet.has("extensionTools")) return "Place extensionTools under steps[].agent.extensionTools with catalog-copied provenance; agent.tools accepts only built-in child tools.";
+	if (action === "catalog" && fieldSet.has("maxBytes")) return "Remove maxBytes; use library.query to narrow catalog results. maxBytes is valid only on run_status/step_result: it bounds assistant previews when preview:true and raw debug events when debugEvents:true.";
+	if (fieldSet.has("preview")) return "Use preview only on run_status or step_result; it defaults to false and opts into bounded assistant text previews. Use maxBytes there only to bound those previews or run_status debug events.";
 	if (action === "message" && fieldSet.has("kind")) return 'Replace kind with channel:"steer" or channel:"follow_up"; accepted means queued/delivered to Pi, not child compliance.';
 	if (fieldSet.has("waitSeconds")) return "Use waitSeconds only on run_status for a bounded wait/read snapshot that wakes on material parent-visible events or timeout.";
-	if (fieldSet.has("debugEvents")) return "Use debugEvents only on run_status when raw background events are needed.";
+	if (fieldSet.has("debugEvents")) return "Use debugEvents only on run_status when raw background events are needed; maxBytes may bound raw debug event previews there.";
 	if (fieldSet.has("cursor")) return "Use cursor only on run_status for debug/backfill pagination.";
 	if (fieldSet.has("library") && action === "start") return "Move start library source selection to graph.library; top-level library is catalog-only.";
 	return 'Use action-specific controls: catalog {library}; start exactly one of {graph,graphFile} plus options; run_status {runId,cursor?,stepId?,waitSeconds?,preview?,maxBytes?,debugEvents?}; step_result {runId,stepId,preview?,maxBytes?}; message {runId,stepId,channel,text,clientMessageId?}; cancel {runId,reason?}; cleanup {runId}.';

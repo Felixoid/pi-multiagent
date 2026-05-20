@@ -53,6 +53,57 @@ Use the lowest rung that solves the supervision problem:
 
 Tool profile law is owned by the skill and runtime catalog output. Cookbook reminders: every child keeps mandatory read/discovery, explicit `agent.tools` replaces rather than appends to catalog defaults, extension tools require copied catalog provenance, and mutation-capable steps need concrete `mutationScope` that is not a sandbox.
 
+## Task packet templates
+
+Use these packet shapes inside step `task` text when fan-in evidence must stay comparable. Packets are output contracts, not extra schema fields.
+
+Mapper packet:
+
+```text
+Return one mapper packet:
+- status: mapped | needs-scope | blocked
+- scope inspected: concrete files/components/artifacts and any explicit exclusions
+- rows: surface, owner or canonical path, evidence, risk or mismatch, validation gap, smallest next action
+- unknowns: facts not inspected and why
+- stop condition: what made you stop instead of broadening search
+```
+
+Reducer packet:
+
+```text
+Return one reducer packet:
+- decision: GO | NEEDS-WORK | BLOCKED
+- canonical owners: deduped paths/contracts/commands
+- findings: deduped finding, severity, evidence, owner, smallest fix
+- conflicts: conflicting upstream claims or evidence gaps
+- lane failures: failed, blocked, missing, or stale upstream evidence
+- validation: observed validation versus claimed or missing validation
+- next action and residual risk
+```
+
+Validator packet:
+
+```text
+Return one validator packet:
+- status: pass | fail | deferred | needs-command-scope
+- command scope: exact parent-copied commands, cwd, and explicit non-goals
+- executed commands: command, cwd, exit status, important output, artifact path if any
+- failure bucket: inherited | introduced | environmental | blocked | not-run
+- blocked/deferred reason and the next falsifiable command
+```
+
+Worker packet:
+
+```text
+Return one worker packet:
+- status: changed | blocked | no-op
+- authorization check: concrete mutationScope, allowed files/globs, mutation class, exclusions, validation commands
+- changed paths and contract surfaces synchronized
+- validation run by the worker, if explicitly authorized
+- files/actions intentionally not touched
+- residual risk or needed parent decision
+```
+
 ## Example chooser
 
 Default to `single-specialist-read-only.json` or one catalog role. Use fanout only when independent lanes are explicitly valuable. Use mutation-capable graphs only after exact current mutation authorization. Do not run mutation-authority examples unless the user's current delegation explicitly authorizes the named mutation class.
@@ -156,8 +207,7 @@ Pure graph file content:
     {
       "id": "inspect",
       "agent": {
-        "system": "Inspect local files. Do not edit.",
-        "tools": ["read"]
+        "system": "Inspect local files. Do not edit. Omitted tools still resolve to mandatory read/discovery."
       },
       "task": "Map the relevant contract, owners, tests, and risks. Return paths and unknowns."
     }
@@ -225,16 +275,14 @@ Use when the parent wants to hand-author one focused inline team without catalog
     {
       "id": "read-readme",
       "agent": {
-        "system": "Read only README.md. Report inline-agent UX gaps. Do not edit.",
-        "tools": ["read"]
+        "system": "Read only README.md. Report inline-agent UX gaps. Do not edit. Omitted tools still resolve to mandatory read/discovery."
       },
       "task": "Assess whether README teaches inline agents, run_status, step_result, and retained-artifact handling clearly. Return three findings and two fixes."
     },
     {
       "id": "read-skill",
       "agent": {
-        "system": "Read only skills/pi-multiagent/SKILL.md. Report inline-agent UX gaps. Do not edit.",
-        "tools": ["read"]
+        "system": "Read only skills/pi-multiagent/SKILL.md. Report inline-agent UX gaps. Do not edit. Omitted tools still resolve to mandatory read/discovery."
       },
       "task": "Assess whether the package skill teaches a parent to hand-author a useful graph with low friction. Return three findings and two fixes."
     },

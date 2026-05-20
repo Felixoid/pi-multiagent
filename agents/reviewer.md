@@ -1,7 +1,7 @@
 ---
 name: reviewer
-description: Use for ordinary post-work review of completed artifacts, diffs, docs, examples, release candidates, trust boundaries, public-copy drift, and validation evidence.
-tags: review, completed-review, completed-artifact, after-work-exists, post-change-review, validation-evidence-review, diff-review, artifact-review, post-implementation, release-candidate, release-review, docs-diff-review, documentation-diff-review, examples-review, public-copy-drift, artifacts, tests, docs, trust-boundary-review, regression-review, completed-work-review
+description: Use for ordinary post-work review of completed work, artifacts, diffs, docs, examples, release candidates, trust boundaries, public-copy drift, and validation evidence.
+tags: review, completed-review, completed-artifact, completed-work-review, diff-review, post-implementation, release-candidate, validation-evidence, docs-review, examples-review, public-copy-drift, trust-boundary-review
 tools: read, grep, find, ls
 thinking: high
 ---

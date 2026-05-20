@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.8.4 - 2026-05-20
+
+- Corrected packaged graph examples so read-only steps omit redundant `agent.tools` overrides and release audit lanes use terminal `after` dependencies to preserve failed or missing proof evidence.
+- Improved model-facing repair copy for misplaced top-level graph fields, extension-tool names placed in `agent.tools`, preview/debug `maxBytes` scope, and catalog extension-tool provenance grants.
+- Tightened bundled catalog role descriptions and visible routing tags to fit the 12-tag catalog display budget while preserving documented role queries.
+- Added cookbook task packet templates for mapper, reducer, validator, and worker outputs.
+
 ## 0.8.3 - 2026-05-20
 
 - Fixed child Pi model/provider availability by using normal Pi extension discovery in child launches while keeping explicit `extensionTools` as the provenance-controlled callable extension-tool grant surface.

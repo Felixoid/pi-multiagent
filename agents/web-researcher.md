@@ -1,7 +1,7 @@
 ---
 name: web-researcher
-description: Use for discovery-first current external web research when explicit parent-active web search/fetch extension tools are granted: official/vendor docs, public announcements, standards, package registry facts, dates/versions, and source URLs.
-tags: web, online, exa, external-research, vendor-docs, official-sources, current-facts, public-docs, announcements, standards, urls, provenance, citations, web-search, web-fetch, needs-extension-tools, requires-web-tools, read-only, external-only
+description: Use for discovery-first current external web research when explicit parent-active web search/fetch extension tools are granted: official/vendor docs, online sources, public announcements, standards, package registry facts, dates/versions, citations, and source URLs.
+tags: web, web-research, online-research, exa, external-research, current-facts, official-sources, vendor-docs, standards, citations, provenance, extension-tools
 tools: read, grep, find, ls
 thinking: high
 ---

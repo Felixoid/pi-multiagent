@@ -1,7 +1,7 @@
 ---
 name: planner
-description: Use when evidence already exists and the caller needs a scoped plan, design, architecture, or implementation contract with owners, exclusions, failure modes, approvals, and validation; return needs-scout rather than inventing missing evidence.
-tags: planning, plan, design, architecture, implementation-contract, owners, approvals, failure-modes, blocker, scope, sequencing, tradeoffs, needs-scout, evidence-required
+description: Use when evidence already exists and the caller needs a scoped plan, design, architecture, or implementation contract with owners, exclusions, approvals, failure modes, sequencing, and validation; return needs-scout rather than inventing missing evidence.
+tags: planning, plan, design, architecture, implementation-contract, owners, approvals, failure-modes, sequencing, validation-plan, needs-scout, evidence-required
 tools: read, grep, find, ls
 thinking: high
 ---

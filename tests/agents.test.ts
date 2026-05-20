@@ -429,6 +429,7 @@ test("bundled package agents are valid", async () => {
 	for (const agent of discovery.agents) {
 		assert.match(agent.description, /^Use (as|for|when)\b/, `${agent.ref} description should be routing-oriented`);
 		assert.equal(agent.tags.length > 0, true, `${agent.ref} should expose catalog routing tags`);
+		assert.equal(agent.tags.length <= 12, true, `${agent.ref} should keep visible catalog routing tags within the rendered 12-tag budget`);
 		assert.equal(agent.tags.every((tag) => /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(tag)), true, `${agent.ref} tags should be normalized`);
 		assert.equal(agent.tags.every((tag) => !tag.startsWith("not-") && !tag.startsWith("no-") && !tag.startsWith("blocked-")), true, `${agent.ref} tags should stay positive searchable routing signals`);
 		assert.deepEqual(agent.tools, expectedTools.get(agent.ref), `${agent.ref} default tools should match its routing contract`);

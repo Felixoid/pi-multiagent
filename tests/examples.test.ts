@@ -36,15 +36,17 @@ test("graph cookbook examples are pure detached graph specs wrapped by start", a
 	}
 });
 
-test("catalog graph examples rely on default read profiles instead of redundant read-only overrides", async () => {
+test("graph examples omit redundant read-only tool overrides", async () => {
 	const files = (await readdir(examplesDir)).filter((file) => file.endsWith(".json")).sort();
 	for (const file of files) {
 		const graph = await readGraphExample(file);
 		const steps = graph.steps;
 		if (!Array.isArray(steps)) throw new Error(`${file} must contain steps`);
 		for (const step of steps) {
-			if (!isRecord(step) || !isRecord(step.agent) || typeof step.agent.ref !== "string") continue;
-			assert.notDeepEqual(step.agent.tools, ["read"], `${file}:${String(step.id)} should omit redundant catalog read-only tools`);
+			if (!isRecord(step) || !isRecord(step.agent) || !Array.isArray(step.agent.tools)) continue;
+			const tools = step.agent.tools.filter((tool): tool is string => typeof tool === "string");
+			assert.equal(tools.length === 0, false, `${file}:${String(step.id)} should omit tools instead of using tools:[] for read-only`);
+			assert.equal(tools.every((tool) => ["read", "grep", "find", "ls"].includes(tool)), false, `${file}:${String(step.id)} should omit redundant read-only-only tools; explicit tools are for narrowing shell or mutation profiles`);
 		}
 	}
 });
@@ -209,6 +211,8 @@ test("research and release examples expose later authorization and command scope
 	assert.equal(JSON.stringify(releaseReadiness).includes("mutationScope"), false);
 	assert.match(stepTask(releaseReadiness, "release-proof"), /REPLACE_WITH_EXACT_READ_ONLY_RELEASE_COMMANDS/);
 	assert.match(stepTask(releaseReadiness, "release-proof"), /needs-command-scope/);
+	assert.deepEqual(stepAfter(releaseReadiness, "release-audit"), ["release-map", "release-proof"]);
+	assert.match(stepTask(releaseReadiness, "release-audit"), /failed, blocked, or missing proof/);
 	assert.equal(isRecord(releaseReadiness.limits) && releaseReadiness.limits.concurrency === 1, true);
 	assert.match(stepTask(releaseReadiness, "readiness-decision"), /npm publish, GitHub Release creation, and gh release view verification/);
 	const release = await readGraphExample("public-release-foundry.json");
@@ -217,7 +221,8 @@ test("research and release examples expose later authorization and command scope
 	assert.equal(stepAgentRef(release, "release-probes"), "package:validator");
 	assert.match(stepTask(release, "release-probes"), /REPLACE_WITH_EXACT_RELEASE_PROBE_COMMANDS/);
 	assert.match(stepTask(release, "release-probes"), /needs-command-scope/);
-	assert.deepEqual(stepNeeds(release, "artifact-audit"), ["release-map", "release-probes"]);
+	assert.deepEqual(stepAfter(release, "artifact-audit"), ["release-map", "release-probes"]);
+	assert.match(stepTask(release, "artifact-audit"), /failed, blocked, or returned missing proof/);
 	assert.match(stepTask(release, "release-validation"), /REPLACE_WITH_EXACT_RELEASE_COMMANDS/);
 	assert.match(stepTask(release, "release-validation"), /Reserve pnpm run check:release for a clean release commit/);
 	assert.match(stepTask(release, "release-validation"), /needs-command-scope/);
@@ -330,6 +335,12 @@ function stepNeeds(graph: Record<string, unknown>, id: string): string[] {
 	const step = findStep(graph, id);
 	if (!Array.isArray(step.needs)) return [];
 	return step.needs.filter((need): need is string => typeof need === "string");
+}
+
+function stepAfter(graph: Record<string, unknown>, id: string): string[] {
+	const step = findStep(graph, id);
+	if (!Array.isArray(step.after)) return [];
+	return step.after.filter((after): after is string => typeof after === "string");
 }
 
 function stepMutationScope(graph: Record<string, unknown>, id: string): string {

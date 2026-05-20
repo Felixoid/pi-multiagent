@@ -128,12 +128,15 @@ test("catalog extension tools render copy-ready graph grants", () => {
 	const catalog = formatDetailsForModel(details("catalog", { extensionTools: [{ name: "exa_search", description: "search web", active: true, from: { source: "npm:pi-exa-tools", scope: "user", origin: "package" } }] }));
 	assert.match(catalog, /extensionTools\[\]=\{"name":"exa_search","from":\{"source":"npm:pi-exa-tools","scope":"user","origin":"package"\}\}/);
 	assert.match(catalog, /steps\[\]\.agent\.extensionTools/);
-	assert.match(catalog, /allowExtensionCode:true/);
+	assert.match(catalog, /not agent\.tools/);
+	assert.match(catalog, /source\/scope\/origin are catalog provenance metadata/);
+	assert.match(catalog, /graph\.authority\.allowExtensionCode:true/);
 	assert.doesNotMatch(catalog, /allowProjectCode:true/);
 	assert.doesNotMatch(catalog, /source=npm:pi-exa-tools scope=user/);
 
 	const projectCatalog = formatDetailsForModel(details("catalog", { extensionTools: [{ name: "project_search", description: "search project", active: true, from: { source: "project:search", scope: "project", origin: "top-level" }, requiresProjectCode: true }] }));
 	assert.match(projectCatalog, /allowExtensionCode:true and graph\.authority\.allowProjectCode:true/);
+	assert.match(projectCatalog, /trusted project\/local code/);
 });
 
 test("catalog rows with adversarial metadata keep disclaimer first", () => {

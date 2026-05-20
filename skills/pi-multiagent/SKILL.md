@@ -152,14 +152,13 @@ Library specialist with catalog defaults:
 }
 ```
 
-Inline specialist with explicit tools:
+Inline specialist with default read/discovery:
 
 ```json
 {
   "id": "mapper",
   "agent": {
-    "system": "Map files and contracts. Do not edit.",
-    "tools": ["read"]
+    "system": "Map files and contracts. Do not edit. Omitted tools still resolve to mandatory read/discovery."
   },
   "task": "Map the affected surface."
 }
@@ -227,8 +226,7 @@ Detached runs do not inherit caller skills by default. A step may request explic
 ```json
 {
   "agent": {
-    "system": "Use the selected skill guidance.",
-    "tools": ["read"],
+    "system": "Use the selected skill guidance. Omitted tools still resolve to mandatory read/discovery.",
     "skills": ["pi-multiagent"]
   }
 }

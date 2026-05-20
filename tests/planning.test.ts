@@ -39,6 +39,11 @@ test("validatePreflightShape enforces detached action fields", () => {
 	assert.match(oldStartShape.find((item) => item.code === "start-control-fields-denied")?.repair ?? "", /under graph/);
 	const oldStartWithPreview = validatePreflightShape({ action: "start", objective: "old", steps: [], preview: true });
 	assert.match(oldStartWithPreview.find((item) => item.code === "start-control-fields-denied")?.repair ?? "", /Move graph body fields under graph/);
+	const topLevelAuthority = validatePreflightShape({ action: "start", objective: "old", authority: { allowFilesystemRead: true }, steps: [] });
+	assert.deepEqual(topLevelAuthority.find((item) => item.code === "start-control-fields-denied")?.fields, ["objective", "steps", "authority"]);
+	assert.match(topLevelAuthority.find((item) => item.code === "start-control-fields-denied")?.repair ?? "", /authority/);
+	const topLevelExtensionTools = validatePreflightShape({ action: "start", graph: graphInput(), extensionTools: [] });
+	assert.match(topLevelExtensionTools.find((item) => item.code === "start-control-fields-denied")?.repair ?? "", /steps\[\]\.agent\.extensionTools/);
 	assert.equal(validatePreflightShape({ action: "start", graph: graphInput(), cursor: "1" }).some((item) => item.code === "start-control-fields-denied"), true);
 	assert.equal(validatePreflightShape({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", graph: graphInput() }).some((item) => item.code === "run_status-control-fields-denied"), true);
 	assert.equal(validatePreflightShape({ action: "cancel", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", maxBytes: 1 }).some((item) => item.code === "cancel-control-fields-denied"), true);
@@ -50,7 +55,10 @@ test("validatePreflightShape enforces detached action fields", () => {
 	assert.match(missingStepResultStep.find((item) => item.code === "step_result-step-required")?.repair ?? "", /one concrete step id/);
 	assert.match(missingStepResultStep.find((item) => item.code === "step_result-step-required")?.repair ?? "", /run_status for run-level/);
 	assert.equal(validatePreflightShape({ action: "step_result", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", maxBytes: 100 }).length, 0);
-	assert.equal(validatePreflightShape({ action: "step_result", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", debugEvents: true }).some((item) => item.code === "step_result-control-fields-denied"), true);
+	const stepDebug = validatePreflightShape({ action: "step_result", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", debugEvents: true });
+	assert.equal(stepDebug.some((item) => item.code === "step_result-control-fields-denied"), true);
+	assert.match(stepDebug.find((item) => item.code === "step_result-control-fields-denied")?.repair ?? "", /run_status/);
+	assert.match(stepDebug.find((item) => item.code === "step_result-control-fields-denied")?.repair ?? "", /maxBytes/);
 	assert.equal(validatePreflightShape({ action: "message", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", text: "x", channel: "steer" }).some((item) => item.code === "message-step-required"), true);
 	const staleKind = validatePreflightShape({ action: "message", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", text: "x", stepId: "one", kind: "steer" });
 	assert.equal(staleKind.some((item) => item.code === "message-control-fields-denied"), true);
