@@ -110,7 +110,7 @@ Graphs are static DAGs. Bind each step to either inline `agent.system` or a sour
 
 Every child process keeps at least the filesystem read/discovery suite (`read`, `grep`, `find`, `ls`), so every runnable graph needs `authority.allowFilesystemRead:true`. Omit `agent.tools` for a catalog role to inherit its catalog `defaultTools` capped by graph authority; explicit `agent.tools` replaces the whole profile and then mandatory read/discovery is added. Use `agent.tools:[]` only to drop non-read catalog defaults while keeping read/discovery.
 
-Child Pi launches use normal Pi extension discovery so extension-provided model providers are available. Ambient trusted extensions may run startup code, provider hooks, tool hooks, and resource discovery as normal Pi behavior. `--tools` remains the callable tool-name allowlist; it is not an extension-code sandbox and extension tools can shadow tool names under normal Pi semantics. Graph authority does not disable or gate this normal Pi extension discovery.
+Child Pi launches use normal Pi extension discovery so extension-provided model providers are available. Ambient trusted extensions may run startup code, provider hooks, tool hooks, and resource discovery as normal Pi behavior. `--tools` remains the callable tool-name allowlist; it is not an extension-code sandbox and extension tools can shadow tool names under normal Pi semantics. Graph authority does not disable or gate this normal Pi extension discovery. Child RPC is unattended: fire-and-forget extension UI updates such as status, notifications, widgets, titles, and editor text are recorded and ignored, while blocking or unknown UI requests fail closed.
 
 Authority is graph-wide:
 

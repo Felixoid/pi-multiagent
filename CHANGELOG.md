@@ -2,9 +2,10 @@
 
 ## Unreleased
 
-## 0.8.2 - 2026-05-20
+## 0.8.3 - 2026-05-20
 
 - Fixed child Pi model/provider availability by using normal Pi extension discovery in child launches while keeping explicit `extensionTools` as the provenance-controlled callable extension-tool grant surface.
+- Allowed unattended child RPC sessions to ignore fire-and-forget extension UI updates while still failing closed on blocking or unknown UI requests, so ambient extensions such as `pi-continue` can report status during child compaction without terminating the step.
 
 ## 0.8.1 - 2026-05-19
 

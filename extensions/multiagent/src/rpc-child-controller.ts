@@ -4,8 +4,9 @@ import { RpcCommandQueue, type RpcCommandAck } from "./rpc-command-queue.ts";
 import { combinedAssistantFinals, envelopeParentMessage, extractAgentEndErrorMessage, extractAgentEndStopReason, extractAssistantErrorMessage, extractAssistantStopReason, extractAssistantText, extractEventText, isRecord, stringField } from "./rpc-record-utils.ts";
 import { STDERR_PREVIEW_CHARS, type AgentInvocationDefaults, type ResolvedAgent, type StepStatus, type TeamLimits } from "./types.ts";
 import { buildPiArgs, getPiInvocation, killProcessTree, type SpawnProcess } from "./child-launch.ts";
-import { serializeRpcJsonLine, type RpcJsonRecord } from "./rpc-jsonl.ts";
+import { type RpcJsonRecord } from "./rpc-jsonl.ts";
 import { RpcChildListeners } from "./rpc-child-listeners.ts";
+import { handleUnattendedUiRequest } from "./rpc-ui-request.ts";
 import { ParentMessageBudget } from "./rpc-parent-message-budget.ts";
 
 const ACK_TIMEOUT_MS = 10_000;
@@ -71,16 +72,16 @@ export class RpcChildController {
 		const args = buildPiArgs(this.options.agent, this.options.defaults, this.options.promptPath);
 		const invocation = getPiInvocation(args, this.options.cwd);
 		this.child = this.spawnProcess(invocation.command, invocation.args, { cwd: this.options.cwd, shell: false, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
-		this.options.onEvent({ type: "rpc", label: "spawn", preview: "child process spawned", status: "running" });
+		this.options.onEvent({ type: "rpc", label: "spawn", preview: "child spawned", status: "running" });
 		this.listeners.attach(this.child, { onRecord: (record) => this.handleRecord(record), onStdoutError: (message) => this.handleStdoutError(message), onStderrData: (text) => this.appendStderr(text), onStderrError: (error) => this.handleStderrError(error), onStdinError: (error) => this.handleStdinError(error), onChildError: (error) => this.fail("failed", `Subagent process error: ${error.message}`), onExit: () => this.handleExit(), onClose: () => this.handleClose() });
-		this.timeoutTimer = setTimeout(() => this.fail("timed_out", `Subagent exceeded timeoutSecondsPerStep=${this.options.limits.timeoutSecondsPerStep}.`), this.options.limits.timeoutSecondsPerStep * 1000);
+		this.timeoutTimer = setTimeout(() => this.fail("timed_out", `timeoutSecondsPerStep=${this.options.limits.timeoutSecondsPerStep} exceeded.`), this.options.limits.timeoutSecondsPerStep * 1000);
 		this.timeoutTimer.unref?.();
 		const completion = new Promise<RpcStepResult>((resolve) => {
 			this.completionResolve = resolve;
 		});
 		this.options.onEvent({ type: "rpc", label: "prompt", preview: "sent", status: "running" });
 		const ack = await this.sendCommand({ type: "prompt", message: task });
-		if (!ack.success) this.fail("failed", ack.error ?? "Initial prompt was rejected.");
+		if (!ack.success) this.fail("failed", ack.error ?? "Prompt rejected.");
 		else this.options.onEvent({ type: "rpc", label: "prompt", preview: "accepted", status: "done" });
 		return completion;
 	}
@@ -91,7 +92,7 @@ export class RpcChildController {
 		if (budgetError) return { success: false, error: budgetError };
 		const commandType = channel === "steer" ? "steer" : "follow_up";
 		const ack = await this.sendCommand({ type: commandType, message: envelopeParentMessage(channel, text) });
-		this.options.onEvent({ type: "parent_message", label: channel, preview: ack.success ? "accepted/queued" : ack.error, status: ack.success ? "done" : "error" });
+		this.options.onEvent({ type: "parent_message", label: channel, preview: ack.success ? "queued" : ack.error, status: ack.success ? "done" : "error" });
 		this.maybeFinalize();
 		return ack;
 	}
@@ -154,7 +155,7 @@ export class RpcChildController {
 		else if (type === "tool_execution_start" || type === "tool_execution_update" || type === "tool_execution_end") this.handleToolEvent(type, record);
 		else if (type === "extension_ui_request") this.handleUiRequest(record);
 		else if (type === "extension_error") this.options.onEvent({ type: "diagnostic", label: "extension_error", preview: extractEventText(record), status: "error" });
-		else this.options.onEvent({ type: "rpc", label: type, preview: extractEventText(record), status: undefined });
+		else this.options.onEvent({ type: "rpc", label: type, preview: extractEventText(record) });
 	}
 
 	private handleResponse(record: RpcJsonRecord): void {
@@ -166,7 +167,7 @@ export class RpcChildController {
 		this.sawAgentEnd = true;
 		this.agentEndStopReason = extractAgentEndStopReason(record);
 		this.agentEndErrorMessage = extractAgentEndErrorMessage(record);
-		const preview = this.agentEndStopReason ? `stopReason=${this.agentEndStopReason}` : "terminal event observed";
+		const preview = this.agentEndStopReason ? `stopReason=${this.agentEndStopReason}` : "terminal event";
 		const suffix = this.agentEndErrorMessage ? `: ${this.agentEndErrorMessage}` : "";
 		this.options.onEvent({ type: "rpc", label: "agent_end", preview: `${preview}${suffix}`, status: "done" });
 		this.maybeFinalize();
@@ -179,7 +180,7 @@ export class RpcChildController {
 			this.liveText = "";
 			this.outputBudget.resetLiveText();
 			this.options.onText?.(this.liveText);
-			this.options.onEvent({ type: "rpc", label: "message_start", preview: "assistant message started", status: "running" });
+			this.options.onEvent({ type: "rpc", label: "message_start", preview: "assistant started", status: "running" });
 			return;
 		}
 		if (eventType === "text_delta") {
@@ -255,20 +256,7 @@ export class RpcChildController {
 	}
 
 	private handleUiRequest(record: RpcJsonRecord): void {
-		const method = typeof record.method === "string" ? record.method : "unknown";
-		const id = typeof record.id === "string" ? record.id : undefined;
-		this.options.onEvent({ type: "ui", label: method, preview: "unattended UI request denied", status: "error" });
-		if (id && ["select", "confirm", "input", "editor"].includes(method)) void this.sendUiCancel(id);
-		this.fail("failed", `Unattended extension UI request denied: ${method}.`);
-	}
-
-	private async sendUiCancel(id: string): Promise<void> {
-		if (!this.child || this.finalized) return;
-		try {
-			this.child.stdin.write(serializeRpcJsonLine({ type: "extension_ui_response", id, cancelled: true }));
-		} catch {
-			// Closeout reports the UI denial.
-		}
+		handleUnattendedUiRequest({ record, child: this.child, finalized: this.finalized, onEvent: this.options.onEvent, onDenied: (message) => this.fail("failed", message) });
 	}
 
 	private maybeFinalize(): void {
@@ -282,7 +270,7 @@ export class RpcChildController {
 		}
 		const text = combinedAssistantFinals(this.assistantFinals);
 		if (text.trim().length === 0) {
-			this.fail("failed", "assistant-final-empty: Subagent completed without assistant final text after agent_end and command acknowledgements; no non-empty terminal assistant text was captured.", "assistant-final-empty");
+			this.fail("failed", "assistant-final-empty: no assistant final text captured after agent_end and command ACKs.", "assistant-final-empty");
 			return;
 		}
 		this.finalize({ status: "succeeded", text, assistantFinals: [...this.assistantFinals], stderr: this.stderr, errorMessage: undefined });
@@ -303,7 +291,7 @@ export class RpcChildController {
 		this.closingResult = result;
 		this.options.onEvent({ type: "rpc", label: "terminalizing", preview: result.status, status: "running" });
 		if (this.timeoutTimer) clearTimeout(this.timeoutTimer);
-		this.commands.closeWith((command) => `RPC command ${command} was closed by step finalization.`);
+		this.commands.closeWith((command) => `RPC command ${command} closed by finalization.`);
 		this.listeners.detachIo(false, true);
 		this.terminateChild();
 		if (!this.child || this.childClosed || this.childExited || this.child.exitCode !== null) this.complete(result);
@@ -315,11 +303,11 @@ export class RpcChildController {
 		this.exitCloseTimer = setTimeout(() => {
 			if (this.childClosed || this.finalized) return;
 			if (this.closingResult) {
-				this.options.onEvent({ type: "diagnostic", label: "process-exit", preview: `process exited before stdio close after ${EXIT_CLOSE_GRACE_MS}ms; step closeout forced`, status: "error" });
+				this.options.onEvent({ type: "diagnostic", label: "process-exit", preview: `stdio close open ${EXIT_CLOSE_GRACE_MS}ms after exit; closeout forced`, status: "error" });
 				this.complete(this.closingResult);
 				return;
 			}
-			this.fail("failed", "Subagent RPC process exited before terminal agent_end.");
+			this.fail("failed", "Subagent process exited before terminal agent_end.");
 		}, EXIT_CLOSE_GRACE_MS);
 		this.exitCloseTimer.unref?.();
 	}
@@ -332,7 +320,7 @@ export class RpcChildController {
 			this.complete(this.closingResult);
 			return;
 		}
-		if (!this.finalized) this.fail("failed", "Subagent RPC process closed before terminal agent_end.");
+		if (!this.finalized) this.fail("failed", "Subagent closed before agent_end.");
 	}
 
 	private complete(result: RpcStepResult): void {
@@ -351,8 +339,8 @@ export class RpcChildController {
 		this.terminating = true;
 		try {
 			this.child.stdin.end();
-		} catch {
-			// SIGTERM below is the authoritative closeout attempt.
+		} catch (error) {
+			this.options.onEvent({ type: "diagnostic", label: "stdin-end", preview: error instanceof Error ? error.message : "stdin end failed", status: "error" });
 		}
 		if (this.child.exitCode === null && !killProcessTree(this.child, "SIGTERM")) this.options.onEvent({ type: "diagnostic", label: "SIGTERM", preview: "not accepted", status: "error" });
 		this.killTimer = setTimeout(() => {
@@ -360,7 +348,7 @@ export class RpcChildController {
 			if (!killProcessTree(this.child, "SIGKILL")) this.options.onEvent({ type: "diagnostic", label: "SIGKILL", preview: "not accepted", status: "error" });
 			this.killTimer = setTimeout(() => {
 				if (!this.child || this.childExited || this.child.exitCode !== null || !this.closingResult) return;
-				this.options.onEvent({ type: "diagnostic", label: "SIGKILL", preview: `process still open after ${SIGKILL_CONFIRM_MS}ms; step closeout forced`, status: "error" });
+				this.options.onEvent({ type: "diagnostic", label: "SIGKILL", preview: `open after ${SIGKILL_CONFIRM_MS}ms; closeout forced`, status: "error" });
 				this.complete(this.closingResult);
 			}, SIGKILL_CONFIRM_MS);
 			this.killTimer.unref?.();

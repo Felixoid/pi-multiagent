@@ -100,6 +100,7 @@ type HarnessMode =
 	"message-deny" |
 	"message-timeout" |
 	"tool-use-then-final" |
+	"ui-fire-and-forget" |
 	"ui-request";
 
 function rpcHarness(mode: HarnessMode = "auto", onSpawn?: (args: string[]) => void): RpcHarness {
@@ -154,6 +155,16 @@ function handleCommand(child: FakeChild, line: string, mode: HarnessMode, childI
 	if (command.type === "prompt") {
 		if (mode === "hold" || mode === "ignore-kill" || mode === "delay-message-ack" || mode === "message-timeout" || mode === "message-deny") hold(child);
 		else if (mode === "ui-request") setImmediate(() => child.stdout.write(`${JSON.stringify({ type: "extension_ui_request", id: "ui-1", method: "toast" })}\n`));
+		else if (mode === "ui-fire-and-forget") setImmediate(() => {
+			for (const request of [
+				{ type: "extension_ui_request", id: "ui-status", method: "setStatus", statusKey: "smoke", statusText: "running" },
+				{ type: "extension_ui_request", id: "ui-notify", method: "notify", message: "smoke", notifyType: "info" },
+				{ type: "extension_ui_request", id: "ui-widget", method: "setWidget", widgetKey: "smoke", widgetLines: ["running"] },
+				{ type: "extension_ui_request", id: "ui-title", method: "setTitle", title: "smoke" },
+				{ type: "extension_ui_request", id: "ui-editor", method: "set_editor_text", text: "smoke" },
+			]) child.stdout.write(`${JSON.stringify(request)}\n`);
+			sendAssistantFinal(child, "ok");
+		});
 		else if (mode === "empty-final" || (mode === "first-empty-then-auto" && childIndex === 0)) setImmediate(() => sendAssistantFinal(child, ""));
 		else if (mode === "exit-no-close-after-terminal") setImmediate(() => sendAssistantEvents(child, "ok"));
 		else if (mode === "exit-no-close-before-terminal") setImmediate(() => child.exitOnly(null, "SIGTERM"));
@@ -414,7 +425,7 @@ test("message_update text streaming without final text is treated as failed term
 	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
-test("unattended extension UI requests fail closed for every method", async () => {
+test("unattended blocking or unknown extension UI requests fail closed", async () => {
 	const root = await mkdir(join(tmpdir(), `pi-multiagent-ui-request-${Date.now()}`), { recursive: true });
 	const harness = rpcHarness("ui-request");
 	const options = makeOptions(root, harness.spawn);
@@ -424,7 +435,23 @@ test("unattended extension UI requests fail closed for every method", async () =
 	assert.equal(terminal.details.run?.status, "failed");
 	assert.match(terminal.details.steps[0]?.errorMessage ?? "", /Unattended extension UI request denied: toast/);
 	const debug = await runAgentTeam({ action: "run_status", runId, debugEvents: true }, options);
-	assert.equal(debug.details.events.some((event) => event.type === "ui" && event.label === "toast"), true);
+	assert.equal(debug.details.events.some((event) => event.type === "ui" && event.label === "toast" && event.status === "error"), true);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("unattended fire-and-forget extension UI requests are ignored without failing the child", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-ui-fire-and-forget-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("ui-fire-and-forget");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "succeeded");
+	assert.equal(terminal.details.outputs[0]?.text, "ok");
+	const debug = await runAgentTeam({ action: "run_status", runId, debugEvents: true }, options);
+	for (const method of ["setStatus", "notify", "setWidget", "setTitle", "set_editor_text"]) {
+		assert.equal(debug.details.events.some((event) => event.type === "ui" && event.label === method && event.status === "done"), true);
+	}
 	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
