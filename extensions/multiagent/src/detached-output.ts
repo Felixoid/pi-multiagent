@@ -1,6 +1,6 @@
 /** Final-output helpers for detached runs. */
 
-import type { RunStatus, StepOutput, StepStatus, TeamStepSpec } from "./types.ts";
+import type { RunStatus, StepArtifactReference, StepOutput, StepStatus, TeamStepSpec } from "./types.ts";
 
 export const FINAL_INLINE_PREVIEW_CHARS = 6000;
 
@@ -13,6 +13,8 @@ interface StepFinalArtifactInput {
 	endedAt: string;
 	text: string;
 	assistantFinals: string[];
+	stopReason: string | undefined;
+	upstreamArtifacts: StepArtifactReference[];
 }
 
 export function buildStepFinalArtifact(input: StepFinalArtifactInput): string {
@@ -23,13 +25,33 @@ export function buildStepFinalArtifact(input: StepFinalArtifactInput): string {
 		`objective: ${input.objective}`,
 		`stepId: ${input.step.id}`,
 		`status: ${input.status}`,
+		`stopReason: ${input.stopReason ?? input.status}`,
 		`agentRef: ${input.step.agent.ref}`,
 		`agentSource: ${input.step.agent.source}`,
+		`cwd: ${input.step.cwd ?? "default"}`,
+		`needs: ${input.step.needs.length > 0 ? input.step.needs.join(", ") : "none"}`,
+		`after: ${input.step.after.length > 0 ? input.step.after.join(", ") : "none"}`,
 		`startedAt: ${input.startedAt ?? ""}`,
 		`endedAt: ${input.endedAt}`,
 		"",
+		"## Upstream artifacts",
+		formatUpstreamArtifacts(input.upstreamArtifacts),
+		"",
+		"## Task",
+		"",
+		input.step.task,
+		"",
 		formatStepFinalBody(input.text, input.assistantFinals),
 	].join("\n");
+}
+
+function formatUpstreamArtifacts(upstreamArtifacts: StepArtifactReference[]): string {
+	if (upstreamArtifacts.length === 0) return "none";
+	return upstreamArtifacts.map((artifact) => {
+		const path = artifact.filePath ? JSON.stringify(artifact.filePath) : "none";
+		const chars = artifact.chars ?? 0;
+		return `- ${artifact.stepId} [${artifact.status}]: artifact=${path} chars=${chars}`;
+	}).join("\n");
 }
 
 function formatStepFinalBody(text: string, assistantFinals: string[]): string {

@@ -1,7 +1,7 @@
 ---
 name: critic
-description: Use for adversarial pre-mortem, pre-implementation risk, or second-pass stress-testing of a concrete proposal, completed path, or release path; returns blockers, falsifying checks, and a risk decision.
-tags: critic, adversarial-review, risk, pre-mortem, pre-implementation, second-pass-risk, blocker, falsifying-checks, release-path-risk, trust-boundary-risk, regression-risk, risk-decision
+description: Use for adversarial pre-mortem, security/trust-boundary risk, pre-implementation risk, or second-pass stress-testing of a concrete proposal, completed path, or release path; returns blockers, falsifying checks, and a risk decision.
+tags: security-risk, adversarial-review, risk, pre-mortem, pre-implementation, second-pass-risk, blocker, falsifying-checks, release-path-risk, trust-boundary-risk, regression-risk, risk-decision
 tools: read, grep, find, ls
 thinking: high
 ---

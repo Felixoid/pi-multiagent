@@ -2,7 +2,7 @@
 
 import type { AgentToolResult, MessageRenderOptions, Theme, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { Text, type Component } from "@earendil-works/pi-tui";
-import { basename } from "node:path";
+import { artifactName, summarizeArtifacts, summarizeFullArtifactPaths, terminalArtifacts } from "./rendering-artifacts.ts";
 import type { AgentTeamInput } from "./schemas.ts";
 import {
 	attentionLines,
@@ -93,7 +93,7 @@ function formatCall(args: AgentTeamInput, theme: Theme): string {
 	if (action === "start") return `${title} ${theme.fg("accent", "launch")} ${theme.fg("dim", startTarget(args))}`;
 	if (action === "run_status") return `${title} ${theme.fg("accent", args.debugEvents === true ? "status debug" : "status")} ${theme.fg("dim", shortRunId(runId))}`;
 	if (action === "step_result") return `${title} ${theme.fg("accent", "inspect step")} ${theme.fg("dim", `${shortRunId(runId)} ${stepId ?? ""}`.trim())}`;
-	if (action === "message") return `${title} ${theme.fg("accent", "send note")} ${theme.fg("dim", `${stepId ?? "step"} ${channel ?? ""}`.trim())}`;
+	if (action === "message") return `${title} ${theme.fg("accent", channel === "follow_up" ? "queue follow-up" : "steer live step")} ${theme.fg("dim", `${stepId ?? "step"} ${channel ?? ""}`.trim())}`;
 	if (action === "cancel") return `${title} ${theme.fg("accent", "stop run")} ${theme.fg("dim", shortRunId(runId))}`;
 	if (action === "cleanup") return `${title} ${theme.fg("accent", "delete evidence")} ${theme.fg("dim", shortRunId(runId))}`;
 	const query = catalogQuery(args);
@@ -155,7 +155,8 @@ function formatPlainResultTail(details: AgentTeamDetails): string {
 function formatPlainTerminalEvidence(details: AgentTeamDetails): string[] {
 	if (!details.notice?.terminal) return [];
 	const lines: string[] = [];
-	if (details.outputs.length > 0) lines.push(`artifact paths ${summarizeFullArtifactPaths(details.outputs)}`);
+	const artifacts = terminalArtifacts(details);
+	if (artifacts.length > 0) lines.push(`artifact paths ${summarizeFullArtifactPaths(artifacts)}`);
 	if (details.run?.expiresAt) lines.push(`expiresAt=${details.run.expiresAt}`);
 	return lines;
 }
@@ -230,8 +231,11 @@ function formatResultTail(details: AgentTeamDetails, theme: Theme): string {
 }
 
 function formatExpanded(details: AgentTeamDetails, theme: Theme): string {
-	const artifacts = details.outputs.map((output) => output.filePath).filter((path): path is string => path !== undefined);
-	if (artifacts.length > 0) return `${theme.fg("muted", "artifacts")} ${theme.fg("dim", artifacts.join(", "))}`;
+	const artifactOutputs = details.notice?.terminal ? terminalArtifacts(details) : details.outputs;
+	if (artifactOutputs.some((output) => output.filePath)) {
+		const copy = details.notice?.terminal ? summarizeFullArtifactPaths(artifactOutputs) : summarizeArtifacts(artifactOutputs);
+		return `${theme.fg("muted", "artifacts")} ${theme.fg("dim", copy)}`;
+	}
 	const errors = details.diagnostics.filter((diagnostic) => diagnostic.severity === "error").map((diagnostic) => diagnostic.code);
 	if (errors.length > 0) return `${theme.fg("muted", "diagnostics")} ${theme.fg("error", errors.join(", "))}`;
 	const tools = stepToolSummaries(details.steps);
@@ -283,26 +287,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function formatNoticeArtifactCopy(details: AgentTeamDetails, theme: Theme): string {
-	if (details.outputs.length === 0) return "";
-	const artifactCopy = details.notice?.terminal ? `artifactPaths=${summarizeFullArtifactPaths(details.outputs)}` : summarizeArtifacts(details.outputs);
+	const artifacts = details.notice?.terminal ? terminalArtifacts(details) : details.outputs;
+	if (artifacts.length === 0) return "";
+	const artifactCopy = details.notice?.terminal ? `artifactPaths=${summarizeFullArtifactPaths(artifacts)}` : summarizeArtifacts(artifacts);
 	return ` ${theme.fg("dim", artifactCopy)}`;
 }
 
 function formatNoticeExpiry(details: AgentTeamDetails, theme: Theme): string {
 	return details.notice?.terminal && details.run?.expiresAt ? ` ${theme.fg("dim", `expiresAt=${details.run.expiresAt}`)}` : "";
-}
-
-function summarizeArtifacts(outputs: AgentTeamDetails["outputs"]): string {
-	const visible = outputs.slice(0, MAX_IDS).map((output) => artifactName(output.filePath)).join(",");
-	return outputs.length > MAX_IDS ? `artifacts=${visible},+${outputs.length - MAX_IDS}` : `artifacts=${visible}`;
-}
-
-function summarizeFullArtifactPaths(outputs: AgentTeamDetails["outputs"]): string {
-	return outputs.map((output) => `${output.stepId}=${output.filePath ?? "no artifact"}`).join(", ");
-}
-
-function artifactName(path: string | undefined): string {
-	return path ? basename(path) : "no artifact";
 }
 
 function reuseText(component: Component | undefined): Text {

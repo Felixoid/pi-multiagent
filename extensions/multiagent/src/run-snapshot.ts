@@ -4,10 +4,12 @@ import { isTerminalRunStatus } from "./detached-output.ts";
 import type { StepState } from "./detached-state.ts";
 import type { StepActivityTracker } from "./step-activity.ts";
 import { childToolNames } from "./tool-policy.ts";
-import type { AgentInvocationDefaults, RunSnapshot, RunStatus, StepSnapshot, StepStatus, TeamStepSpec } from "./types.ts";
+import type { AgentInvocationDefaults, RunSnapshot, RunStatus, StepArtifactReference, StepSnapshot, StepStatus, TeamStepSpec } from "./types.ts";
 
 export function buildStepSnapshots(states: Iterable<StepState>, activity: StepActivityTracker, defaults: AgentInvocationDefaults = { model: undefined, thinking: undefined }): StepSnapshot[] {
-	return [...states].map((state) => ({
+	const stateList = [...states];
+	const byId = new Map(stateList.map((state) => [state.spec.id, state]));
+	return stateList.map((state) => ({
 		id: state.spec.id,
 		status: state.status,
 		agentRef: state.spec.agent.ref,
@@ -24,7 +26,29 @@ export function buildStepSnapshots(states: Iterable<StepState>, activity: StepAc
 		errorMessage: state.errorMessage,
 		outputFilePath: state.output?.filePath,
 		outputChars: state.output?.chars,
+		taskPreview: taskPreview(state.spec.task),
+		cwd: state.spec.cwd,
+		stopReason: state.errorMessage ?? (isTerminalStepStatus(state.status) ? state.status : undefined),
+		upstreamArtifacts: upstreamArtifactReferences(state.spec, byId),
 	}));
+}
+
+const TASK_PREVIEW_CHARS = 180;
+
+function taskPreview(task: string): string {
+	const normalized = task.replace(/\s+/g, " ").trim();
+	return normalized.length <= TASK_PREVIEW_CHARS ? normalized : `${normalized.slice(0, TASK_PREVIEW_CHARS)}... [truncated ${normalized.length - TASK_PREVIEW_CHARS} chars]`;
+}
+
+function upstreamArtifactReferences(step: TeamStepSpec, byId: Map<string, StepState>): StepArtifactReference[] {
+	return [...step.needs, ...step.after].map((stepId) => {
+		const state = byId.get(stepId);
+		return { stepId, status: state?.status ?? "missing", filePath: state?.output?.filePath, chars: state?.output?.chars };
+	});
+}
+
+function isTerminalStepStatus(status: StepStatus): boolean {
+	return status !== "pending" && status !== "running";
 }
 
 export function buildRunSnapshot(input: { runId: string; objective: string; status: RunStatus; createdAt: string; updatedAt: string; retentionSeconds: number; liveStepIds: string[]; sinkStepIds: string[]; lastEvent: string | undefined; canMessage: boolean; canCancel: boolean; counts: Record<StepStatus, number> }): RunSnapshot {

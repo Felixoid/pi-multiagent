@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Use for ordinary post-work review of completed work, artifacts, diffs, docs, examples, release candidates, trust boundaries, public-copy drift, and validation evidence.
+description: Use for ordinary post-work review of completed work, artifacts, diffs, docs, examples, release candidates, trust boundaries, public-copy drift, and supplied validation evidence; shell-observed checks belong to validator.
 tags: review, completed-review, completed-artifact, completed-work-review, diff-review, post-implementation, release-candidate, validation-evidence, docs-review, examples-review, public-copy-drift, trust-boundary-review
 tools: read, grep, find, ls
 thinking: high

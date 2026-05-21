@@ -149,23 +149,40 @@ function validateStepGraph(steps: TeamStepSpec[], diagnostics: AgentDiagnostic[]
 		for (const need of step.needs) if (!ids.has(need)) diagnostics.push(makeDiagnostic("dependency-unknown", `Step ${step.id} depends on unknown step ${need}.`, "error", `/graph/steps/${index}/needs`));
 		for (const after of step.after) if (!ids.has(after)) diagnostics.push(makeDiagnostic("dependency-unknown", `Step ${step.id} waits after unknown step ${after}.`, "error", `/graph/steps/${index}/after`));
 	}
-	const visiting = new Set<string>();
 	const visited = new Set<string>();
+	const stack: { id: string; edgeFromParent?: "needs" | "after" }[] = [];
 	const byId = new Map(steps.map((step) => [step.id, step]));
-	const visit = (id: string): boolean => {
-		if (visited.has(id)) return false;
-		if (visiting.has(id)) return true;
-		visiting.add(id);
+	const visit = (id: string, edgeFromParent?: "needs" | "after"): string | undefined => {
+		if (visited.has(id)) return undefined;
+		const existing = stack.findIndex((frame) => frame.id === id);
+		if (existing !== -1) return formatDependencyCycle([...stack.slice(existing), { id, edgeFromParent }]);
+		stack.push({ id, edgeFromParent });
 		const step = byId.get(id);
-		for (const dependency of [...(step?.needs ?? []), ...(step?.after ?? [])]) if (visit(dependency)) return true;
-		visiting.delete(id);
+		for (const need of step?.needs ?? []) {
+			const cycle = byId.has(need) ? visit(need, "needs") : undefined;
+			if (cycle) return cycle;
+		}
+		for (const after of step?.after ?? []) {
+			const cycle = byId.has(after) ? visit(after, "after") : undefined;
+			if (cycle) return cycle;
+		}
+		stack.pop();
 		visited.add(id);
-		return false;
+		return undefined;
 	};
-	for (const step of steps) if (visit(step.id)) {
-		diagnostics.push(makeDiagnostic("dependency-cycle", "Graph dependencies contain a cycle.", "error", "/graph/steps"));
-		return;
+	for (const step of steps) {
+		const cycle = visit(step.id);
+		if (cycle) {
+			diagnostics.push(makeDiagnostic("dependency-cycle", `Graph dependencies contain a cycle: ${cycle}.`, "error", "/graph/steps"));
+			return;
+		}
 	}
+}
+
+function formatDependencyCycle(frames: { id: string; edgeFromParent?: "needs" | "after" }[]): string {
+	if (frames.length === 0) return "unknown";
+	const [first, ...rest] = frames;
+	return rest.reduce((text, frame) => `${text} --${frame.edgeFromParent ?? "depends"}--> ${frame.id}`, first.id);
 }
 
 function resolveInvocationCwd(cwd: string, diagnostics: AgentDiagnostic[]): string {

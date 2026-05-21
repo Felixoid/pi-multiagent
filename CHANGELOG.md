@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.8.6 - 2026-05-21
+
+- Added richer terminal artifact metadata: finalized step artifacts now include full task text, cwd, dependency edges, upstream artifact references, and stop/status hints, while `run_status` surfaces bounded task previews plus all terminal step artifacts instead of sinks only.
+- Improved repair microcopy for common supervision mistakes, including `run_status` `stepId` plus `preview:true`, live `message` step-not-found recovery, multi-error schema diagnostics, dependency-cycle paths, and clearer TUI message action labels.
+- Added `validation-matrix-gate.json` plus cookbook guidance for parent graph packets, artifact handoff packets, partial-evidence recovery, alternative-plan tournaments, and Web Research to Local Decision choreography.
+- Tightened catalog role descriptions for local exploration, docs audits, adversarial review, completed review, command validation, and synthesis routing.
+- Updated README, skill, examples, public-doc checks, and focused runtime tests around the new metadata and repair contracts while keeping source-size and package checks green.
+
 ## 0.8.5 - 2026-05-21
 
 - Added recoverable child-RPC context-overflow handling so Pi compaction/continue can produce a later valid final without accepting stale pre-overflow output, while unrecovered overflow fails and blocks `needs` dependents.

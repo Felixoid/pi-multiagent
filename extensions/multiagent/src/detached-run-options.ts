@@ -1,4 +1,4 @@
-import type { AgentTeamNotice, CleanupReceipt, EventType, MessageReceipt } from "./types.ts";
+import type { AgentDiagnostic, AgentTeamNotice, CleanupReceipt, EventType, MessageReceipt } from "./types.ts";
 
 export interface DetachedRunDetailsOptions {
 	cursor?: string;
@@ -11,6 +11,7 @@ export interface DetachedRunDetailsOptions {
 	error?: { code: string; message: string };
 	includeEvents?: boolean;
 	notice?: AgentTeamNotice;
+	diagnostics?: AgentDiagnostic[];
 }
 
 export interface DetachedRunEventInput {

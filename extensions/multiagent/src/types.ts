@@ -344,6 +344,13 @@ export interface RunSnapshot {
 	counts: Record<StepStatus, number>;
 }
 
+export interface StepArtifactReference {
+	stepId: string;
+	status: StepStatus | "missing";
+	filePath: string | undefined;
+	chars: number | undefined;
+}
+
 export interface StepSnapshot {
 	id: string;
 	status: StepStatus;
@@ -361,6 +368,10 @@ export interface StepSnapshot {
 	errorMessage: string | undefined;
 	outputFilePath?: string;
 	outputChars?: number;
+	taskPreview?: string;
+	cwd?: string;
+	stopReason?: string;
+	upstreamArtifacts?: StepArtifactReference[];
 }
 
 export interface StepOutput {

@@ -1,6 +1,6 @@
 ---
 name: validator
-description: Use for bounded parent-named command-backed validation, read-only package or documentation validation, status/diff checks, test proof, package proof, release gate proof, and final command checks.
+description: Use for bounded parent-named command-backed validation: status/diff checks, targeted tests, script-backed package/docs checks, release gate proof, and final command proof.
 tags: validation, validator, command-proof, named-commands, command-scope, shell-validation, read-only-shell, test-runner, diff-status, package-proof, release-gate-proof, final-check
 tools: read, grep, find, ls, bash
 thinking: high

@@ -1,4 +1,5 @@
 import { formatTruncatedModelContent } from "./result-truncation.ts";
+import { formatTerminalStepArtifacts } from "./terminal-step-artifact-format.ts";
 import type { AgentTeamDetails, BackgroundEvent, RunSnapshot, StepOutput, StepSnapshot } from "./types.ts";
 
 export { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, describeOutputLimit, truncateHead } from "./result-truncation.ts";
@@ -76,8 +77,9 @@ function formatStart(details: AgentTeamDetails): string {
 }
 
 function formatRunStatus(details: AgentTeamDetails): string {
-	const nonSinkEvidence = formatNonSinkTerminalEvidence(details);
-	const sections = ["# agent_team run_status", "", TRUST_NOTICE, errorLine(details), "", "## Sink artifacts", formatArtifactIndex(details.outputs, "none yet"), nonSinkEvidence, "", details.run ? formatRunSnapshot(details.run) : "No run snapshot.", formatCursor(details.cursor), "run_status stepId targets wait/debug events only; use step_result for one step's artifact/text preview.", diag(details), "", "## Steps", details.steps.length > 0 ? details.steps.map(formatStep).join("\n") : "none", "", "## Sink finals", details.outputs.length > 0 ? details.outputs.map(formatOutput).join("\n\n") : "none yet"];
+	const terminalArtifacts = formatTerminalStepArtifacts(details.steps, details.outputs);
+	const previewHeading = details.outputs.some((output) => output.text !== undefined) ? "## Sink output previews" : "## Sink final metadata";
+	const sections = ["# agent_team run_status", "", TRUST_NOTICE, errorLine(details), details.run ? formatRunSnapshot(details.run) : "No run snapshot.", formatCursor(details.cursor), "run_status stepId targets wait/debug events only; use step_result for one step's artifact/text preview.", diag(details), "", "## Sink artifacts", formatArtifactIndex(details.outputs, "none yet"), terminalArtifacts, "", "## Steps", details.steps.length > 0 ? details.steps.map(formatStep).join("\n") : "none", "", previewHeading, details.outputs.length > 0 ? details.outputs.map(formatOutput).join("\n\n") : "none yet"];
 	if (details.events.length > 0) sections.push("", "## Debug events", details.events.map(formatEvent).join("\n"));
 	return sections.filter(Boolean).join("\n");
 }
@@ -95,29 +97,17 @@ function stepResultVisibleSteps(details: AgentTeamDetails): StepSnapshot[] {
 
 function formatStepResultAvailableStepIds(details: AgentTeamDetails): string {
 	if (details.error?.code !== "step-not-found" || details.steps.length === 0) return "";
+	return formatAvailableStepIds(details);
+}
+
+function formatAvailableStepIds(details: AgentTeamDetails): string {
+	if (details.error?.code !== "step-not-found" || details.steps.length === 0) return "";
 	return `Available step ids: ${details.steps.map((step) => modelText(step.id)).join(", ")}`;
-}
-
-function formatNonSinkTerminalEvidence(details: AgentTeamDetails): string {
-	if (!details.run) return "";
-	const sinkIds = new Set(details.run.sinkStepIds);
-	const rows = details.steps.filter((step) => !sinkIds.has(step.id) && isTerminalStepStatus(step.status)).map(formatStepArtifact);
-	if (rows.length === 0) return "";
-	return `\n## Non-sink terminal artifacts\n${rows.join("\n")}`;
-}
-
-function isTerminalStepStatus(status: StepSnapshot["status"]): boolean {
-	return status !== "pending" && status !== "running";
-}
-
-function formatStepArtifact(step: StepSnapshot): string {
-	const artifact = step.outputFilePath ? JSON.stringify(step.outputFilePath) : "none";
-	return `- ${step.id} [${step.status}]: artifact=${artifact} chars=${step.outputChars ?? 0}`;
 }
 
 function formatMessage(details: AgentTeamDetails): string {
 	const receipt = details.message;
-	return ["# agent_team message", "", TRUST_NOTICE, details.error ? `Error: ${modelText(details.error.code)} - ${modelText(details.error.message)}` : "", receipt ? formatMessageReceiptLine(receipt) : "No message receipt.", receipt?.reused ? `Reused clientMessageId${receipt.clientMessageId ? ` ${modelText(receipt.clientMessageId)}` : ""} receipt; no additional child message was queued.` : "", receipt?.accepted ? "Acceptance confirms Pi accepted the queued message; it does not prove child compliance, output, completion, or that the child should stop early." : "", receipt?.accepted ? messageChannelSemantics(receipt.channel) : "", receipt?.undeliveredReason ? `Reason: ${modelText(receipt.undeliveredReason)}` : "", details.run ? formatRunSnapshot(details.run) : "", diag(details)].filter(Boolean).join("\n");
+	return ["# agent_team message", "", TRUST_NOTICE, details.error ? `Error: ${modelText(details.error.code)} - ${modelText(details.error.message)}` : "", formatAvailableStepIds(details), receipt ? formatMessageReceiptLine(receipt) : "No message receipt.", receipt?.reused ? `Reused clientMessageId${receipt.clientMessageId ? ` ${modelText(receipt.clientMessageId)}` : ""} receipt; no additional child message was queued.` : "", receipt?.accepted ? "Acceptance confirms Pi accepted the queued message; it does not prove child compliance, output, completion, or that the child should stop early." : "", receipt?.accepted ? messageChannelSemantics(receipt.channel) : "", receipt?.undeliveredReason ? `Reason: ${modelText(receipt.undeliveredReason)}` : "", details.run ? formatRunSnapshot(details.run) : "", diag(details)].filter(Boolean).join("\n");
 }
 
 function formatCleanup(details: AgentTeamDetails): string {
@@ -145,8 +135,10 @@ function formatMessageReceiptLine(receipt: NonNullable<AgentTeamDetails["message
 	return `Message ${receipt.accepted ? "accepted/queued" : "denied"} for ${modelText(receipt.stepId)} (${modelText(receipt.channel)}).`;
 }
 
-function formatList(values: string[]): string {
-	return values.length > 0 ? values.map(modelText).join(",") : "none";
+function formatList(values: string[], maxItems = 12): string {
+	if (values.length === 0) return "none";
+	const visible = values.slice(0, maxItems).map(modelText).join(",");
+	return values.length > maxItems ? `${visible},+${values.length - maxItems} more` : visible;
 }
 
 function optionalList(label: string, values: string[]): string {

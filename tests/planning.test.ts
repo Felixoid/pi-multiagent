@@ -525,7 +525,8 @@ test("resolveDetachedGraph materializes terminal after dependencies", async () =
 		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
 		undefined,
 	);
-	assert.equal(cycle.diagnostics.some((item) => item.code === "dependency-cycle"), true);
+	const cycleDiagnostic = cycle.diagnostics.find((item) => item.code === "dependency-cycle");
+	assert.match(cycleDiagnostic?.message ?? "", /one --after--> two --needs--> one/);
 });
 
 test("resolveDetachedGraph resolves built-in tools independent of parent active built-ins", async () => {

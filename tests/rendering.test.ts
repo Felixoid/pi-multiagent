@@ -184,6 +184,46 @@ test("renderAgentTeamResult summarizes pushed notices with visible artifacts", (
 	assert.match(missingDetailsCard, /untrusted status evidence; run_status\/step_result for artifacts/);
 });
 
+test("renderAgentTeamResult terminal notices surface upstream terminal artifact paths", () => {
+	const notice = details("run_status", {
+		run: run({ objective: "detached", status: "succeeded", terminal: true, liveStepIds: [], sinkStepIds: ["sink"], lastEvent: "terminal: succeeded", expiresAt: "2030-01-01T00:00:00.000Z", canMessage: false, canCancel: false, canCleanup: true, counts: counts({ succeeded: 2 }) }),
+		steps: [
+			step({ id: "upstream", agentRef: "inline:upstream", status: "succeeded", outputFilePath: "/tmp/upstream-final.md", outputChars: 11 }),
+			step({ id: "sink", agentRef: "inline:sink", status: "succeeded", needs: ["upstream"], outputFilePath: "/tmp/sink-final.md", outputChars: 9 }),
+		],
+		outputs: [{ stepId: "sink", status: "succeeded", text: undefined, filePath: "/tmp/sink-final.md", chars: 9 }],
+		notice: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", mode: "milestones", terminal: true, reasons: ["terminal:succeeded"], noticeCount: 1, noticeLimitReached: false },
+	});
+	const rendered = renderAgentTeamResult({ content: [], details: notice }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
+	assert.match(rendered, /artifactPaths=sink=\/tmp\/sink-final\.md, upstream=\/tmp\/upstream-final\.md/);
+	const fallback = formatAgentTeamNoticeText(notice);
+	assert.match(fallback, /final evidence sink succeeded sink-final\.md/);
+	assert.match(fallback, /artifact paths sink=\/tmp\/sink-final\.md, upstream=\/tmp\/upstream-final\.md/);
+});
+
+test("renderAgentTeamResult terminal notices cap large artifact path lists", () => {
+	const notice = details("run_status", {
+		run: run({ objective: "detached", status: "succeeded", terminal: true, liveStepIds: [], sinkStepIds: ["sink"], lastEvent: "terminal: succeeded", expiresAt: "2030-01-01T00:00:00.000Z", canMessage: false, canCancel: false, canCleanup: true, counts: counts({ succeeded: 5 }) }),
+		steps: [
+			step({ id: "a", agentRef: "inline:a", status: "succeeded", outputFilePath: "/tmp/a-final.md", outputChars: 1 }),
+			step({ id: "b", agentRef: "inline:b", status: "succeeded", outputFilePath: "/tmp/b-final.md", outputChars: 1 }),
+			step({ id: "sink", agentRef: "inline:sink", status: "succeeded", outputFilePath: "/tmp/sink-final.md", outputChars: 1 }),
+			step({ id: "c", agentRef: "inline:c", status: "succeeded", outputFilePath: "/tmp/c-final.md", outputChars: 1 }),
+			step({ id: "d", agentRef: "inline:d", status: "succeeded", outputFilePath: "/tmp/d-final.md", outputChars: 1 }),
+		],
+		outputs: [{ stepId: "sink", status: "succeeded", text: undefined, filePath: "/tmp/sink-final.md", chars: 1 }],
+		notice: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", mode: "milestones", terminal: true, reasons: ["terminal:succeeded"], noticeCount: 1, noticeLimitReached: false },
+	});
+	const fallback = formatAgentTeamNoticeText(notice);
+	assert.match(fallback, /artifact paths sink=\/tmp\/sink-final\.md, a=\/tmp\/a-final\.md, b=\/tmp\/b-final\.md, \+2 more; use run_status\/step_result/);
+	assert.doesNotMatch(fallback, /c-final|d-final/);
+	const rendered = renderAgentTeamResult({ content: [], details: notice }, { expanded: false, isPartial: false }, theme, undefined).render(160).join("\n");
+	assert.match(rendered, /artifactPaths=sink=\/tmp\/sink-final\.md, a=\/tmp\/a-final\.md, b=\/tmp\/b-final\.md, \+2 more; use run_status\/step_result/);
+	const expanded = renderAgentTeamResult({ content: [], details: notice }, { expanded: true, isPartial: false }, theme, undefined).render(160).join("\n");
+	assert.match(expanded, /artifacts sink=\/tmp\/sink-final\.md, a=\/tmp\/a-final\.md, b=\/tmp\/b-final\.md, \+2 more; use run_status\/step_result/);
+	assert.doesNotMatch(expanded, /c-final|d-final/);
+});
+
 test("renderAgentTeamResult keeps milestone notices compact", () => {
 	const notice = details("run_status", {
 		run: run({ objective: "detached", status: "running", terminal: false, liveStepIds: ["one"], sinkStepIds: ["one"], lastEvent: "sink one running", counts: counts({ running: 1 }) }),

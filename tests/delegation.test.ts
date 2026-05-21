@@ -361,7 +361,14 @@ test("start returns a registered runId and run_status exposes final output", asy
 	const artifact = await readFile(artifactPath, "utf8");
 	assert.match(artifact, /# agent_team step final/);
 	assert.match(artifact, /stepId: one/);
+	assert.match(artifact, /status: succeeded/);
+	assert.match(artifact, /stopReason: succeeded/);
 	assert.match(artifact, /agentRef: inline:one/);
+	assert.match(artifact, /cwd: .*pi-multiagent-detached-/);
+	assert.match(artifact, /needs: none/);
+	assert.match(artifact, /after: none/);
+	assert.match(artifact, /## Upstream artifacts\nnone/);
+	assert.match(artifact, /## Task\n\nReturn ok\./);
 	assert.match(artifact, /\n\nok\n?$/);
 	assert.doesNotMatch(artifact, /## Assistant final 1/);
 	const debug = await runAgentTeam({ action: "run_status", runId: runId ?? "", cursor: "0", debugEvents: true }, options);
@@ -995,6 +1002,9 @@ test("run_status waitSeconds can target one step and rejects unknown step target
 	assert.equal(missing.details.error?.code, "step-not-found");
 	const live = await runAgentTeam({ action: "run_status", runId, stepId: "one" }, options);
 	assert.equal(live.details.run?.terminal, false);
+	const previewWarning = await runAgentTeam({ action: "run_status", runId, stepId: "one", preview: true }, options);
+	assert.equal(previewWarning.details.diagnostics.some((item) => item.code === "run-status-step-preview-ignored"), true);
+	assert.match(previewWarning.content[0].text, /run-status-step-preview-ignored/);
 	harness.release("done");
 	const terminal = await waitTerminal(root, runId, options);
 	assert.equal(terminal.details.run?.status, "succeeded");
@@ -1167,15 +1177,36 @@ test("run_status uses sink finals, step_result exposes one step, and terminal no
 		notices.push(details);
 		return undefined;
 	};
+	await mkdir(join(root, "sink-cwd"), { recursive: true });
+	const longSinkTask = `Return sink. ${"Do not expose the full delegated task in run_status details. ".repeat(8)}`;
 	const started = await runAgentTeam(graph([
 		{ id: "one", agent: { system: "Return upstream." }, task: "Return upstream." },
-		{ id: "two", agent: { system: "Return sink." }, task: "Return sink.", needs: ["one"] },
+		{ id: "two", agent: { system: "Return sink." }, task: longSinkTask, needs: ["one"], cwd: "sink-cwd" },
 	]), options);
 	const runId = started.details.run?.runId ?? "";
 	const runStatusResult = await waitTerminal(root, runId, options);
 	assert.deepEqual(runStatusResult.details.run?.sinkStepIds, ["two"]);
 	assert.deepEqual(runStatusResult.details.outputs.map((output) => output.stepId), ["two"]);
 	assert.equal(runStatusResult.details.events.length, 0);
+	const upstreamStep = runStatusResult.details.steps.find((step) => step.id === "one");
+	const sinkStep = runStatusResult.details.steps.find((step) => step.id === "two");
+	assert.ok(upstreamStep?.outputFilePath);
+	assert.ok(sinkStep?.outputFilePath);
+	assert.equal(sinkStep?.cwd?.endsWith("/sink-cwd"), true);
+	assert.notEqual(sinkStep?.taskPreview, longSinkTask);
+	assert.match(sinkStep?.taskPreview ?? "", /Return sink\./);
+	assert.match(sinkStep?.taskPreview ?? "", /truncated/);
+	assert.deepEqual(sinkStep?.upstreamArtifacts?.map((artifact) => ({ stepId: artifact.stepId, status: artifact.status, filePath: artifact.filePath, chars: artifact.chars })), [{ stepId: "one", status: "succeeded", filePath: upstreamStep.outputFilePath, chars: upstreamStep.outputChars }]);
+	assert.match(runStatusResult.content[0].text, /## Terminal step artifacts/);
+	assert.doesNotMatch(runStatusResult.content[0].text, new RegExp(longSinkTask.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+	assert.match(runStatusResult.content[0].text, /one \[succeeded\]: artifact=/);
+	assert.match(runStatusResult.content[0].text, /two \[succeeded\]: artifact=/);
+	const sinkArtifact = await readFile(sinkStep.outputFilePath, "utf8");
+	assert.match(sinkArtifact, /cwd: .*\/sink-cwd/);
+	assert.match(sinkArtifact, /needs: one/);
+	assert.match(sinkArtifact, /after: none/);
+	assert.match(sinkArtifact, new RegExp(`- one \\[succeeded\\]: artifact=${JSON.stringify(upstreamStep.outputFilePath).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} chars=${upstreamStep.outputChars}`));
+	assert.equal(sinkArtifact.includes(`## Task\n\n${longSinkTask}`), true);
 	assert.equal(notices.length, 1);
 	assert.equal(notices[0].action, "run_status");
 	assert.equal(notices[0].notice?.terminal, true);
@@ -1350,6 +1381,12 @@ test("message writes bounded live channel messages to a running step only", asyn
 	const started = await runAgentTeam(graph(), options);
 	const runId = started.details.run?.runId ?? "";
 	for (let attempt = 0; harness.children.length === 0 && attempt < 20; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+	const missingStep = await runAgentTeam({ action: "message", runId, stepId: "missing", channel: "steer", text: "tighten scope" }, options);
+	assert.equal(missingStep.details.ok, false);
+	assert.equal(missingStep.details.error?.code, "step-not-found");
+	assert.equal(missingStep.details.message, undefined);
+	assert.match(missingStep.content[0].text, /Available step ids: one/);
+	assert.match(missingStep.content[0].text, /No message receipt/);
 	const receipt = await runAgentTeam({ action: "message", runId, stepId: "one", channel: "steer", text: "tighten scope", clientMessageId: "m1" }, options);
 	assert.equal(receipt.details.message?.accepted, true);
 	assert.equal(receipt.details.message?.reused, false);
@@ -1866,6 +1903,22 @@ test("start fails before launching children when preflight or authority fails", 
 	assert.equal(invalidMaxBytes.details.diagnostics.some((item) => item.code === "input-schema-invalid"), true);
 	assert.match(invalidMaxBytes.content[0].text, /preview:true/);
 	assert.match(invalidMaxBytes.content[0].text, /debugEvents:true/);
+	const multiInvalid = await runAgentTeam({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "Bad Step", cursor: "", waitSeconds: 0, maxBytes: 0, preview: "yes", debugEvents: "no" } as AgentTeamInput, options);
+	const schemaDiagnostics = multiInvalid.details.diagnostics.filter((item) => item.code === "input-schema-invalid");
+	assert.equal(schemaDiagnostics.length, 5);
+	assert.equal(schemaDiagnostics.every((item) => item.repair && item.repair.length > 0), true);
+	const invalidPreviewControls = await runAgentTeam({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", maxBytes: 0, preview: "yes", debugEvents: "no" } as AgentTeamInput, options);
+	const repairsByPath = new Map(invalidPreviewControls.details.diagnostics.filter((item) => item.code === "input-schema-invalid").map((item) => [item.path, item.repair ?? ""]));
+	assert.match(repairsByPath.get("/maxBytes") ?? "", /maxBytes/);
+	assert.match(repairsByPath.get("/preview") ?? "", /preview/);
+	assert.doesNotMatch(repairsByPath.get("/preview") ?? "", /maxBytes/);
+	assert.match(repairsByPath.get("/debugEvents") ?? "", /debugEvents/);
+	assert.doesNotMatch(repairsByPath.get("/debugEvents") ?? "", /preview must/);
+	for (const [path, field] of [["/stepId", "stepId"], ["/cursor", "cursor"], ["/waitSeconds", "waitSeconds"]] as const) {
+		const repair = schemaDiagnostics.find((item) => item.path === path)?.repair ?? "";
+		assert.match(repair, new RegExp(field));
+		assert.doesNotMatch(repair, /maxBytes must|preview must|debugEvents must/);
+	}
 	const misplacedAuthority = await runAgentTeam({ action: "start", authority: { allowFilesystemRead: true }, objective: "x", steps: [] }, options);
 	assert.equal(misplacedAuthority.details.diagnostics.some((item) => item.code === "start-control-fields-denied"), true);
 	assert.match(misplacedAuthority.content[0].text, /Move graph body fields under graph/);

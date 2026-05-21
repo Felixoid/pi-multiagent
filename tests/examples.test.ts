@@ -151,6 +151,7 @@ test("packaged graph examples resolve against bundled catalog with expected sink
 		["research-to-change-gated-loop.json", ["final-report"]],
 		["sharded-map-reduce-audit.json", ["reduce-decision"]],
 		["single-specialist-read-only.json", ["inspect"]],
+		["validation-matrix-gate.json", ["final-proof"]],
 	]);
 	const files = (await readdir(examplesDir)).filter((file) => file.endsWith(".json")).sort();
 	assert.deepEqual(files, [...expectedSinks.keys()].sort(), "expected sink map must cover every packaged graph example exactly");
@@ -252,6 +253,12 @@ test("validator graph steps require parent-copied command scope", async () => {
 			assert.match(task, /scope is implied only by upstream evidence/, `${file}:${String(step.id)} must reject upstream-implied command scope`);
 		}
 	}
+	const matrix = await readGraphExample("validation-matrix-gate.json");
+	for (const stepId of ["validation-a", "validation-b", "validation-c"]) {
+		assert.match(stepTask(matrix, stepId), /missing, broad, mutating, requires network\/credentials/, `validation-matrix-gate.json:${stepId} must reject unsafe command scope`);
+	}
+	assert.match(stepTask(matrix, "final-proof"), /NOT PASSED/);
+	assert.match(stepTask(matrix, "final-proof"), /lacks command-backed evidence/);
 });
 
 test("read-only reusable skeletons fail closed when parent scope is missing", async () => {

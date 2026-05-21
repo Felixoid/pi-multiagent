@@ -9,13 +9,13 @@ import { forgetDetachedRun, getDetachedRun, listDetachedRuns, registerDetachedRu
 import { materializeAgentTeamInput } from "./graph-file.ts";
 import { resolveDetachedGraph, validatePreflightShape } from "./planning.ts";
 import { finalizeDetails, hasDiagnosticError, makeDetails, type AgentTeamRuntimeOptions, unavailableTools } from "./runtime-options.ts";
+import { schemaRepair } from "./schema-repair.ts";
 import { catalogParentExtensionToolDiagnostics } from "./tool-policy.ts";
 import { AgentTeamSchema, type AgentTeamInput, type GraphSpec } from "./schemas.ts";
 import type { AgentDiagnostic, AgentTeamDetails, RunSnapshot } from "./types.ts";
-import { AGENT_TEAM_ACTION_VALUES, BUILTIN_CHILD_TOOL_NAMES, DEFAULT_GRAPH_LIBRARY_SOURCES, DEFAULT_RESULT_PREVIEW_MAX_BYTES, MAX_LIVE_DETACHED_RUNS, MAX_RETAINED_DETACHED_RUNS, type ExecutionAction } from "./types.ts";
+import { AGENT_TEAM_ACTION_VALUES, DEFAULT_GRAPH_LIBRARY_SOURCES, DEFAULT_RESULT_PREVIEW_MAX_BYTES, MAX_LIVE_DETACHED_RUNS, MAX_RETAINED_DETACHED_RUNS, type ExecutionAction } from "./types.ts";
 
 const validateAgentTeamInput = Compile(AgentTeamSchema);
-const BUILTIN_CHILD_TOOL_SET = new Set<string>(BUILTIN_CHILD_TOOL_NAMES);
 
 export async function runAgentTeam(rawInput: unknown, options: AgentTeamRuntimeOptions): Promise<AgentToolResult<AgentTeamDetails>> {
 	const rawPreflightDiagnostics = validatePreflightShape(rawInput);
@@ -64,9 +64,15 @@ function start(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnost
 async function run_status(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): Promise<AgentTeamDetails> {
 	const run = getDetachedRun(input.runId);
 	if (!run) return makeDetails("run_status", false, diagnostics, options, undefined, runNotFoundError());
-	if (input.stepId && !run.hasStep(input.stepId)) return run.details("run_status", { stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES, preview: input.preview === true, ok: false, error: { code: "step-not-found", message: "No step in the retained detached run matches stepId." } });
+	const requestDiagnostics = runStatusRequestDiagnostics(input);
+	if (input.stepId && !run.hasStep(input.stepId)) return run.details("run_status", { stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES, preview: input.preview === true, diagnostics: requestDiagnostics, ok: false, error: { code: "step-not-found", message: "No step in the retained detached run matches stepId." } });
 	if (input.waitSeconds !== undefined) await run.waitForChange({ stepId: input.stepId, cursor: input.cursor, seconds: input.waitSeconds });
-	return run.details("run_status", { cursor: input.cursor, stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES, preview: input.preview === true, includeEvents: input.debugEvents === true });
+	return run.details("run_status", { cursor: input.cursor, stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES, preview: input.preview === true, includeEvents: input.debugEvents === true, diagnostics: requestDiagnostics });
+}
+
+function runStatusRequestDiagnostics(input: AgentTeamInput): AgentDiagnostic[] {
+	if (!input.stepId || input.preview !== true) return [];
+	return [{ code: "run-status-step-preview-ignored", message: "run_status stepId filters wait/debug events only; use step_result with this stepId for a step text preview.", path: "/stepId", severity: "warning" }];
 }
 
 function step_result(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): AgentTeamDetails {
@@ -79,7 +85,8 @@ function step_result(input: AgentTeamInput, options: AgentTeamRuntimeOptions, di
 async function message(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): Promise<AgentTeamDetails> {
 	const run = getDetachedRun(input.runId);
 	if (!run) return makeDetails("message", false, diagnostics, options, undefined, runNotFoundError());
-	const receipt = await run.message(input.stepId ?? "", input.channel ?? "steer", input.text ?? "", input.clientMessageId);
+	if (!input.stepId || !run.hasStep(input.stepId)) return run.details("message", { stepId: input.stepId, ok: false, error: { code: "step-not-found", message: "No step in the retained detached run matches stepId." } });
+	const receipt = await run.message(input.stepId, input.channel ?? "steer", input.text ?? "", input.clientMessageId);
 	return run.details("message", { message: receipt, ok: receipt.accepted, error: receipt.accepted ? undefined : { code: "message-not-delivered", message: receipt.undeliveredReason ?? "Message was not delivered." } });
 }
 
@@ -133,41 +140,12 @@ function detachedRunOptions(options: AgentTeamRuntimeOptions): AgentTeamRuntimeO
 
 function validateInputSchema(input: unknown): AgentDiagnostic[] {
 	if (validateAgentTeamInput.Check(input)) return [];
-	const first = [...validateAgentTeamInput.Errors(input)][0];
-	const path = first?.instancePath || "/";
-	const message = first ? `agent_team input schema violation at ${path}: ${first.message}` : "agent_team input does not match the public schema; check action-specific fields, enum values, bounds, and unknown properties.";
-	return [{ code: "input-schema-invalid", message, path, severity: "error", repair: schemaRepair(input, path) }];
-}
-
-function schemaRepair(input: unknown, path: string): string {
-	if (isRecord(input)) {
-		const misplacedExtensionTool = findMisplacedExtensionToolName(input);
-		if (misplacedExtensionTool) return `agent.tools accepts only built-in child tools (${BUILTIN_CHILD_TOOL_NAMES.join(", ")}). Move extension tool ${misplacedExtensionTool} to steps[].agent.extensionTools with catalog-copied {name, from:{source, scope?, origin?}} provenance and set graph.authority.allowExtensionCode:true; do not put extension tool names in agent.tools.`;
-		if (findAgentSkillsField(input)) return "Remove steps[].agent.skills. Subagent skill availability is controlled only by the product config flag --agent-team-subagent-skills enabled|disabled; it is all-or-nothing, defaults to enabled, and is not graph-controlled.";
-		if (input.authority !== undefined) return 'Move authority under graph: {"action":"start","graph":{"authority":{"allowFilesystemRead":true},"objective":"...","steps":[...]}}.';
-		if (path === "/maxBytes" || input.maxBytes !== undefined) return "maxBytes must be between 1 and 200000 and is valid only on run_status/step_result: it bounds assistant previews when preview:true and raw debug event previews when run_status debugEvents:true; catalog narrowing uses library.query.";
-		if (path === "/preview" || input.preview !== undefined) return "preview must be true or false and is valid only for run_status and step_result; previews default to false.";
-		if (path === "/debugEvents" || input.debugEvents !== undefined) return "debugEvents must be true or false and is valid only for run_status; use maxBytes there only to bound raw debug event previews.";
-		if (path === "/channel" || input.channel !== undefined) return 'Use channel:"steer" or channel:"follow_up" for message.';
-		if (path === "/text" || input.text !== undefined) return "Message text must be a non-empty string.";
-	}
-	return "Use the action-specific control set: catalog uses library; start uses graph/graphFile plus options; run_status/step_result use runId and preview controls; message uses runId, stepId, channel, text, and optional clientMessageId.";
-}
-
-function findMisplacedExtensionToolName(input: Record<string, unknown>): string | undefined {
-	const graph = input.graph;
-	if (!isRecord(graph) || !Array.isArray(graph.steps)) return undefined;
-	for (const step of graph.steps) {
-		if (!isRecord(step) || !isRecord(step.agent) || !Array.isArray(step.agent.tools)) continue;
-		for (const tool of step.agent.tools) if (typeof tool === "string" && !BUILTIN_CHILD_TOOL_SET.has(tool)) return tool;
-	}
-	return undefined;
-}
-
-function findAgentSkillsField(input: Record<string, unknown>): boolean {
-	const graph = input.graph;
-	if (!isRecord(graph) || !Array.isArray(graph.steps)) return false;
-	return graph.steps.some((step) => isRecord(step) && isRecord(step.agent) && step.agent.skills !== undefined);
+	const errors = [...validateAgentTeamInput.Errors(input)].slice(0, 5);
+	if (errors.length === 0) return [{ code: "input-schema-invalid", message: "agent_team input does not match the public schema; check action-specific fields, enum values, bounds, and unknown properties.", path: "/", severity: "error", repair: schemaRepair(input, "/") }];
+	return errors.map((error) => {
+		const path = error.instancePath || "/";
+		return { code: "input-schema-invalid", message: `agent_team input schema violation at ${path}: ${error.message}`, path, severity: "error", repair: schemaRepair(input, path) };
+	});
 }
 
 function detailsAction(input: unknown): ExecutionAction | "missing/invalid" {

@@ -186,21 +186,50 @@ test("model content helper bounds run_status output with valid recovery hint", (
 	assert.doesNotMatch(content, /run_status with a narrower stepId/);
 });
 
-test("run_status hints at non-sink terminal evidence without previewing it", () => {
-	const sink: StepSnapshot = { id: "sink", status: "succeeded", agentRef: "inline:sink", ...DEFAULT_STEP_TOOLS, needs: ["upstream"], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined };
-	const upstream: StepSnapshot = { id: "upstream", status: "succeeded", agentRef: "inline:upstream", ...DEFAULT_STEP_TOOLS, needs: [], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined };
+test("run_status indexes all terminal step artifacts without previewing upstream text", () => {
+	const sink: StepSnapshot = { id: "sink", status: "succeeded", agentRef: "inline:sink", ...DEFAULT_STEP_TOOLS, needs: ["upstream"], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined, taskPreview: "Synthesize upstream evidence", cwd: "reports", upstreamArtifacts: [{ stepId: "upstream", status: "succeeded", filePath: "/tmp/upstream-final.md", chars: 13 }] };
+	const upstream: StepSnapshot = { id: "upstream", status: "succeeded", agentRef: "inline:upstream", ...DEFAULT_STEP_TOOLS, needs: [], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined, taskPreview: "Map local evidence", outputFilePath: "/tmp/upstream-final.md", outputChars: 13 };
 	const output: StepOutput = { stepId: "sink", status: "succeeded", text: "sink text", filePath: "/tmp/sink-final.md", chars: 9 };
 	const content = formatDetailsForModel(details("run_status", { run: runSnapshot({ sinkStepIds: ["sink"] }), steps: [upstream, sink], outputs: [output] }));
-	assert.match(content, /Non-sink terminal artifacts/);
-	assert.match(content, /upstream \[succeeded\]: artifact=none chars=0/);
+	assert.match(content, /Terminal step artifacts/);
+	assert.match(content, /upstream \[succeeded\]: artifact="\/tmp\/upstream-final\.md" chars=13/);
+	assert.match(content, /sink \[succeeded\]: artifact="\/tmp\/sink-final\.md" chars=9 cwd="reports" upstream=upstream:succeeded="\/tmp\/upstream-final\.md" task="Synthesize upstream evidence"/);
 	assert.doesNotMatch(content, /\[agent_team output begin: upstream\]/);
+});
+
+test("run_status keeps core status before bounded terminal artifact metadata", () => {
+	const longPath = `/tmp/${"artifact-path-".repeat(80)}final.md`;
+	const upstreamArtifacts = Array.from({ length: 12 }, (_, index) => ({ stepId: `up-${index}`, status: "succeeded" as const, filePath: `${longPath}-${index}`, chars: 10 }));
+	const steps: StepSnapshot[] = Array.from({ length: 16 }, (_, index) => ({ id: `step-${index}`, status: "succeeded", agentRef: `inline:step-${index}`, ...DEFAULT_STEP_TOOLS, needs: [], after: [], startedAt: "now", endedAt: "now", lastActivity: "step finished [succeeded]", errorMessage: undefined, outputFilePath: `${longPath}-${index}`, outputChars: 10, cwd: `/tmp/${"cwd-".repeat(80)}${index}`, taskPreview: `Task ${index} ${"long task ".repeat(60)}`, upstreamArtifacts }));
+	const content = formatDetailsForModelContent(details("run_status", { run: runSnapshot(), steps, diagnostics: [{ code: "important-diagnostic", message: "keep visible", path: "/", severity: "warning" }] }));
+	assert.match(content, /Run: agt_/);
+	assert.match(content, /important-diagnostic/);
+	assert.match(content, /## Steps/);
+	assert.match(content, /## Terminal step artifacts/);
+	assert.match(content, /more terminal step artifact/);
+	assert.equal(content.indexOf("Run: agt_") < content.indexOf("## Terminal step artifacts"), true);
+	assert.equal(content.indexOf("## Terminal step artifacts") < content.indexOf("## Steps"), true);
+	assert.equal(Buffer.byteLength(content, "utf8") <= DEFAULT_MAX_BYTES + 260, true);
+});
+
+
+test("run_status keeps artifact paths before verbose step rows under truncation", () => {
+	const skills = Array.from({ length: 80 }, (_, index) => `skill-${index}`);
+	const steps: StepSnapshot[] = Array.from({ length: 80 }, (_, index) => ({ id: `step-${index}`, status: "succeeded", agentRef: `inline:step-${index}`, model: "openai-codex/gpt-5.5", thinking: "high", effectiveTools: ["read", "grep", "find", "ls", "bash"], extensionTools: [], callerSkills: skills, needs: [], after: [], startedAt: "now", endedAt: "now", lastActivity: `step ${index} finished`, errorMessage: undefined, outputFilePath: `/tmp/terminal-${index}.md`, outputChars: 10 }));
+	const outputs: StepOutput[] = [{ stepId: "sink", status: "succeeded", filePath: "/tmp/sink-final.md", chars: 10 }];
+	const content = formatDetailsForModelContent(details("run_status", { run: runSnapshot(), steps, outputs }));
+	assert.match(content, /Run: agt_/);
+	assert.match(content, /## Sink artifacts\n- sink \[succeeded\]: artifact="\/tmp\/sink-final\.md"/);
+	assert.match(content, /## Terminal step artifacts/);
+	assert.match(content, /## Steps/);
+	assert.equal(content.indexOf("/tmp/sink-final.md") < content.indexOf("## Steps"), true);
 });
 
 test("run_status artifact index exposes all sink artifacts before previews under truncation", () => {
 	const outputs: StepOutput[] = Array.from({ length: 16 }, (_, index) => ({ stepId: `sink-${index}`, status: "succeeded", text: index === 0 ? "x".repeat(DEFAULT_MAX_BYTES * 2) : `text ${index}`, filePath: `/tmp/sink-${index}.md`, chars: index === 0 ? DEFAULT_MAX_BYTES * 2 : 6 }));
 	const content = formatDetailsForModelContent(details("run_status", { outputs }));
 	for (let index = 0; index < outputs.length; index += 1) assert.match(content, new RegExp(`artifact="/tmp/sink-${index}\\.md"`));
-	assert.equal(content.indexOf("## Sink artifacts") < content.indexOf("## Sink finals"), true);
+	assert.equal(content.indexOf("## Sink artifacts") < content.indexOf("## Sink output previews"), true);
 	assert.equal(content.indexOf("artifact=\"/tmp/sink-15.md\"") < content.indexOf("[agent_team output begin: sink-0]"), true);
 });
 

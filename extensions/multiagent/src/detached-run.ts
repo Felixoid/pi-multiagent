@@ -3,6 +3,7 @@ import { createRunArtifactStore, cleanupRunArtifacts, type RunArtifactStore } fr
 import { BackgroundEventStore } from "./background-events.ts";
 import { buildDelegatedTask, writePromptFile } from "./delegated-prompt.ts";
 import { isTerminalRunStatus, isTerminalStepStatus } from "./detached-output.ts";
+import { sendDetachedMessage } from "./detached-message.ts";
 import { selectOutputsForAction } from "./detached-output-selection.ts";
 import { forgetDetachedRun } from "./detached-registry.ts";
 import { createPendingStepState, type StepState } from "./detached-state.ts";
@@ -22,7 +23,7 @@ import { buildRunSnapshot, buildStepSnapshots, countStepStatuses, findSinkStepId
 import { createStepOutputArtifact } from "./step-output-artifact.ts";
 import { stalledStepBlockerMessage } from "./stalled-step-diagnostics.ts";
 import { collectUpstreamOutputs } from "./upstream-outputs.ts";
-import type { AgentDiagnostic, AgentTeamDetails, LibraryOptions, MessageChannel, MessageReceipt, ResolvedGraph, RunStatus, StepStatus, TeamStepSpec } from "./types.ts";
+import type { AgentDiagnostic, AgentTeamDetails, LibraryOptions, MessageChannel, ResolvedGraph, RunStatus, StepArtifactReference, StepStatus, TeamStepSpec } from "./types.ts";
 import { DEFAULT_RESULT_PREVIEW_MAX_BYTES as PREVIEW_BYTES } from "./types.ts";
 
 export class DetachedRun {
@@ -76,29 +77,7 @@ export class DetachedRun {
 	}
 
 	async message(stepId: string, channel: MessageChannel, text: string, clientMessageId: string | undefined) {
-		const hit = this.messageReceipts.lookup(stepId, channel, text, clientMessageId);
-		if (hit === "conflict") return this.messageReceipt(stepId, channel, clientMessageId, false, "Conflicting clientMessageId");
-		if (hit) return hit;
-		let done: (receipt: MessageReceipt) => void = () => {};
-		const pending = new Promise<MessageReceipt>((resolve) => { done = resolve; });
-		const reserved = this.messageReceipts.reserve(stepId, channel, text, clientMessageId, pending);
-		if (reserved === "conflict") return this.messageReceipt(stepId, channel, clientMessageId, false, "Conflicting clientMessageId");
-		if (reserved) return reserved;
-		const settle = (receipt: MessageReceipt) => {
-			this.messageReceipts.settle(stepId, channel, text, clientMessageId, receipt);
-			done(receipt);
-			return receipt;
-		};
-		const state = this.states.get(stepId);
-		if (!state || !state.controller || state.status !== "running" || this.status !== "running") return settle(this.messageReceipt(stepId, channel, clientMessageId, false, "Step not live or messageable."));
-		let receipt: MessageReceipt;
-		try {
-			const ack = await state.controller.message(channel, text);
-			receipt = this.messageReceipt(stepId, channel, clientMessageId, ack.success, ack.error, false);
-		} catch (error) {
-			receipt = this.messageReceipt(stepId, channel, clientMessageId, false, error instanceof Error ? error.message : String(error));
-		}
-		return settle(receipt);
+		return sendDetachedMessage({ runId: this.id, runStatus: this.status, states: this.states, receipts: this.messageReceipts, stepId, channel, text, clientMessageId, appendEvent: (event) => this.appendEvent(event) });
 	}
 
 	cancel(reason?: string, options: { forceKill?: boolean } = {}) {
@@ -128,7 +107,7 @@ export class DetachedRun {
 	details(action: AgentTeamDetails["action"], options: DetachedRunDetailsOptions = {}): AgentTeamDetails {
 		const includeEvents = options.includeEvents === true;
 		const delta = includeEvents ? this.events.delta(options.cursor, options.stepId, options.maxBytes ?? PREVIEW_BYTES) : { events: [], cursor: this.events.currentCursor() };
-		return makeDetails(action, options.ok ?? true, this.diagnostics, this.options, { library: this.library, run: this.snapshot(), cursor: delta.cursor, events: delta.events, steps: this.stepSnapshots(), outputs: selectOutputsForAction(action, options.stepId, options.maxBytes ?? PREVIEW_BYTES, options.preview === true, this.states.values(), this.sinkStepIds()), message: options.message, cleanup: options.cleanup, notice: options.notice }, options.error);
+		return makeDetails(action, options.ok ?? true, [...this.diagnostics, ...(options.diagnostics ?? [])], this.options, { library: this.library, run: this.snapshot(), cursor: delta.cursor, events: delta.events, steps: this.stepSnapshots(), outputs: selectOutputsForAction(action, options.stepId, options.maxBytes ?? PREVIEW_BYTES, options.preview === true, this.states.values(), this.sinkStepIds()), message: options.message, cleanup: options.cleanup, notice: options.notice }, options.error);
 	}
 
 	snapshot() {
@@ -225,13 +204,13 @@ export class DetachedRun {
 		const status = result.status === "timed_out" || result.status === "canceled" || result.status === "failed" ? result.status : "succeeded";
 		state.finalText = result.text;
 		state.assistantFinals = result.assistantFinals;
-		state.output = this.createStepOutput(state, status, result.text, result.assistantFinals);
+		state.output = this.createStepOutput(state, status, result.text, result.assistantFinals, result.errorMessage);
 		if (result.stderr.length > 0) this.appendEvent({ stepId: state.spec.id, type: "diagnostic", label: "stderr", preview: result.stderr, status: "done" });
 		this.finishState(state, status, result.errorMessage);
 	}
 
-	private createStepOutput(state: StepState, status: StepStatus, text: string, assistantFinals: string[] = []) {
-		return createStepOutputArtifact({ runId: this.id, objective: this.graph.objective, artifactStore: this.artifactStore, diagnostics: this.diagnostics, events: this.events, state, status, text, assistantFinals });
+	private createStepOutput(state: StepState, status: StepStatus, text: string, assistantFinals: string[] = [], stopReason?: string) {
+		return createStepOutputArtifact({ runId: this.id, objective: this.graph.objective, artifactStore: this.artifactStore, diagnostics: this.diagnostics, events: this.events, state, status, text, assistantFinals, stopReason, upstreamArtifacts: this.upstreamArtifactReferences(state.spec) });
 	}
 
 	private updateLiveText(state: StepState, text: string) {
@@ -250,7 +229,7 @@ export class DetachedRun {
 		if (!state.output) {
 			const text = errorMessage ?? "";
 			state.finalText = text;
-			state.output = this.createStepOutput(state, status, text);
+			state.output = this.createStepOutput(state, status, text, [], errorMessage ?? status);
 		}
 		state.status = status;
 		state.endedAt = now();
@@ -326,15 +305,17 @@ export class DetachedRun {
 		unrefTimer(this.retentionTimer);
 	}
 
+	private upstreamArtifactReferences(step: TeamStepSpec): StepArtifactReference[] {
+		return [...step.needs, ...step.after].map((stepId) => {
+			const state = this.states.get(stepId);
+			return { stepId, status: state?.status ?? "missing", filePath: state?.output?.filePath, chars: state?.output?.chars };
+		});
+	}
+
 	private sinkStepIds() { return findSinkStepIds(this.graph.steps); }
 	private lastEventSummary() { return summarizeBackgroundEvent(this.events.last()); }
 	private stepSnapshots() { return buildStepSnapshots(this.states.values(), this.stepActivity, this.options.defaults); }
 	private counts() { return countStepStatuses(this.states.values()); }
-
-	private messageReceipt(stepId: string, channel: MessageChannel, clientMessageId: string | undefined, accepted: boolean, undeliveredReason: string | undefined, recordEvent = true) {
-		if (recordEvent) this.appendEvent({ stepId, type: "parent_message", label: channel, preview: accepted ? "accepted/queued" : undeliveredReason, status: accepted ? "done" : "error" });
-		return { runId: this.id, stepId, channel, clientMessageId, accepted, undeliveredReason, reused: false };
-	}
 
 	private appendEvent(input: DetachedRunEventInput) {
 		const event = this.events.append(input);

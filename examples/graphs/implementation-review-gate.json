@@ -1,5 +1,5 @@
 {
-  "objective": "Implement one authorized package change with read-only mapping, critique, serialized work, validation, and final review.",
+  "objective": "Implement one authorized package change with read-only mapping, critique, serialized work, worker-reported validation evidence, and final review. Use implementation-validation-gate.json when independent command-backed validation is required.",
   "library": {
     "sources": [
       "package"
@@ -16,7 +16,7 @@
       "agent": {
         "ref": "package:scout"
       },
-      "task": "Map the implementation scope, canonical owners, affected docs/tests/examples, and validation obligations. Do not edit."
+      "task": "Map the concrete parent-copied implementation scope, canonical owners, affected docs/tests/examples, and validation obligations. If no concrete delegated question, affected surface, stop condition, or expected output fields were copied in, return NEEDS-SCOPE without broad repo search. Do not run commands or edit."
     },
     {
       "id": "implementation-plan",

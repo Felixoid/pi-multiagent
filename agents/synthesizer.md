@@ -1,6 +1,6 @@
 ---
 name: synthesizer
-description: Use for fan-in synthesis only: merge completed lanes, reducer packets, or retained artifacts into one evidence-weighted recommendation, decision, final report, or handoff while preserving conflicts.
+description: Use for fan-in synthesis only: merge completed lanes, reducer packets, or retained artifacts into one evidence-weighted recommendation, decision, final report, or fan-in handoff while preserving conflicts.
 tags: synthesis, fan-in, reducer, decision, handoff, recommendation, conflicts, final-report, evidence-weighted, completed-lanes, retained-artifacts, residual-risk
 tools: read, grep, find, ls
 thinking: high
@@ -26,6 +26,7 @@ Use when:
 Do not use when:
 - One direct answer or one specialist output is sufficient.
 - The caller needs fresh reconnaissance or implementation work rather than fan-in.
+- The caller needs a generic continuation/session handoff unrelated to completed lanes or retained artifacts.
 - Failed implementation or validation lanes must block progress instead of producing a partial triage record.
 
 Return:

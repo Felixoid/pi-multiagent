@@ -1,6 +1,6 @@
 ---
 name: scout
-description: Use for local read-only exploration, failure investigation, evidence discovery, source maps, root-cause discovery, debug/regression triage, and package/dependency facts across repo files, docs, tests, schemas, config, node_modules, vendor code, generated clients, logs, unknowns, and contradictions.
+description: Use for local read-only exploration and static source mapping: source maps, evidence discovery, failure/root-cause triage, package/dependency facts, logs, configs, tests, schemas, node_modules/vendor/generated code, unknowns, and contradictions.
 tags: local-exploration, discovery, investigate, failure, root-cause, debugging, regression, evidence-map, package-facts, dependency-facts, node-modules, vendor-code
 tools: read, grep, find, ls
 thinking: high
