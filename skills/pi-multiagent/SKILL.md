@@ -18,13 +18,13 @@ Actions:
 
 - `catalog`: discover package/user/trusted-project library agents, routing tags, their default built-in tool profiles, and active parent extension-tool provenance.
 - `start`: validate a pure graph or graphFile, register a detached run, launch work asynchronously, return `runId`, and push compact notices by default.
-- `run_status`: read a compact status/artifact snapshot, or add `waitSeconds` to wait for a material parent-visible event or timeout before returning the same snapshot; assistant text previews require `preview:true`, and raw events require `debugEvents:true`.
+- `run_status`: read a compact status/artifact snapshot, effective tools/model lane, or add `waitSeconds` to wait for a material parent-visible event or timeout before returning the same snapshot; assistant text previews require `preview:true`, and raw events require `debugEvents:true`.
 - `step_result`: inspect exactly one step's live or terminal artifact surface; assistant text previews require `preview:true`, and finalized steps include artifact paths.
 - `message`: queue a bounded live parent message to one running step through the `steer` or `follow_up` child RPC channel; acceptance proves queueing, not compliance or completion.
 - `cancel`: request cancellation.
 - `cleanup`: delete retained artifacts after terminal state only when the evidence is no longer needed.
 
-Child internals are not auto-injected; compact pushed notices are untrusted human receipts and omit the full child transcript.
+Child internals are not auto-injected; compact pushed notices are untrusted human receipts and omit the full child transcript. Children inherit the active parent model/thinking defaults only at `start` launch time unless their agent metadata pins a lane; parent model changes after launch do not hot-swap live children.
 
 Action controls are strict. Valid shapes are: `catalog` with `library`; `start` with exactly one `graph` or `graphFile` plus optional `options.maxRunSeconds`, `options.terminalRetentionSeconds`, and `options.notify`; `run_status` with `runId` plus optional `cursor`, wait/debug `stepId`, `waitSeconds`, `maxBytes`, `preview`, and `debugEvents`; `step_result` with `runId`, `stepId`, optional `maxBytes`, and `preview`; `message` with `runId`, `stepId`, `channel`, `text`, and optional `clientMessageId`; `cancel` with `runId` and optional `reason`; `cleanup` with only `runId`. Schema-admissible fatal action-shape failures render as `# agent_team error` with misplaced fields and repair copy; schema-invalid fields may be rejected by Pi before package rendering. `catalog` is narrowed with `library.query`, not `maxBytes`; `preview` is run_status/step_result-only; `waitSeconds` is run_status-only and returns a compact bounded wait/read snapshot.
 
@@ -180,7 +180,7 @@ Detached graphs fail closed unless authority is explicit:
 - `allowShellTools`: permits `bash` for trusted shell probes and commands. Bash can mutate through commands.
 - `allowMutationTools`: permits structured `edit` and `write`.
 - `allowExtensionCode`: permits explicit callable `extensionTools` grants; normal Pi extension discovery for model providers follows the child cwd and agent dir independently of this flag.
-- `allowProjectCode`: permits `project:` agents, project library sources, project/local explicit `extensionTools` grants, and project/temporary caller skill sources; it does not disable normal Pi extension discovery in child processes.
+- `allowProjectCode`: permits `project:` agents, project library sources, project/local explicit `extensionTools` grants, and project/temporary caller skill sources when subagent skills are enabled; it does not disable normal Pi extension discovery in child processes.
 
 Catalog agent descriptions and tags are model-facing routing contracts; prefer the role whose description or tags match the delegated job, then inspect its runtime `defaultTools`. This is the canonical selection rule; the cookbook links back to it and adds choreography, not a second role taxonomy. Tags are routing metadata only; they do not grant tools, skills, source trust, shell, mutation, or release authority. Catalog agent tool profiles are defaults, not mandatory boilerplate or authorization. A library step with omitted `tools` inherits the catalog profile capped by graph authority. If authority partially strips inherited non-read defaults, start returns a `catalog-default-tools-capped` warning; if authority denies the mandatory read/discovery suite, start fails with `catalog-default-tools-denied` or `filesystem-read-authority-required`. Explicit `tools` replace the whole catalog profile before mandatory read/discovery is added, and missing authority is a planning error.
 
@@ -188,7 +188,7 @@ Any read/discovery primitive in `tools` expands to the full read/discovery suite
 
 Child Pi launches use normal Pi extension discovery for model/provider availability. Ambient trusted extensions may run startup code, provider hooks, tool hooks, and `resources_discover` as normal Pi behavior. Graph authority does not disable or gate this normal Pi extension discovery. Built-in child tools are launched by child Pi with `--tools`; they do not depend on which built-in tools happen to be active in the parent UI. `--tools` is a callable tool-name allowlist, not an extension-code sandbox, and extension tools can shadow tool names under normal Pi semantics. Child RPC is unattended: fire-and-forget extension UI updates such as status, notifications, widgets, titles, and editor text are recorded and ignored, while blocking or unknown UI requests fail closed. Parent-active inventory still matters for `extensionTools`, because those grants make explicit callable extension tools available by source provenance.
 
-A child receives the graph objective, its own step prompt/task, explicit upstream dependency evidence, and selected tools, explicit `extensionTools`, and selected skills. It does not receive the parent transcript, parent session, context files, prompt templates, themes, project `SYSTEM.md`, or unselected caller skills. Direct Pi discovery of context files, prompt templates, themes, and skills is disabled by launch flags, but loaded extensions may contribute resources through normal Pi extension APIs.
+A child receives the graph objective, its own step prompt/task, explicit upstream dependency evidence, selected tools, explicit `extensionTools`, and product-configured caller skills. It does not receive the parent transcript, parent session, context files, prompt templates, themes, project `SYSTEM.md`, or ambient skill discovery. Direct Pi discovery of context files, prompt templates, themes, and skills is disabled by launch flags, but loaded extensions may contribute resources through normal Pi extension APIs. The effective child model/thinking lane is captured at `start` from agent metadata or the then-active parent defaults and is reported in run snapshots.
 
 A step may set `cwd` to an existing directory inside the invocation cwd. `cwd` narrows launch working context: symlinked, missing, non-directory, or path-escaping values are denied, and the runtime records cwd identity at planning and revalidates it immediately before child launch. It is not path confinement. `agent_team` does not add a read sandbox beyond Pi tools, the OS, and runtime behavior; put path limits in `task`, `system`, `cwd`, and `mutationScope` as instruction/launch-context controls. Bash-enabled children are refused in cwd trees containing `.pi/settings.json`.
 
@@ -221,18 +221,9 @@ Explicit extension grants load trusted code into the child with additive `--exte
 
 ## Caller skills
 
-Detached runs do not inherit caller skills by default. A step may request explicit include-only skill names through `agent.skills` and must also have the read/discovery suite:
+Subagent skill propagation is a product configuration knob, not a graph field. Use the Pi launch flag `--agent-team-subagent-skills enabled|disabled`; the default is `enabled`. Enabled subagents receive all caller-visible Pi skills that are safe under the existing project-code policy, and the generated child prompt reminds them to use relevant available skills when that improves assigned-task quality. Disabled subagents receive none. `steps[].agent.skills` is rejected.
 
-```json
-{
-  "agent": {
-    "system": "Use the selected skill guidance. Omitted tools still resolve to mandatory read/discovery.",
-    "skills": ["pi-multiagent"]
-  }
-}
-```
-
-Skills never grant tools. Project-scoped, temporary-scoped, or workspace-local caller skill files require `graph.authority.allowProjectCode:true`.
+Skills never grant tools, graph authority, mutation permission, broader task scope, or permission to ignore the delegated task. Enabled mode is all-or-nothing: unreadable visible skill sources, inactive parent `read`, or project/temporary/workspace-local skill files without `graph.authority.allowProjectCode:true` fail planning with a diagnostic. Use `--agent-team-subagent-skills disabled` when no caller skills should cross into children.
 
 ## Graph files
 
@@ -245,7 +236,7 @@ Use `graphFile` only with `start` and only for a pure graph JSON file copied int
 }
 ```
 
-The file must be a regular relative `.json` file inside cwd, max 256 KiB. Symlinks, absolute paths, control fields, action wrappers, and nested graphFile are denied. A graph file is still an executable delegation spec: its `authority`, tools, extension grants, caller skills, and prompts are honored after validation, so load graph files only from trusted workspace content. Package examples are copyable documentation, not a runtime template API.
+The file must be a regular relative `.json` file inside cwd, max 256 KiB. Symlinks, absolute paths, control fields, action wrappers, and nested graphFile are denied. A graph file is still an executable delegation spec: its `authority`, tools, extension grants, product-configured caller skills, and prompts are honored after validation, so load graph files only from trusted workspace content. Package examples are copyable documentation, not a runtime template API.
 
 Load [Graph cookbook](references/graph-cookbook.md) when a reusable choreography helps.
 
@@ -255,7 +246,7 @@ Load [Graph cookbook](references/graph-cookbook.md) when a reusable choreography
 
 `step_result` is the step inspection side: exactly one `stepId`, status/artifact metadata by default, or bounded assistant text when `preview:true` is set. With `preview:true`, a running step returns normal emitted assistant text so far and a terminal step returns final preview plus artifact path. Use it for non-sink upstream evidence without bloating the parent context. `maxBytes` bounds the returned preview; full terminal text remains in the artifact path.
 
-Every finalized step writes a best-effort tmp final artifact with metadata, status, agent ref/source, timestamps, and every non-empty assistant final in chronological order. A single final stays as raw final text; multiple finals render as ordered `Assistant final N` sections so a later child turn cannot overwrite earlier final evidence. The canonical artifact reference is the structured `StepOutput.filePath` populated when the step final is recorded; model-facing run_status and step_result render artifact indexes before optional previews or long run prose. A child that reaches terminal RPC state without non-empty assistant final text is failed rather than accepted as a succeeded empty artifact. If artifact writing fails, terminalization continues with bounded text and a diagnostic but no artifact path. Pushed notices omit child-authored final text to keep the parent context compact and show human receipts with artifact names; use `run_status`, `step_result`, `preview:true`, or artifact paths for sink content. Retained artifacts can be the durable evidence needed after compaction, connection drops, same-session continuation, or graph chaining. Cleanup deletes manifest-owned artifacts for terminal runs, so use it only after evidence is preserved or intentionally discarded.
+Every finalized step writes a best-effort tmp final artifact with metadata, status, agent ref/source, timestamps, and every non-empty assistant final in chronological order. A single final stays as raw final text; multiple finals render as ordered `Assistant final N` sections so a later child turn cannot overwrite earlier final evidence. The canonical artifact reference is the structured `StepOutput.filePath` populated when the step final is recorded; model-facing run_status and step_result render artifact indexes before optional previews or long run prose. A child that reaches terminal RPC state without non-empty assistant final text is failed rather than accepted as a succeeded empty artifact. A child context overflow is a recovery boundary when Pi compacts/continues: stale pre-overflow finals are discarded, success requires a later valid assistant final, and unrecovered overflow fails with a diagnostic instead of unblocking `needs` dependents. If artifact writing fails, terminalization continues with bounded text and a diagnostic but no artifact path. Pushed notices omit child-authored final text to keep the parent context compact and show human receipts with artifact names; use `run_status`, `step_result`, `preview:true`, or artifact paths for sink content. Retained artifacts can be the durable evidence needed after compaction, connection drops, same-session continuation, or graph chaining. Cleanup deletes manifest-owned artifacts for terminal runs, so use it only after evidence is preserved or intentionally discarded.
 
 Interactive Pi shows one compact pinned live-runs card only while graph work is live. It updates in place and is cleared at terminal state; completed runs should appear only as normal compact tool rows and pushed notice receipts.
 
@@ -293,7 +284,7 @@ Inspect parent-owned fields before child-authored text:
 
 - action error code and diagnostics;
 - run state and terminal flag;
-- step status, `lastActivity`, and errorMessage; an empty terminal assistant final is failed evidence with `assistant-final-empty`, not a successful lane;
+- step status, launch-time model/thinking lane, `lastActivity`, and errorMessage; an empty terminal assistant final is failed evidence with `assistant-final-empty`, not a successful lane;
 - compact `run_status` first, including step `lastActivity`; add `preview:true` only when bounded assistant text belongs in context; add `waitSeconds` for material-event bounded wait/read instead of shell polling; use `debugEvents:true` only for package debugging when events around RPC response, assistant_final, agent_end, UI denial, cancel, timeout, cleanup, artifact failure, or forced process-exit closeout are needed;
 - targeted `step_result` for exactly one specialist, especially non-sink upstream evidence; set `preview:true` for bounded assistant text;
 - retained artifact paths before cleanup, plus cleanup receipt only after intentional deletion;

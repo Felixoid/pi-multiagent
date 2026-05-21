@@ -4,13 +4,15 @@ import { isTerminalRunStatus } from "./detached-output.ts";
 import type { StepState } from "./detached-state.ts";
 import type { StepActivityTracker } from "./step-activity.ts";
 import { childToolNames } from "./tool-policy.ts";
-import type { RunSnapshot, RunStatus, StepSnapshot, StepStatus, TeamStepSpec } from "./types.ts";
+import type { AgentInvocationDefaults, RunSnapshot, RunStatus, StepSnapshot, StepStatus, TeamStepSpec } from "./types.ts";
 
-export function buildStepSnapshots(states: Iterable<StepState>, activity: StepActivityTracker): StepSnapshot[] {
+export function buildStepSnapshots(states: Iterable<StepState>, activity: StepActivityTracker, defaults: AgentInvocationDefaults = { model: undefined, thinking: undefined }): StepSnapshot[] {
 	return [...states].map((state) => ({
 		id: state.spec.id,
 		status: state.status,
 		agentRef: state.spec.agent.ref,
+		model: state.spec.agent.model ?? defaults.model,
+		thinking: state.spec.agent.thinking ?? defaults.thinking,
 		effectiveTools: childToolNames(state.spec.agent),
 		extensionTools: state.spec.agent.extensionTools.map((tool) => tool.name),
 		callerSkills: state.spec.agent.callerSkills.map((skill) => skill.name),

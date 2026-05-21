@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BackgroundEventStore } from "../extensions/multiagent/src/background-events.ts";
 import { RunNotifier, terminalStepNoticeReasons } from "../extensions/multiagent/src/run-notifier.ts";
-import type { AgentDiagnostic, AgentTeamDetails, StepSnapshot } from "../extensions/multiagent/src/types.ts";
+import type { AgentTeamDetails, StepSnapshot } from "../extensions/multiagent/src/types.ts";
 
 function runtimeOptions(onNotice: (details: AgentTeamDetails) => void) {
 	return {
@@ -25,15 +24,13 @@ function runtimeOptions(onNotice: (details: AgentTeamDetails) => void) {
 }
 
 test("RunNotifier coalesces milestones inside minInterval and preserves terminal notice", async () => {
-	const diagnostics: AgentDiagnostic[] = [];
-	const events = new BackgroundEventStore();
+	const diagnostics: string[] = [];
 	const notices: AgentTeamDetails[] = [];
 	const notifier = new RunNotifier({
 		runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_",
 		notify: { mode: "milestones", maxNotices: 3, minIntervalSeconds: 0.03 },
-		diagnostics,
-		events,
 		runtimeOptions: runtimeOptions((details) => notices.push(details)),
+		recordDiagnostic: (code, _label, message) => diagnostics.push(`${code}:${message}`),
 		isTerminal: () => false,
 		details: (notice) => ({ kind: "agent_team", action: "run_status", ok: true, diagnostics: [], error: undefined, library: undefined, catalog: [], extensionTools: [], run: undefined, cursor: undefined, events: [], steps: [], outputs: [], message: undefined, cleanup: undefined, notice }),
 	});
@@ -49,6 +46,21 @@ test("RunNotifier coalesces milestones inside minInterval and preserves terminal
 	assert.equal(notices[1].notice?.terminal, false);
 	assert.equal(notices[2].notice?.terminal, true);
 	assert.deepEqual(notices[2].notice?.reasons, ["terminal:mixed"]);
+});
+
+test("RunNotifier records notice callback failures without throwing", () => {
+	const diagnostics: string[] = [];
+	const notifier = new RunNotifier({
+		runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_",
+		notify: { mode: "final", maxNotices: 0, minIntervalSeconds: 0 },
+		runtimeOptions: runtimeOptions(() => { throw new Error("notice failed"); }),
+		recordDiagnostic: (code, label, message) => diagnostics.push(`${code}:${label}:${message}`),
+		isTerminal: () => false,
+		details: (notice) => ({ kind: "agent_team", action: "run_status", ok: true, diagnostics: [], error: undefined, library: undefined, catalog: [], extensionTools: [], run: undefined, cursor: undefined, events: [], steps: [], outputs: [], message: undefined, cleanup: undefined, notice }),
+	});
+	assert.doesNotThrow(() => notifier.sendTerminal("succeeded"));
+	assert.equal(diagnostics.length, 1);
+	assert.match(diagnostics[0] ?? "", /run-notice-callback-failed:agent_team-notice:Could not send agent_team notice: notice failed/);
 });
 
 test("terminalStepNoticeReasons names failed blocked and timed out steps only", () => {
@@ -67,6 +79,8 @@ function step(id: string, status: StepSnapshot["status"]): StepSnapshot {
 		id,
 		status,
 		agentRef: "inline",
+		model: undefined,
+		thinking: undefined,
 		effectiveTools: ["read", "grep", "find", "ls"],
 		extensionTools: [],
 		callerSkills: [],

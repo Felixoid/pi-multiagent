@@ -99,6 +99,9 @@ type HarnessMode =
 	"ignore-kill" |
 	"message-deny" |
 	"message-timeout" |
+	"context-overflow-no-recovery" |
+	"context-overflow-recover" |
+	"context-overflow-stale-final-recover" |
 	"tool-use-then-final" |
 	"ui-fire-and-forget" |
 	"ui-request";
@@ -169,6 +172,21 @@ function handleCommand(child: FakeChild, line: string, mode: HarnessMode, childI
 		else if (mode === "exit-no-close-after-terminal") setImmediate(() => sendAssistantEvents(child, "ok"));
 		else if (mode === "exit-no-close-before-terminal") setImmediate(() => child.exitOnly(null, "SIGTERM"));
 		else if (mode === "agent-end-nested-length") setImmediate(() => sendNestedStopReasonFinal(child, "ok", "length", "Length limit reached."));
+		else if (mode === "context-overflow-no-recovery") setImmediate(() => {
+			sendContextOverflow(child);
+			child.close(0);
+		});
+		else if (mode === "context-overflow-recover") setImmediate(() => {
+			sendContextOverflow(child);
+			sendCompactionCycle(child);
+			sendAssistantFinal(child, "recovered ok");
+		});
+		else if (mode === "context-overflow-stale-final-recover") setImmediate(() => {
+			sendAssistantMessageEnd(child, "stale before overflow");
+			sendContextOverflow(child);
+			sendCompactionCycle(child);
+			sendAssistantFinal(child, "fresh after recovery");
+		});
 		else if (mode === "tool-use-then-final") setImmediate(() => {
 			sendAssistantMessageEnd(child, "tool preface", "toolUse");
 			sendAssistantFinal(child, "final ok");
@@ -214,10 +232,38 @@ function sendAssistantMessageEnd(child: FakeChild, text: string, stopReason?: st
 	child.stdout.write(`${JSON.stringify({ type: "message_end", message: assistantMessage(text, stopReason, errorMessage) })}\n`);
 }
 
+function sendMetadataOnlyAssistantEnd(child: FakeChild, stopReason: string, errorMessage: string): void {
+	child.stdout.write(`${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [], stopReason, errorMessage } })}\n`);
+}
+
+function sendNestedContextOverflowAgentEnd(child: FakeChild): void {
+	child.stdout.write(`${JSON.stringify({ type: "agent_end", stopReason: "stop", messages: [{ role: "assistant", content: [], stopReason: "error", errorMessage: CONTEXT_OVERFLOW_ERROR }] })}\n`);
+}
+
+function sendToolExecutionEvent(child: FakeChild, type: "tool_execution_start" | "tool_execution_update" | "tool_execution_end", toolName = "read"): void {
+	child.stdout.write(`${JSON.stringify({ type, toolName })}\n`);
+}
+
+function sendExtensionUiRequest(child: FakeChild, method: string): void {
+	child.stdout.write(`${JSON.stringify({ type: "extension_ui_request", id: `ui-${method}`, method })}\n`);
+}
+
 function sendNestedStopReasonFinal(child: FakeChild, text: string, stopReason: string, errorMessage: string): void {
 	sendAssistantMessageEnd(child, text, stopReason, errorMessage);
 	child.stdout.write(`${JSON.stringify({ type: "agent_end", messages: [assistantMessage(text, stopReason, errorMessage)] })}\n`);
 	child.close(0);
+}
+
+const CONTEXT_OVERFLOW_ERROR = "context_length_exceeded: input exceeds the context window";
+
+function sendContextOverflow(child: FakeChild): void {
+	sendAssistantMessageEnd(child, "", "error", CONTEXT_OVERFLOW_ERROR);
+	sendAgentEnd(child, "error", CONTEXT_OVERFLOW_ERROR);
+}
+
+function sendCompactionCycle(child: FakeChild): void {
+	child.stdout.write(`${JSON.stringify({ type: "compaction_start", reason: "overflow" })}\n`);
+	child.stdout.write(`${JSON.stringify({ type: "compaction_end", reason: "overflow", aborted: false, willRetry: true })}\n`);
 }
 
 function assistantMessage(text: string, stopReason: string | undefined, errorMessage?: string): { role: string; content: { type: string; text: string }[]; stopReason?: string; errorMessage?: string } {
@@ -232,6 +278,10 @@ function sendAgentEnd(child: FakeChild, stopReason = "stop", errorMessage?: stri
 	if (stopReason) payload.stopReason = stopReason;
 	if (errorMessage) payload.errorMessage = errorMessage;
 	child.stdout.write(`${JSON.stringify(payload)}\n`);
+}
+
+function sendAgentEndErrorMetadata(child: FakeChild, errorMessage: string, messages: unknown[] = []): void {
+	child.stdout.write(`${JSON.stringify({ type: "agent_end", error: { message: errorMessage }, messages })}\n`);
 }
 
 function sendAssistantFinal(child: FakeChild, text: string): void {
@@ -319,6 +369,56 @@ test("start returns a registered runId and run_status exposes final output", asy
 	assert.equal(debug.details.run?.lastEvent, "terminal: succeeded");
 	assert.equal(harness.messages[0]?.type, "prompt");
 	assert.equal(harness.messages[0]?.message.includes("Objective:"), true);
+});
+
+test("run snapshots expose the launch-time child model lane", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-model-lane-${Date.now()}`), { recursive: true });
+	let spawnedArgs: string[] = [];
+	const harness = rpcHarness("auto", (args) => { spawnedArgs = args; });
+	const options = makeOptions(root, harness.spawn, { defaults: { model: "parent/model", thinking: "medium" } });
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	assert.equal(started.details.steps[0]?.model, "parent/model");
+	assert.equal(started.details.steps[0]?.thinking, "medium");
+	assert.match(started.content[0].text, /model=parent\/model/);
+	assert.match(started.content[0].text, /thinking=medium/);
+	assert.equal(spawnedArgs[spawnedArgs.indexOf("--model") + 1], "parent/model");
+	assert.equal(spawnedArgs[spawnedArgs.indexOf("--thinking") + 1], "medium");
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "succeeded");
+	assert.equal(terminal.details.steps[0]?.model, "parent/model");
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("product-configured subagent skills affect launch args and child prompt", async () => {
+	const parent = await mkdir(join(tmpdir(), `pi-multiagent-skill-launch-${Date.now()}`), { recursive: true });
+	const root = await mkdir(join(parent, "workspace"), { recursive: true });
+	const skillPath = join(parent, "visible-skill.md");
+	await writeFile(skillPath, "# Visible skill\n");
+	const parentSkills = { apiAvailable: true, readActive: true, errorMessage: undefined, skills: [{ name: "visible-skill", description: "Visible", sourceInfo: { path: skillPath, source: "user:visible-skill", scope: "user", origin: "top-level", baseDir: parent } }] };
+	let enabledArgs: string[] = [];
+	const enabledHarness = rpcHarness("auto", (args) => { enabledArgs = args; });
+	const enabledOptions = makeOptions(root, enabledHarness.spawn, { parentSkills });
+	const enabled = await runAgentTeam(graph(), enabledOptions);
+	const enabledRunId = enabled.details.run?.runId ?? "";
+	assert.equal(enabled.details.steps[0]?.callerSkills.join(","), "visible-skill");
+	assert.equal(enabledArgs[enabledArgs.indexOf("--skill") + 1]?.endsWith("visible-skill.md"), true);
+	const enabledPrompt = await readFile(enabledArgs[enabledArgs.indexOf("--append-system-prompt") + 1], "utf8");
+	assert.match(enabledPrompt, /Use relevant available skills/);
+	await waitTerminal(root, enabledRunId, enabledOptions);
+	await runAgentTeam({ action: "cleanup", runId: enabledRunId }, enabledOptions);
+
+	let disabledArgs: string[] = [];
+	const disabledHarness = rpcHarness("auto", (args) => { disabledArgs = args; });
+	const disabledOptions = makeOptions(root, disabledHarness.spawn, { parentSkills, subagentSkills: { mode: "disabled" } });
+	const disabled = await runAgentTeam(graph(), disabledOptions);
+	const disabledRunId = disabled.details.run?.runId ?? "";
+	assert.deepEqual(disabled.details.steps[0]?.callerSkills, []);
+	assert.equal(disabledArgs.includes("--skill"), false);
+	const disabledPrompt = await readFile(disabledArgs[disabledArgs.indexOf("--append-system-prompt") + 1], "utf8");
+	assert.doesNotMatch(disabledPrompt, /Use relevant available skills/);
+	await waitTerminal(root, disabledRunId, disabledOptions);
+	await runAgentTeam({ action: "cleanup", runId: disabledRunId }, disabledOptions);
 });
 
 test("start rejects inherited catalog defaults capped to no tools", async () => {
@@ -493,6 +593,166 @@ for (const fixture of [
 	});
 }
 
+test("context overflow can recover to a later valid assistant final", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-context-overflow-recover-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("context-overflow-recover");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "succeeded");
+	assert.equal(terminal.details.steps[0]?.status, "succeeded");
+	assert.equal(terminal.details.outputs[0]?.text, "recovered ok");
+	const debug = await runAgentTeam({ action: "run_status", runId, cursor: "0", debugEvents: true }, options);
+	assert.equal(debug.details.events.some((event) => event.label === "context_overflow_recovering"), true);
+	assert.equal(debug.details.events.some((event) => event.label === "assistant-error"), false);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("context overflow recovery discards stale pre-overflow assistant finals", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-context-overflow-stale-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("context-overflow-stale-final-recover");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "succeeded");
+	assert.equal(terminal.details.outputs[0]?.text, "fresh after recovery");
+	assert.doesNotMatch(terminal.details.outputs[0]?.text ?? "", /stale/);
+	const artifact = await readFile(terminal.details.outputs[0]?.filePath ?? "", "utf8");
+	assert.match(artifact, /fresh after recovery/);
+	assert.doesNotMatch(artifact, /stale before overflow/);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("unrecovered context overflow fails and blocks needs dependents", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-context-overflow-unrecovered-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("context-overflow-no-recovery");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph([
+		{ id: "overflow", agent: { system: "Overflow." }, task: "Overflow." },
+		{ id: "dependent", agent: { system: "Must not run." }, task: "Must not run.", needs: ["overflow"] },
+	]), options);
+	const runId = started.details.run?.runId ?? "";
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "failed");
+	assert.equal(terminal.details.steps.find((step) => step.id === "overflow")?.status, "failed");
+	assert.equal(terminal.details.steps.find((step) => step.id === "dependent")?.status, "blocked");
+	assert.match(terminal.details.steps.find((step) => step.id === "overflow")?.errorMessage ?? "", /context-overflow-unrecovered/);
+	assert.equal(harness.children.length, 1);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("metadata-only context overflow cannot succeed with stale assistant final", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-context-overflow-metadata-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("hold");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	await waitForChildren(harness, 1);
+	sendAssistantMessageEnd(harness.children[0], "stale before metadata overflow");
+	sendMetadataOnlyAssistantEnd(harness.children[0], "error", CONTEXT_OVERFLOW_ERROR);
+	sendAgentEnd(harness.children[0], "stop");
+	harness.children[0].close(0);
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "failed");
+	assert.match(terminal.details.steps[0]?.errorMessage ?? "", /context-overflow-unrecovered/);
+	assert.doesNotMatch(terminal.details.outputs[0]?.text ?? "", /stale before metadata overflow/);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("agent_end nested context overflow cannot be masked by root stop", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-context-overflow-nested-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("hold");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	await waitForChildren(harness, 1);
+	sendAssistantMessageEnd(harness.children[0], "stale before nested overflow");
+	sendNestedContextOverflowAgentEnd(harness.children[0]);
+	harness.children[0].close(0);
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "failed");
+	assert.match(terminal.details.steps[0]?.errorMessage ?? "", /context-overflow-unrecovered/);
+	assert.doesNotMatch(terminal.details.outputs[0]?.text ?? "", /stale before nested overflow/);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("agent_end context overflow error metadata without stopReason cannot succeed with stale assistant final", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-context-overflow-agent-error-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("hold");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	await waitForChildren(harness, 1);
+	sendAssistantMessageEnd(harness.children[0], "stale before agent_end overflow");
+	sendAgentEndErrorMetadata(harness.children[0], CONTEXT_OVERFLOW_ERROR);
+	harness.children[0].close(0);
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "failed");
+	assert.match(terminal.details.steps[0]?.errorMessage ?? "", /context-overflow-unrecovered/);
+	assert.doesNotMatch(terminal.details.outputs[0]?.text ?? "", /stale before agent_end overflow/);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("agent_end context overflow error metadata without stopReason can recover to a fresh final", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-context-overflow-agent-recover-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("hold");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	await waitForChildren(harness, 1);
+	sendAssistantMessageEnd(harness.children[0], "stale before agent_end recovery");
+	sendAgentEndErrorMetadata(harness.children[0], CONTEXT_OVERFLOW_ERROR);
+	sendCompactionCycle(harness.children[0]);
+	sendAssistantFinal(harness.children[0], "fresh after agent_end recovery");
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "succeeded");
+	assert.equal(terminal.details.outputs[0]?.text, "fresh after agent_end recovery");
+	assert.doesNotMatch(terminal.details.outputs[0]?.text ?? "", /stale/);
+	const artifact = await readFile(terminal.details.outputs[0]?.filePath ?? "", "utf8");
+	assert.match(artifact, /fresh after agent_end recovery/);
+	assert.doesNotMatch(artifact, /stale before agent_end recovery/);
+	const debug = await runAgentTeam({ action: "run_status", runId, cursor: "0", debugEvents: true }, options);
+	assert.equal(debug.details.events.some((event) => event.label === "context_overflow_recovering"), true);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("agent_end non-overflow error metadata without stopReason fails the step", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-agent-error-metadata-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("hold");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	await waitForChildren(harness, 1);
+	sendAssistantMessageEnd(harness.children[0], "ok before agent error");
+	sendAgentEndErrorMetadata(harness.children[0], "Runtime failure.");
+	harness.children[0].close(0);
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "failed");
+	assert.match(terminal.details.steps[0]?.errorMessage ?? "", /Runtime failure/);
+	assert.equal(terminal.details.outputs[0]?.status, "failed");
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("agent_end non-overflow error metadata ignores context-overflow text in prior messages", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-agent-error-metadata-false-positive-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("hold");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	await waitForChildren(harness, 1);
+	sendAgentEndErrorMetadata(harness.children[0], "Internal server error", [assistantMessage("prompt is too long but not error metadata", undefined)]);
+	harness.children[0].close(0);
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "failed");
+	assert.match(terminal.details.steps[0]?.errorMessage ?? "", /Internal server error/);
+	assert.doesNotMatch(terminal.details.steps[0]?.errorMessage ?? "", /context-overflow-unrecovered/);
+	const debug = await runAgentTeam({ action: "run_status", runId, cursor: "0", debugEvents: true }, options);
+	assert.equal(debug.details.events.some((event) => event.label === "context_overflow_recovering"), false);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
 test("assistant toolUse message text is not treated as final success output", async () => {
 	const root = await mkdir(join(tmpdir(), `pi-multiagent-tooluse-final-${Date.now()}`), { recursive: true });
 	const harness = rpcHarness("tool-use-then-final");
@@ -628,12 +888,80 @@ test("running step snapshots expose compact live phase without requiring wait po
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		run_status = await runAgentTeam({ action: "run_status", runId }, options);
 	}
-	assert.match(run_status.details.steps[0]?.lastActivity ?? "", /child spawned|child prompt sent|child accepted prompt|model turn active \(no output yet\)/);
+	assert.match(run_status.details.steps[0]?.lastActivity ?? "", /child spawned|child prompt sent|prompt accepted; waiting for child output|model turn active \(no output yet\)/);
 	assert.doesNotMatch(run_status.details.steps[0]?.lastActivity ?? "", /assistant turn started/);
 	assert.match(run_status.content[0].text, /lastActivity=/);
 	harness.release("done");
 	const terminal = await waitTerminal(root, runId, options);
 	assert.match(terminal.details.steps[0]?.lastActivity ?? "", /step finished/);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("step activity refreshes live UI on tool events without assistant text", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-tool-liveness-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("hold");
+	const updates: AgentTeamDetails[] = [];
+	const options = makeOptions(root, harness.spawn, { onRunUpdate: (details) => { updates.push(details); return undefined; } });
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	await waitForChildren(harness, 1);
+	const before = updates.length;
+	sendToolExecutionEvent(harness.children[0], "tool_execution_start", "read");
+	let refreshed: AgentTeamDetails | undefined;
+	for (let attempt = 0; attempt < 20; attempt += 1) {
+		refreshed = updates.slice(before).find((details) => /tool read running/.test(details.steps[0]?.lastActivity ?? ""));
+		if (refreshed) break;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+	assert.match(refreshed?.steps[0]?.lastActivity ?? "", /tool read running/);
+	harness.release("done");
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "succeeded");
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("non-text assistant message updates become compact activity", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-message-update-liveness-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("hold");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	await waitForChildren(harness, 1);
+	sendAssistantMessageEvent(harness.children[0], { type: "tool_use" });
+	let status: AgentToolResult<AgentTeamDetails> | undefined;
+	for (let attempt = 0; attempt < 20; attempt += 1) {
+		status = await runAgentTeam({ action: "run_status", runId, debugEvents: true }, options);
+		if (/assistant tool activity/.test(status.details.steps[0]?.lastActivity ?? "")) break;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+	assert.match(status?.details.steps[0]?.lastActivity ?? "", /assistant tool activity/);
+	assert.equal(status?.details.events.some((event) => event.label === "tool_use"), true);
+	harness.release("done");
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "succeeded");
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("fire-and-forget UI requests show ignored liveness instead of denied", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-ui-liveness-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("hold");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	await waitForChildren(harness, 1);
+	sendExtensionUiRequest(harness.children[0], "setStatus");
+	let status: AgentToolResult<AgentTeamDetails> | undefined;
+	for (let attempt = 0; attempt < 20; attempt += 1) {
+		status = await runAgentTeam({ action: "run_status", runId, debugEvents: true }, options);
+		if (/UI request ignored: setStatus/.test(status.details.steps[0]?.lastActivity ?? "")) break;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+	assert.match(status?.details.steps[0]?.lastActivity ?? "", /UI request ignored: setStatus/);
+	assert.doesNotMatch(status?.details.steps[0]?.lastActivity ?? "", /denied/);
+	assert.equal(status?.details.events.some((event) => event.type === "ui" && event.label === "setStatus" && event.status === "done"), true);
+	harness.release("done");
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "succeeded");
 	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
@@ -1549,9 +1877,6 @@ test("start fails before launching children when preflight or authority fails", 
 	assert.match(misplacedExtensionTool.content[0].text, /catalog-copied/);
 	const invalidText = await runAgentTeam({ action: "message", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", channel: "steer", text: 42 }, options);
 	assert.equal(invalidText.details.diagnostics.some((item) => item.code === "input-schema-invalid"), true);
-	const staleKind = await runAgentTeam({ action: "message", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", kind: "steer", text: "x" }, options);
-	assert.equal(staleKind.details.diagnostics.some((item) => item.code === "input-schema-invalid"), true);
-	assert.equal(staleKind.details.diagnostics.some((item) => item.code === "message-control-fields-denied"), true);
 	const denied = await runAgentTeam(graph([{ id: "one", agent: { system: "x", tools: ["bash"] }, task: "x" }]), options);
 	assert.equal(denied.details.error?.code, "start-planning-failed");
 	assert.equal(harness.children.length, 0);

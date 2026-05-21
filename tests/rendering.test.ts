@@ -280,7 +280,7 @@ function run(fields: Partial<RunSnapshot>): RunSnapshot {
 }
 
 function step(fields: Partial<StepSnapshot> & { id: string; agentRef: string; status: StepStatus }): StepSnapshot {
-	return { effectiveTools: ["read", "grep", "find", "ls"], extensionTools: [], callerSkills: [], needs: [], after: [], startedAt: undefined, endedAt: undefined, lastActivity: undefined, errorMessage: undefined, outputFilePath: undefined, outputChars: undefined, ...fields };
+	return { model: undefined, thinking: undefined, effectiveTools: ["read", "grep", "find", "ls"], extensionTools: [], callerSkills: [], needs: [], after: [], startedAt: undefined, endedAt: undefined, lastActivity: undefined, errorMessage: undefined, outputFilePath: undefined, outputChars: undefined, ...fields };
 }
 
 function counts(fields: Partial<Record<StepStatus, number>>): Record<StepStatus, number> {

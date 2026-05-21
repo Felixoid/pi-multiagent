@@ -5,6 +5,7 @@ import type { SpawnProcess } from "./child-launch.ts";
 import { formatDetailsForModelContent } from "./result-format.ts";
 import { catalogParentExtensionTools } from "./tool-policy.ts";
 import type { AgentDiagnostic, AgentInvocationDefaults, AgentTeamDetails, LibraryOptions, ParentSkillInventory, ParentToolInventory } from "./types.ts";
+import type { SubagentSkillConfig } from "./subagent-skills-config.ts";
 
 export interface AgentTeamRuntimeOptions {
 	cwd: string;
@@ -15,6 +16,7 @@ export interface AgentTeamRuntimeOptions {
 	defaults: AgentInvocationDefaults;
 	parentTools?: ParentToolInventory;
 	parentSkills?: ParentSkillInventory;
+	subagentSkills?: SubagentSkillConfig;
 	signal: AbortSignal | undefined;
 	/** Tool-call updates are action-scoped; detached background runs must not retain or call this after start returns. */
 	onUpdate: AgentToolUpdateCallback<AgentTeamDetails> | undefined;

@@ -33,7 +33,7 @@ test("buildPiArgs keeps normal extension discovery and loads explicit extension 
 	assert.equal(args[args.indexOf("--tools") + 1], "read,grep,find,ls,exa_search");
 });
 
-test("buildPiArgs launches only explicitly selected caller skills", () => {
+test("buildPiArgs loads resolved caller skill files once", () => {
 	const agent = { ...resolvedAgent(), callerSkills: [
 		{ name: "one", description: "One", source: { path: "/tmp/one/SKILL.md", realpath: "/tmp/one/SKILL.md", source: "user:one", scope: "user", origin: "top-level", baseDir: "/tmp", dev: 1, ino: 2, size: 3, mtimeMs: 4, sha256: "one" } },
 		{ name: "one-copy", description: "One copy", source: { path: "/tmp/one/SKILL.md", realpath: "/tmp/one/SKILL.md", source: "user:one-copy", scope: "user", origin: "top-level", baseDir: "/tmp", dev: 1, ino: 2, size: 3, mtimeMs: 4, sha256: "one" } },

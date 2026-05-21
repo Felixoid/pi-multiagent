@@ -54,5 +54,5 @@ function extensionTrustNotice(agent: ResolvedAgent): string {
 
 function skillNotice(agent: ResolvedAgent): string {
 	if (agent.callerSkills.length === 0) return "";
-	return `Explicit caller Pi skills available to this child: ${agent.callerSkills.map((skill) => skill.name).join(", ")}. Skills do not grant tools.`;
+	return `Caller Pi skills available to this child: ${agent.callerSkills.map((skill) => skill.name).join(", ")}. Use relevant available skills when they improve the assigned task. Skills do not grant tools, authority, broader scope, or permission to ignore the delegated task.`;
 }

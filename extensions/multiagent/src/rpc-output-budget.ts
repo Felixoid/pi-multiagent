@@ -48,6 +48,11 @@ export class AssistantOutputBudget {
 		this.assistantFinalCount += 1;
 		this.assistantFinalBytes += bytes;
 	}
+
+	resetAssistantFinals(): void {
+		this.assistantFinalBytes = 0;
+		this.assistantFinalCount = 0;
+	}
 }
 
 function budgetExceeded(label: string, bytes: number): { ok: false; failure: OutputBudgetFailure } {

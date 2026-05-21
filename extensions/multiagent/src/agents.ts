@@ -60,7 +60,7 @@ function readAgentFile(filePath: string, source: Exclude<LibrarySource, never>, 
 		diagnostics.push({
 			code: "agent-caller-skills-denied",
 			path: filePath,
-			message: `Library agent ${source}:${name} cannot self-declare caller skill grants; bind explicit step skills in the agent_team graph.`,
+			message: `Library agent ${source}:${name} cannot self-declare caller skill grants; subagent skill propagation is controlled only by the agent_team product configuration.`,
 			severity: "warning",
 		});
 		return undefined;

@@ -35,14 +35,62 @@ export function extractAgentEndErrorMessage(record: RpcJsonRecord): string | und
 	return errorMessageFromRecord(record) ?? errorMessageFromRecord(lastAssistantMessage(record));
 }
 
+export function isAgentEndContextOverflow(record: RpcJsonRecord): boolean {
+	const directError = errorMessageFromRecord(record);
+	if (isContextOverflowStop(stopReasonFromRecord(record), directError, directEventText(record))) return true;
+	if (hasErrorMetadata(record)) return isContextOverflowText(directError);
+	const assistant = lastAssistantMessage(record);
+	const assistantError = errorMessageFromRecord(assistant);
+	if (isContextOverflowStop(stopReasonFromRecord(assistant), assistantError, directEventText(assistant))) return true;
+	return hasErrorMetadata(assistant) && isContextOverflowText(assistantError);
+}
+
+export function hasAgentEndErrorMetadata(record: RpcJsonRecord): boolean {
+	return hasErrorMetadata(record) || hasErrorMetadata(lastAssistantMessage(record));
+}
+
 export function extractEventText(record: RpcJsonRecord): string {
-	const direct = stringField(record.text) ?? stringField(record.error) ?? stringField(record.message);
+	const direct = directEventText(record);
 	if (direct) return direct;
 	try {
 		return JSON.stringify(record).slice(0, 400);
 	} catch {
 		return "unrenderable RPC record";
 	}
+}
+
+const CONTEXT_OVERFLOW_PATTERNS = [
+	/prompt is too long/i,
+	/request_too_large/i,
+	/input is too long for requested model/i,
+	/exceeds the context window/i,
+	/input token count.*exceeds the maximum/i,
+	/maximum prompt length is \d+/i,
+	/reduce the length of the messages/i,
+	/maximum context length is \d+ tokens/i,
+	/exceeds the limit of \d+/i,
+	/exceeds the available context size/i,
+	/greater than the context length/i,
+	/context window exceeds limit/i,
+	/exceeded model token limit/i,
+	/too large for model with \d+ maximum context length/i,
+	/model_context_window_exceeded/i,
+	/prompt too long; exceeded (?:max )?context length/i,
+	/context[_ ]length[_ ]exceeded/i,
+	/too many tokens/i,
+	/token limit exceeded/i,
+	/^4(?:00|13)\s*(?:status code)?\s*\(no body\)/i,
+];
+
+const NON_CONTEXT_OVERFLOW_PATTERNS = [
+	/^(Throttling error|Service unavailable):/i,
+	/rate limit/i,
+	/too many requests/i,
+];
+
+export function isContextOverflowStop(stopReason: string | undefined, errorMessage: string | undefined, fallbackText?: string): boolean {
+	if (normalizeStopReason(stopReason) !== "error") return false;
+	return isContextOverflowText(errorMessage, fallbackText);
 }
 
 export function envelopeParentMessage(channel: MessageChannel, text: string): string {
@@ -70,7 +118,10 @@ function lastAssistantMessage(record: RpcJsonRecord | undefined): RpcJsonRecord 
 
 function stopReasonFromRecord(record: RpcJsonRecord | undefined): string | undefined {
 	if (!record) return undefined;
-	const value = stringField(record.stopReason) ?? stringField(record.stop_reason);
+	return normalizeStopReason(stringField(record.stopReason) ?? stringField(record.stop_reason));
+}
+
+function normalizeStopReason(value: string | undefined): string | undefined {
 	if (!value) return undefined;
 	const lowered = value.trim().toLowerCase();
 	return lowered.length > 0 ? lowered : undefined;
@@ -86,6 +137,24 @@ function errorMessageFromRecord(record: RpcJsonRecord | undefined): string | und
 	const fallback = stringField(record.error);
 	if (fallback) return fallback;
 	return undefined;
+}
+
+function directEventText(record: RpcJsonRecord | undefined): string | undefined {
+	if (!record) return undefined;
+	return stringField(record.text) ?? stringField(record.error) ?? stringField(record.message);
+}
+
+function hasErrorMetadata(record: RpcJsonRecord | undefined): boolean {
+	if (!record) return false;
+	if (errorMessageFromRecord(record)) return true;
+	return Object.hasOwn(record, "error") && record.error !== undefined && record.error !== null;
+}
+
+function isContextOverflowText(errorMessage: string | undefined, fallbackText?: string): boolean {
+	const text = [errorMessage, fallbackText].filter((item): item is string => typeof item === "string" && item.trim().length > 0).join("\n");
+	if (text.length === 0) return false;
+	if (NON_CONTEXT_OVERFLOW_PATTERNS.some((pattern) => pattern.test(text))) return false;
+	return CONTEXT_OVERFLOW_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 function safeJson(value: { channel: MessageChannel; text: string }): string {

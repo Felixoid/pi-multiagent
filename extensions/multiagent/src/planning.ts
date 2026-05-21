@@ -5,7 +5,7 @@ import { lstatSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { GraphSpec } from "./schemas.ts";
-import type { AgentConfig, AgentDiagnostic, CwdIdentity, GraphAuthority, LibrarySource, ParentSkillInventory, ResolvedAgent, ResolvedGraph, TeamStepSpec } from "./types.ts";
+import type { AgentConfig, AgentDiagnostic, CwdIdentity, GraphAuthority, LibrarySource, ParentSkillInventory, ResolvedAgent, ResolvedGraph, SubagentSkillMode, TeamStepSpec } from "./types.ts";
 import { DEFAULT_GRAPH_LIBRARY_SOURCES, LIBRARY_SOURCE_VALUES, PUBLIC_ID_PATTERN, SOURCE_QUALIFIED_LIBRARY_REF_PATTERN } from "./types.ts";
 import { createCallerSkillResolutionContext, resolveAgentCallerSkills } from "./caller-skills.ts";
 import { extensionToolPolicyFromAuthority, normalizeAuthority } from "./authority-policy.ts";
@@ -13,6 +13,7 @@ import { normalizeLimits, normalizeStartOptions } from "./limits.ts";
 import { resolveMutationScope } from "./mutation-scope.ts";
 import { resolveAgentToolAccess } from "./tool-policy.ts";
 import { resolveBuiltinToolProfile } from "./builtin-tool-profile.ts";
+import { DEFAULT_SUBAGENT_SKILL_MODE } from "./subagent-skills-config.ts";
 
 const PUBLIC_ID_REGEX = new RegExp(PUBLIC_ID_PATTERN);
 const SOURCE_REF_REGEX = new RegExp(SOURCE_QUALIFIED_LIBRARY_REF_PATTERN);
@@ -20,6 +21,7 @@ const SOURCE_REF_REGEX = new RegExp(SOURCE_QUALIFIED_LIBRARY_REF_PATTERN);
 export interface ResolveGraphContext {
 	parentTools: import("./types.ts").ParentToolInventory;
 	parentSkills?: ParentSkillInventory;
+	subagentSkillMode?: SubagentSkillMode;
 	cwd: string;
 	invocationCwd: string;
 }
@@ -33,9 +35,10 @@ export function resolveDetachedGraph(graph: GraphSpec, libraryAgents: AgentConfi
 	const options = normalizeStartOptions(rawOptions);
 	const invocationCwd = resolveInvocationCwd(context.invocationCwd, diagnostics);
 	const skillContext = createCallerSkillResolutionContext(context.parentSkills, invocationCwd);
-	const steps = graph.steps.map((step, index) => resolveStep(step, index, graph.objective, authority, library, libraryAgents, diagnostics, { ...context, invocationCwd }, skillContext)).filter((step): step is TeamStepSpec => step !== undefined);
+	const subagentSkillMode = context.subagentSkillMode ?? DEFAULT_SUBAGENT_SKILL_MODE;
+	const steps = graph.steps.map((step, index) => resolveStep(step, index, graph.objective, authority, library, libraryAgents, diagnostics, { ...context, invocationCwd, subagentSkillMode }, skillContext)).filter((step): step is TeamStepSpec => step !== undefined);
 	validateStepGraph(steps, diagnostics);
-	return { objective: graph.objective.trim(), library, authority, steps, limits, options, graphHash: hashGraph(graph, authority, limits, options), diagnostics };
+	return { objective: graph.objective.trim(), library, authority, steps, limits, options, graphHash: hashGraph(graph, authority, limits, options, subagentSkillMode), diagnostics };
 }
 
 export { validatePreflightShape } from "./preflight-shape.ts";
@@ -76,7 +79,7 @@ function resolveStepAgent(stepId: string, spec: GraphSpec["steps"][number]["agen
 		if (!tools) return undefined;
 		const toolAccess = resolveToolAccess(stepId, spec, tools, authority, diagnostics, context, path);
 		if (!toolAccess) return undefined;
-		const skills = resolveAgentCallerSkills({ selection: spec.skills, tools: toolAccess.tools, label: `step agent ${stepId}`, path: `${path}/skills`, allowProjectCode: authority.allowProjectCode, diagnostics, context: skillContext });
+		const skills = resolveAgentCallerSkills({ mode: context.subagentSkillMode ?? DEFAULT_SUBAGENT_SKILL_MODE, tools: toolAccess.tools, label: `step agent ${stepId}`, path: `${path}/skills`, allowProjectCode: authority.allowProjectCode, diagnostics, context: skillContext });
 		if (!skills) return undefined;
 		return { id: stepId, ref: `inline:${stepId}`, name: stepId, kind: "inline", description: stepId, tools: toolAccess.tools, extensionTools: toolAccess.extensionTools, callerSkills: skills, systemPrompt, model: undefined, thinking: undefined, source: "inline", filePath: undefined, sha256: undefined };
 	}
@@ -113,7 +116,7 @@ function resolveLibraryAgent(stepId: string, spec: GraphSpec["steps"][number]["a
 	if (!tools) return undefined;
 	const toolAccess = resolveToolAccess(stepId, spec, tools, authority, diagnostics, context, path);
 	if (!toolAccess) return undefined;
-	const skills = resolveAgentCallerSkills({ selection: spec.skills, tools: toolAccess.tools, label: `step agent ${stepId}`, path: `${path}/skills`, allowProjectCode: authority.allowProjectCode, diagnostics, context: skillContext });
+	const skills = resolveAgentCallerSkills({ mode: context.subagentSkillMode ?? DEFAULT_SUBAGENT_SKILL_MODE, tools: toolAccess.tools, label: `step agent ${stepId}`, path: `${path}/skills`, allowProjectCode: authority.allowProjectCode, diagnostics, context: skillContext });
 	if (!skills) return undefined;
 	return { id: stepId, ref: agent.ref, name: agent.name, kind: "library", description: agent.description, tools: toolAccess.tools, extensionTools: toolAccess.extensionTools, callerSkills: skills, systemPrompt: agent.systemPrompt, model: agent.model, thinking: agent.thinking, source: agent.source, filePath: agent.filePath, sha256: agent.sha256 };
 }
@@ -246,8 +249,8 @@ function validatePublicId(value: string, label: string, diagnostics: AgentDiagno
 	return false;
 }
 
-function hashGraph(graph: GraphSpec, authority: GraphAuthority, limits: unknown, options: unknown): string {
-	return createHash("sha256").update(JSON.stringify({ graph, authority, limits, options })).digest("hex");
+function hashGraph(graph: GraphSpec, authority: GraphAuthority, limits: unknown, options: unknown, subagentSkillMode: SubagentSkillMode): string {
+	return createHash("sha256").update(JSON.stringify({ graph, authority, limits, options, subagentSkillMode })).digest("hex");
 }
 
 function dedupeRefs(values: string[]): string[] {

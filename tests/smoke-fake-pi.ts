@@ -52,6 +52,7 @@ class FakeChild extends EventEmitter {
 }
 
 const tools: RegisteredTool[] = [];
+const flagValues = new Map<string, boolean | string>();
 const customMessages: { message: unknown; options: unknown }[] = [];
 const statusValues: (string | undefined)[] = [];
 const widgetValues: unknown[] = [];
@@ -64,6 +65,12 @@ registerMultiagentExtension(
 			if (eventName === "session_shutdown") shutdownHandlers.push(handler);
 		},
 		registerMessageRenderer() {},
+		registerFlag(name: string, options: { default?: boolean | string }) {
+			if (options.default !== undefined) flagValues.set(name, options.default);
+		},
+		getFlag(name: string) {
+			return flagValues.get(name);
+		},
 		registerTool(tool: RegisteredTool) {
 			tools.push(tool);
 		},
@@ -74,7 +81,7 @@ registerMultiagentExtension(
 			return undefined;
 		},
 		getActiveTools() {
-			return [];
+			return ["read"];
 		},
 		getAllTools() {
 			return [];
@@ -88,6 +95,7 @@ registerMultiagentExtension(
 
 const tool = tools.find((candidate) => candidate.name === "agent_team");
 assert.ok(tool);
+assert.equal(flagValues.get("agent-team-subagent-skills"), "enabled");
 
 const catalog = await tool.execute("smoke-catalog", { action: "catalog", library: { sources: ["package"], query: "review" } }, undefined, undefined, makeCtx(false));
 assert.equal(catalog.content[0].text.includes("package:reviewer"), true);

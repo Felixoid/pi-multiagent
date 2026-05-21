@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import type { AgentConfig, ParentSkillInventory, ParentToolInfo, ParentToolInventory } from "../extensions/multiagent/src/types.ts";
 import { findProjectSettingsFile, resolveDetachedGraph, validatePreflightShape } from "../extensions/multiagent/src/planning.ts";
+import { readSubagentSkillConfig } from "../extensions/multiagent/src/subagent-skills-config.ts";
 import { BUILTIN_CHILD_TOOL_NAMES, READONLY_CHILD_TOOL_NAMES } from "../extensions/multiagent/src/types.ts";
 
 const parentTools: ParentToolInventory = { apiAvailable: true, errorMessage: undefined, tools: activeBuiltinTools() };
@@ -349,7 +350,7 @@ test("resolveDetachedGraph gates project and workspace-local caller skills on al
 	const graph = {
 		objective: "skills",
 		authority: { allowFilesystemRead: true },
-		steps: [{ id: "one", agent: { system: "x", tools: ["read"], skills: ["project-skill", "user-link"] }, task: "x" }],
+		steps: [{ id: "one", agent: { system: "x", tools: ["read"] }, task: "x" }],
 	};
 	const denied = resolveDetachedGraph(graph, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills: projectSkills }, undefined);
 	assert.equal(denied.diagnostics.filter((item) => item.code === "caller-skills-project-code-authority-required").length, 2);
@@ -376,7 +377,7 @@ test("resolveDetachedGraph gates project and workspace-local caller skills on al
 			},
 		],
 	};
-	const subdirGraph = { objective: "subdir skills", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { system: "x", tools: ["read"], skills: ["repo-skill"] }, task: "x" }] };
+	const subdirGraph = { objective: "subdir skills", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { system: "x", tools: ["read"] }, task: "x" }] };
 	const subdirDenied = resolveDetachedGraph(subdirGraph, [], [], { cwd: subdir, invocationCwd: subdir, parentTools, parentSkills: repoSkills }, undefined);
 	assert.equal(subdirDenied.diagnostics.some((item) => item.code === "caller-skills-project-code-authority-required"), true);
 	assert.deepEqual(subdirDenied.steps, []);
@@ -385,9 +386,10 @@ test("resolveDetachedGraph gates project and workspace-local caller skills on al
 	assert.deepEqual(subdirAllowed.steps[0]?.agent.callerSkills.map((skill) => skill.name), ["repo-skill"]);
 });
 
-test("resolveDetachedGraph does not inherit parent skills when agent.skills is omitted", async () => {
-	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-skills-none-${Date.now()}`), { recursive: true });
-	const skillPath = join(cwd, "visible-skill.md");
+test("resolveDetachedGraph propagates all caller skills by default and none when product config disables them", async () => {
+	const parent = await mkdir(join(tmpdir(), `pi-multiagent-plan-skills-default-${Date.now()}`), { recursive: true });
+	const cwd = await mkdir(join(parent, "workspace"), { recursive: true });
+	const skillPath = join(parent, "visible-skill.md");
 	await writeFile(skillPath, "# Visible skill\n");
 	const visibleSkills: ParentSkillInventory = {
 		apiAvailable: true,
@@ -397,19 +399,48 @@ test("resolveDetachedGraph does not inherit parent skills when agent.skills is o
 			{
 				name: "visible-skill",
 				description: "Visible skill",
-				sourceInfo: { path: skillPath, source: "user:visible-skill", scope: "user", origin: "top-level", baseDir: dirname(cwd) },
+				sourceInfo: { path: skillPath, source: "user:visible-skill", scope: "user", origin: "top-level", baseDir: parent },
 			},
 		],
 	};
-	const graph = resolveDetachedGraph(
-		{ objective: "skills omitted", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { system: "x", tools: ["read"] }, task: "x" }] },
-		[],
-		[],
-		{ cwd, invocationCwd: cwd, parentTools, parentSkills: visibleSkills },
-		undefined,
-	);
-	assert.equal(graph.diagnostics.some((item) => item.severity === "error"), false);
-	assert.deepEqual(graph.steps[0]?.agent.callerSkills, []);
+	const graph = { objective: "skills default", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { system: "x", tools: ["read"] }, task: "x" }] };
+	const enabled = resolveDetachedGraph(graph, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills: visibleSkills }, undefined);
+	assert.equal(enabled.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(enabled.steps[0]?.agent.callerSkills.map((skill) => skill.name), ["visible-skill"]);
+	const explicitEnabled = resolveDetachedGraph(graph, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills: visibleSkills, subagentSkillMode: "enabled" }, undefined);
+	assert.deepEqual(explicitEnabled.steps[0]?.agent.callerSkills.map((skill) => skill.name), ["visible-skill"]);
+	const disabled = resolveDetachedGraph(graph, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills: visibleSkills, subagentSkillMode: "disabled" }, undefined);
+	assert.equal(disabled.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(disabled.steps[0]?.agent.callerSkills, []);
+	const unavailable = resolveDetachedGraph(graph, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills: { apiAvailable: false, readActive: false, errorMessage: "inventory failed", skills: [] } }, undefined);
+	assert.equal(unavailable.diagnostics.some((item) => item.code === "subagent-skills-inventory-unavailable"), true);
+	assert.deepEqual(unavailable.steps, []);
+	const readInactive = resolveDetachedGraph(graph, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills: { apiAvailable: true, readActive: false, errorMessage: undefined, skills: [] } }, undefined);
+	assert.equal(readInactive.diagnostics.some((item) => item.code === "subagent-skills-parent-read-inactive"), true);
+	assert.deepEqual(readInactive.steps, []);
+});
+
+test("resolveDetachedGraph fails all-or-nothing when any enabled caller skill source is unavailable", async () => {
+	const parent = await mkdir(join(tmpdir(), `pi-multiagent-plan-skills-unavailable-${Date.now()}`), { recursive: true });
+	const cwd = await mkdir(join(parent, "workspace"), { recursive: true });
+	const validSkillPath = join(parent, "valid-skill.md");
+	await writeFile(validSkillPath, "# Valid skill\n");
+	const skills: ParentSkillInventory = { apiAvailable: true, readActive: true, errorMessage: undefined, skills: [
+		{ name: "valid-skill", description: "Valid", sourceInfo: { path: validSkillPath, source: "user:valid-skill", scope: "user", origin: "top-level", baseDir: parent } },
+		{ name: "missing-skill", description: "Missing", sourceInfo: { path: join(parent, "missing-skill.md"), source: "user:missing-skill", scope: "user", origin: "top-level", baseDir: parent } },
+	] };
+	const graph = { objective: "skills unavailable", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { system: "x", tools: ["read"] }, task: "x" }] };
+	const result = resolveDetachedGraph(graph, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills: skills }, undefined);
+	assert.equal(result.diagnostics.some((item) => item.code === "caller-skill-source-unavailable" && item.severity === "error"), true);
+	assert.deepEqual(result.steps, []);
+});
+
+test("readSubagentSkillConfig defaults enabled and rejects invalid values", () => {
+	assert.deepEqual(readSubagentSkillConfig(undefined), { config: { mode: "enabled" }, diagnostics: [] });
+	assert.deepEqual(readSubagentSkillConfig("disabled"), { config: { mode: "disabled" }, diagnostics: [] });
+	const invalid = readSubagentSkillConfig("sometimes");
+	assert.deepEqual(invalid.config, { mode: "enabled" });
+	assert.equal(invalid.diagnostics[0]?.code, "subagent-skills-config-invalid");
 });
 
 test("resolveDetachedGraph gates project and local extension sources on allowProjectCode", async () => {

@@ -51,7 +51,7 @@ function start(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnost
 	const librarySources = graph.library?.sources && graph.library.sources.length > 0 ? graph.library.sources : DEFAULT_GRAPH_LIBRARY_SOURCES;
 	const library = normalizeLibraryOptions({ sources: librarySources, projectAgents: graph.authority?.allowProjectCode ? "allow" : "deny" });
 	const discovery = discoverAgents({ cwd: options.cwd, packageAgentsDir: options.packageAgentsDir, library });
-	const resolved = resolveDetachedGraph(graph, discovery.agents, [...diagnostics, ...discovery.diagnostics], { cwd: options.cwd, invocationCwd: options.cwd, parentTools: options.parentTools ?? unavailableTools(), parentSkills: options.parentSkills }, input.options);
+	const resolved = resolveDetachedGraph(graph, discovery.agents, [...diagnostics, ...discovery.diagnostics], { cwd: options.cwd, invocationCwd: options.cwd, parentTools: options.parentTools ?? unavailableTools(), parentSkills: options.parentSkills, subagentSkillMode: options.subagentSkills?.mode }, input.options);
 	if (resolved.steps.length !== graph.steps.length || hasDiagnosticError(resolved.diagnostics)) return makeDetails("start", false, resolved.diagnostics, options, { library: { ...library, sources: discovery.sources } }, { code: "start-planning-failed", message: "Detached graph planning failed; no child process was launched." });
 	const capacityError = detachedRunCapacityError();
 	if (capacityError) return makeDetails("start", false, resolved.diagnostics, options, { library: { ...library, sources: discovery.sources } }, capacityError);
@@ -143,6 +143,7 @@ function schemaRepair(input: unknown, path: string): string {
 	if (isRecord(input)) {
 		const misplacedExtensionTool = findMisplacedExtensionToolName(input);
 		if (misplacedExtensionTool) return `agent.tools accepts only built-in child tools (${BUILTIN_CHILD_TOOL_NAMES.join(", ")}). Move extension tool ${misplacedExtensionTool} to steps[].agent.extensionTools with catalog-copied {name, from:{source, scope?, origin?}} provenance and set graph.authority.allowExtensionCode:true; do not put extension tool names in agent.tools.`;
+		if (findAgentSkillsField(input)) return "Remove steps[].agent.skills. Subagent skill availability is controlled only by the product config flag --agent-team-subagent-skills enabled|disabled; it is all-or-nothing, defaults to enabled, and is not graph-controlled.";
 		if (input.authority !== undefined) return 'Move authority under graph: {"action":"start","graph":{"authority":{"allowFilesystemRead":true},"objective":"...","steps":[...]}}.';
 		if (path === "/maxBytes" || input.maxBytes !== undefined) return "maxBytes must be between 1 and 200000 and is valid only on run_status/step_result: it bounds assistant previews when preview:true and raw debug event previews when run_status debugEvents:true; catalog narrowing uses library.query.";
 		if (path === "/preview" || input.preview !== undefined) return "preview must be true or false and is valid only for run_status and step_result; previews default to false.";
@@ -161,6 +162,12 @@ function findMisplacedExtensionToolName(input: Record<string, unknown>): string 
 		for (const tool of step.agent.tools) if (typeof tool === "string" && !BUILTIN_CHILD_TOOL_SET.has(tool)) return tool;
 	}
 	return undefined;
+}
+
+function findAgentSkillsField(input: Record<string, unknown>): boolean {
+	const graph = input.graph;
+	if (!isRecord(graph) || !Array.isArray(graph.steps)) return false;
+	return graph.steps.some((step) => isRecord(step) && isRecord(step.agent) && step.agent.skills !== undefined);
 }
 
 function detailsAction(input: unknown): ExecutionAction | "missing/invalid" {

@@ -193,6 +193,7 @@ export function humanActivity(text: string): string {
 		.replace(/^step\s+/, "")
 		.replace(/^assistant writing$/u, "writing")
 		.replace(/^child prompt sent$/u, "prompt sent")
+		.replace(/^prompt accepted; waiting for child output$/u, "waiting for output")
 		.replace(/^model turn active \(no output yet\)$/u, "thinking")
 		.replace(/^child spawned$/u, "starting")
 		.replace(/^assistant final$/u, "finalizing")

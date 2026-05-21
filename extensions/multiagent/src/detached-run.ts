@@ -16,14 +16,14 @@ import { RunNotifier, stepNoticeReasons, terminalStepNoticeReasons } from "./run
 import type { DetachedRunDetailsOptions, DetachedRunEventInput } from "./detached-run-options.ts";
 import { terminalRunStatus } from "./run-terminal-status.ts";
 import { RunWaiters } from "./run-waiters.ts";
-import { safeRuntimeCallback } from "./runtime-diagnostics.ts";
+import { createRunUiCallback } from "./run-ui-callback.ts";
 import { makeDetails, type AgentTeamRuntimeOptions, unrefTimer } from "./runtime-options.ts";
 import { buildRunSnapshot, buildStepSnapshots, countStepStatuses, findSinkStepIds } from "./run-snapshot.ts";
 import { createStepOutputArtifact } from "./step-output-artifact.ts";
 import { stalledStepBlockerMessage } from "./stalled-step-diagnostics.ts";
 import { collectUpstreamOutputs } from "./upstream-outputs.ts";
-import type { AgentDiagnostic, AgentTeamDetails, CleanupReceipt, LibraryOptions, MessageChannel, MessageReceipt, ResolvedGraph, RunSnapshot, RunStatus, StepStatus, TeamStepSpec } from "./types.ts";
-import { DEFAULT_RESULT_PREVIEW_MAX_BYTES } from "./types.ts";
+import type { AgentDiagnostic, AgentTeamDetails, LibraryOptions, MessageChannel, MessageReceipt, ResolvedGraph, RunStatus, StepStatus, TeamStepSpec } from "./types.ts";
+import { DEFAULT_RESULT_PREVIEW_MAX_BYTES as PREVIEW_BYTES } from "./types.ts";
 
 export class DetachedRun {
 	readonly id: string;
@@ -44,6 +44,7 @@ export class DetachedRun {
 	private maxRunTimer: ReturnType<typeof setTimeout> | undefined;
 	private retentionTimer: ReturnType<typeof setTimeout> | undefined;
 	private readonly waiters = new RunWaiters();
+	private readonly runUi = createRunUiCallback((message) => this.recordDiagnostic("run-ui-callback-failed", "run-ui", message));
 
 	constructor(id: string, graph: ResolvedGraph, options: AgentTeamRuntimeOptions, library: LibraryOptions) {
 		this.id = id;
@@ -115,7 +116,7 @@ export class DetachedRun {
 		void this.schedule();
 	}
 
-	cleanup(): CleanupReceipt {
+	cleanup() {
 		const deletedPaths = cleanupRunArtifacts(this.artifactStore);
 		if (this.maxRunTimer) clearTimeout(this.maxRunTimer);
 		if (this.retentionTimer) clearTimeout(this.retentionTimer);
@@ -126,11 +127,11 @@ export class DetachedRun {
 
 	details(action: AgentTeamDetails["action"], options: DetachedRunDetailsOptions = {}): AgentTeamDetails {
 		const includeEvents = options.includeEvents === true;
-		const delta = includeEvents ? this.events.delta(options.cursor, options.stepId, options.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES) : { events: [], cursor: this.events.currentCursor() };
-		return makeDetails(action, options.ok ?? true, this.diagnostics, this.options, { library: this.library, run: this.snapshot(), cursor: delta.cursor, events: delta.events, steps: this.stepSnapshots(), outputs: selectOutputsForAction(action, options.stepId, options.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES, options.preview === true, this.states.values(), this.sinkStepIds()), message: options.message, cleanup: options.cleanup, notice: options.notice }, options.error);
+		const delta = includeEvents ? this.events.delta(options.cursor, options.stepId, options.maxBytes ?? PREVIEW_BYTES) : { events: [], cursor: this.events.currentCursor() };
+		return makeDetails(action, options.ok ?? true, this.diagnostics, this.options, { library: this.library, run: this.snapshot(), cursor: delta.cursor, events: delta.events, steps: this.stepSnapshots(), outputs: selectOutputsForAction(action, options.stepId, options.maxBytes ?? PREVIEW_BYTES, options.preview === true, this.states.values(), this.sinkStepIds()), message: options.message, cleanup: options.cleanup, notice: options.notice }, options.error);
 	}
 
-	snapshot(): RunSnapshot {
+	snapshot() {
 		const liveStepIds = this.stepSnapshots().filter((step) => step.status === "running").map((step) => step.id);
 		return buildRunSnapshot({ runId: this.id, objective: this.graph.objective, status: this.status, createdAt: this.createdAt, updatedAt: this.updatedAt, retentionSeconds: this.graph.options.terminalRetentionSeconds, liveStepIds, sinkStepIds: this.sinkStepIds(), lastEvent: this.lastEventSummary(), canMessage: this.status === "running" && liveStepIds.length > 0, canCancel: this.status === "running" || this.status === "canceling", counts: this.counts() });
 	}
@@ -327,13 +328,12 @@ export class DetachedRun {
 
 	private sinkStepIds() { return findSinkStepIds(this.graph.steps); }
 	private lastEventSummary() { return summarizeBackgroundEvent(this.events.last()); }
-	private stepSnapshots() { return buildStepSnapshots(this.states.values(), this.stepActivity); }
+	private stepSnapshots() { return buildStepSnapshots(this.states.values(), this.stepActivity, this.options.defaults); }
 	private counts() { return countStepStatuses(this.states.values()); }
 
 	private messageReceipt(stepId: string, channel: MessageChannel, clientMessageId: string | undefined, accepted: boolean, undeliveredReason: string | undefined, recordEvent = true) {
-		const receipt = { runId: this.id, stepId, channel, clientMessageId, accepted, undeliveredReason, reused: false };
 		if (recordEvent) this.appendEvent({ stepId, type: "parent_message", label: channel, preview: accepted ? "accepted/queued" : undeliveredReason, status: accepted ? "done" : "error" });
-		return receipt;
+		return { runId: this.id, stepId, channel, clientMessageId, accepted, undeliveredReason, reused: false };
 	}
 
 	private appendEvent(input: DetachedRunEventInput) {
@@ -341,6 +341,7 @@ export class DetachedRun {
 		this.stepActivity.record(event);
 		this.waiters.notify(event);
 		if (this.status === "running" && input.type === "diagnostic" && input.label !== "agent_team-notice") this.notifier.queueMilestone(`diagnostic:${input.label ?? "event"}`);
+		if (this.status === "running" && input.stepId !== undefined && input.type !== "assistant_delta") this.touch();
 	}
 
 	private recordDiagnostic(code: string, label: string, message: string) {
@@ -355,8 +356,7 @@ export class DetachedRun {
 
 	private touch() {
 		this.updatedAt = now();
-		const errorMessage = safeRuntimeCallback(() => this.options.onRunUpdate?.(this.details("run_status")), "agent_team UI failed");
-		if (errorMessage) this.recordDiagnostic("run-ui-callback-failed", "run-ui", errorMessage);
+		this.runUi(() => this.options.onRunUpdate?.(this.details("run_status")));
 	}
 }
 

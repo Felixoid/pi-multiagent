@@ -32,7 +32,7 @@ export function summarizeStepActivity(event: BackgroundEvent): string {
 	if (event.type === "assistant_final") return "assistant final";
 	if (event.type === "parent_message") return summarizeParentMessage(event);
 	if (event.type === "diagnostic") return summarizeDiagnostic(event);
-	if (event.type === "ui") return `UI request denied${event.label ? `: ${event.label}` : ""}`;
+	if (event.type === "ui") return `UI request ${event.status === "done" ? "ignored" : "denied"}${event.label ? `: ${event.label}` : ""}`;
 	if (event.type === "run") return summarizeRun(event);
 	return event.preview ?? event.status ?? event.type;
 }
@@ -60,7 +60,10 @@ function summarizeRpc(event: BackgroundEvent): string {
 	if (event.label === "message_end") return "assistant message ended";
 	if (event.label === "agent_end") return "child terminal event";
 	if (event.label === "terminalizing") return `terminalizing${event.preview ? ` [${event.preview}]` : ""}`;
-	if (event.label === "prompt") return event.status === "done" ? "child accepted prompt" : "child prompt sent";
+	if (event.label === "prompt") return event.status === "done" ? "prompt accepted; waiting for child output" : "child prompt sent";
+	if (event.label === "thinking") return event.status === "done" ? "reasoning ended" : "reasoning";
+	if (event.label === "toolcall") return event.status === "done" ? "tool call ended" : "tool call streaming";
+	if (event.label === "tool_use" || event.label === "message_update:tool_use") return "assistant tool activity";
 	if (event.label === "response") return "child command response";
 	return `child event: ${event.label ?? "rpc"}`;
 }

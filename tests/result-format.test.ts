@@ -3,7 +3,7 @@ import test from "node:test";
 import { DEFAULT_MAX_BYTES, formatDetailsForModel, formatDetailsForModelContent } from "../extensions/multiagent/src/result-format.ts";
 import type { AgentTeamDetails, StepOutput, StepSnapshot } from "../extensions/multiagent/src/types.ts";
 
-const DEFAULT_STEP_TOOLS = { effectiveTools: ["read", "grep", "find", "ls"], extensionTools: [], callerSkills: [] };
+const DEFAULT_STEP_TOOLS = { model: undefined, thinking: undefined, effectiveTools: ["read", "grep", "find", "ls"], extensionTools: [], callerSkills: [] };
 
 test("model run_status and step_result put trust notice before child output", () => {
 	const output: StepOutput = { stepId: "sink", status: "succeeded", text: "child text", filePath: "/tmp/sink-final.md", chars: 10 };
@@ -16,12 +16,14 @@ test("model run_status and step_result put trust notice before child output", ()
 });
 
 test("start copy makes waiting the default and shows effective tools", () => {
-	const step: StepSnapshot = { id: "one", status: "running", agentRef: "inline:one", effectiveTools: ["read", "grep", "find", "ls", "bash", "exa_search"], extensionTools: ["exa_search"], callerSkills: ["pi-multiagent"], needs: [], after: [], startedAt: "now", endedAt: undefined, lastActivity: "tool bash running", errorMessage: undefined };
+	const step: StepSnapshot = { id: "one", status: "running", agentRef: "inline:one", model: "parent/model", thinking: "medium", effectiveTools: ["read", "grep", "find", "ls", "bash", "exa_search"], extensionTools: ["exa_search"], callerSkills: ["pi-multiagent"], needs: [], after: [], startedAt: "now", endedAt: undefined, lastActivity: "tool bash running", errorMessage: undefined };
 	const start = formatDetailsForModel(details("start", { run: runSnapshot({ liveStepIds: ["one"], counts: { pending: 0, running: 1, succeeded: 0, failed: 0, blocked: 0, timed_out: 0, canceled: 0 }, canMessage: true, canCancel: true }), steps: [step] }));
 	assert.match(start, /No action is needed while work is healthy/);
 	assert.match(start, /Use run_status only for manual compact inspection or waitSeconds/);
 	assert.match(start, /cleanup deletes retained evidence/);
 	assert.match(start, /## Effective step tools/);
+	assert.match(start, /model=parent\/model/);
+	assert.match(start, /thinking=medium/);
 	assert.match(start, /effectiveTools=read,grep,find,ls,bash,exa_search/);
 	assert.match(start, /extensionTools=exa_search/);
 	assert.match(start, /skills=pi-multiagent/);
@@ -52,9 +54,11 @@ test("accepted message receipts explain queue semantics and non-compliance proof
 	assert.match(reused, /no additional child message was queued/);
 });
 
-test("run_status step rows include compact last activity, returned cursor, and stepId boundary copy", () => {
-	const step: StepSnapshot = { id: "worker", status: "running", agentRef: "inline:worker", effectiveTools: ["read", "grep", "find", "ls", "bash"], extensionTools: [], callerSkills: [], needs: [], after: [], startedAt: "now", endedAt: undefined, lastActivity: "tool bash running", errorMessage: undefined };
+test("run_status step rows include model lane, compact last activity, returned cursor, and stepId boundary copy", () => {
+	const step: StepSnapshot = { id: "worker", status: "running", agentRef: "inline:worker", model: "parent/model", thinking: "high", effectiveTools: ["read", "grep", "find", "ls", "bash"], extensionTools: [], callerSkills: [], needs: [], after: [], startedAt: "now", endedAt: undefined, lastActivity: "tool bash running", errorMessage: undefined };
 	const run_status = formatDetailsForModel(details("run_status", { steps: [step] }));
+	assert.match(run_status, /model=parent\/model/);
+	assert.match(run_status, /thinking=high/);
 	assert.match(run_status, /effectiveTools=read,grep,find,ls,bash/);
 	assert.match(run_status, /lastActivity="tool bash running"/);
 	assert.match(run_status, /\nCursor: 0/);

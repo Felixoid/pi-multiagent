@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.8.5 - 2026-05-21
+
+- Added recoverable child-RPC context-overflow handling so Pi compaction/continue can produce a later valid final without accepting stale pre-overflow output, while unrecovered overflow fails and blocks `needs` dependents.
+- Exposed launch-time child model/thinking lanes in run snapshots, and clarified that children inherit parent defaults only at `start` time unless agent metadata pins a lane.
+- Tightened README, skill, and cookbook guidance around child context isolation, overflow recovery, model-lane evidence, subagent skill propagation, and scoped weak-model tasks.
+- Added the `--agent-team-subagent-skills enabled|disabled` product flag; it defaults to enabled/all caller-visible skills, rejects graph-controlled `agent.skills`, and reminds enabled children to use relevant available skills without broadening authority.
+- Repaired live child activity status so prompt acceptance, reasoning/tool/message-update RPC activity, and tool events refresh compact run/TUI state without dumping reasoning deltas or fake progress.
+- Contracted fossil-style public-doc and delegation checks toward survivor behavior, active denial, package hygiene, and trust-boundary invariants.
+
 ## 0.8.4 - 2026-05-20
 
 - Corrected packaged graph examples so read-only steps omit redundant `agent.tools` overrides and release audit lanes use terminal `after` dependencies to preserve failed or missing proof evidence.

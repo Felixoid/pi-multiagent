@@ -48,9 +48,16 @@ async function loadPackageRoot(root: string, label: string): Promise<void> {
 		const extension = moduleRecord.default;
 		assert.equal(typeof extension, "function", `${label}: ${extensionPath} default export should be a Pi extension function`);
 		const tools: RegisteredTool[] = [];
+		const flagValues = new Map<string, boolean | string>();
 		extension({
 			on() {},
 			registerMessageRenderer() {},
+			registerFlag(name: string, options: { default?: boolean | string }) {
+				if (options.default !== undefined) flagValues.set(name, options.default);
+			},
+			getFlag(name: string) {
+				return flagValues.get(name);
+			},
 			registerTool(tool: RegisteredTool) {
 				tools.push(tool);
 			},
@@ -61,6 +68,7 @@ async function loadPackageRoot(root: string, label: string): Promise<void> {
 		});
 		const tool = tools.find((candidate) => candidate.name === "agent_team");
 		assert.ok(tool, `${label}: ${extensionPath} should register agent_team`);
+		assert.equal(flagValues.get("agent-team-subagent-skills"), "enabled", `${label}: ${extensionPath} should default subagent skills to enabled`);
 		assert.match(tool.description ?? "", /step_result.*one step/);
 		assert.equal((tool.description ?? "").length < 1400, true, `${label}: agent_team description should stay compact`);
 		assert.equal((tool.promptGuidelines ?? []).join("\n").length < 3600, true, `${label}: agent_team prompt guidelines should stay within model-facing budget`);

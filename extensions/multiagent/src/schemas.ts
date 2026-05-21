@@ -35,7 +35,6 @@ import {
 	PROJECT_AGENTS_POLICY_VALUES,
 	PUBLIC_ID_PATTERN,
 	RUN_ID_PATTERN,
-	SKILL_NAME_PATTERN,
 	SOURCE_QUALIFIED_LIBRARY_REF_PATTERN,
 	TOOL_NAME_PATTERN,
 } from "./types.ts";
@@ -98,19 +97,12 @@ const ExtensionToolGrantSchema = Type.Object(
 	StrictObjectOptions,
 );
 
-const SkillNamesSchema = Type.Array(Type.String({ description: "Caller-visible Pi skill name.", minLength: 1, maxLength: 64, pattern: SKILL_NAME_PATTERN }), {
-	description: "Explicit include-only caller-visible Pi skill names for this step.",
-	minItems: 1,
-	maxItems: 128,
-});
-
 const StepAgentSchema = Type.Object(
 	{
 		system: Type.Optional(nonEmptyText("Inline step-agent system prompt. Set exactly one of system or ref; runtime planning rejects missing or mixed bindings.")),
 		ref: Type.Optional(sourceQualifiedLibraryRef('Source-qualified library ref such as "package:reviewer". Set exactly one of system or ref; runtime planning rejects missing or mixed bindings.')),
 		tools: Type.Optional(Type.Array(StringEnum(BUILTIN_CHILD_TOOL_NAMES), { description: "Explicit built-in child tool profile. Every child keeps at least the read/discovery suite, so omitted or [] resolves to read, grep, find, and ls and requires graph.authority.allowFilesystemRead:true. For library agents, explicit tools replace the whole catalog defaultTools profile; mandatory read/discovery is then added. It does not append. Any read/discovery primitive expands to the full read, grep, find, ls suite.", maxItems: 24 })),
 		extensionTools: Type.Optional(Type.Array(ExtensionToolGrantSchema, { description: "Explicit parent-active callable extension tool grants for this step.", maxItems: 24 })),
-		skills: Type.Optional(SkillNamesSchema),
 	},
 	{ ...StrictObjectOptions, description: "Step-local inline agent or source-qualified library agent. Set exactly one of system or ref. No invocation-local agent registry is used." },
 );

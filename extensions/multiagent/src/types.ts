@@ -11,6 +11,7 @@ export type RunStatus = "running" | "succeeded" | "mixed" | "failed" | "cancelin
 export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "blocked" | "timed_out" | "canceled";
 export type MessageChannel = "steer" | "follow_up";
 export type NotifyMode = "none" | "final" | "milestones";
+export type SubagentSkillMode = "enabled" | "disabled";
 export type EventType = "run" | "step" | "assistant_delta" | "assistant_final" | "tool" | "diagnostic" | "parent_message" | "rpc" | "ui";
 
 export const DEFAULT_LIBRARY_SOURCES: LibrarySource[] = ["package"];
@@ -25,6 +26,7 @@ export const RUN_STATUS_VALUES = ["running", "succeeded", "mixed", "failed", "ca
 export const STEP_STATUS_VALUES = ["pending", "running", "succeeded", "failed", "blocked", "timed_out", "canceled"] as const;
 export const MESSAGE_CHANNEL_VALUES = ["steer", "follow_up"] as const;
 export const NOTIFY_MODE_VALUES = ["none", "final", "milestones"] as const;
+export const SUBAGENT_SKILL_MODE_VALUES = ["enabled", "disabled"] as const;
 export const PUBLIC_ID_PATTERN = "^[a-z][a-z0-9-]{0,62}$";
 export const RUN_ID_PATTERN = "^agt_[A-Za-z0-9_-]{24,96}$";
 export const SOURCE_QUALIFIED_LIBRARY_REF_PATTERN = "^(package|user|project):[a-z][a-z0-9-]{0,62}$";
@@ -245,7 +247,6 @@ export interface ResolvedExtensionToolGrant {
 interface GraphStepAgentSharedInput {
 	tools?: string[];
 	extensionTools?: ExtensionToolGrantSpec[];
-	skills?: string[];
 }
 
 export interface GraphStepAgentInput extends GraphStepAgentSharedInput {
@@ -347,6 +348,8 @@ export interface StepSnapshot {
 	id: string;
 	status: StepStatus;
 	agentRef: string;
+	model: string | undefined;
+	thinking: string | undefined;
 	effectiveTools: string[];
 	extensionTools: string[];
 	callerSkills: string[];
