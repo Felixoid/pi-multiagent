@@ -14,7 +14,7 @@ import type { SpawnOptions } from "../extensions/multiagent/src/child-launch.ts"
 import type { AgentTeamRuntimeOptions } from "../extensions/multiagent/src/runtime-options.ts";
 import type { AgentTeamInput } from "../extensions/multiagent/src/schemas.ts";
 import type { AgentTeamDetails, ParentToolInfo } from "../extensions/multiagent/src/types.ts";
-import { BUILTIN_CHILD_TOOL_NAMES, MAX_STEP_OUTPUT_BYTES } from "../extensions/multiagent/src/types.ts";
+import { BUILTIN_CHILD_TOOL_NAMES, MAX_LIVE_DETACHED_RUNS, MAX_STEP_OUTPUT_BYTES } from "../extensions/multiagent/src/types.ts";
 
 class FakeChild extends EventEmitter {
 	stdin = new PassThrough();
@@ -343,12 +343,15 @@ test("start returns a registered runId and run_status exposes final output", asy
 	const options = makeOptions(root, harness.spawn);
 	const started = await runAgentTeam(graph(), options);
 	const runId = started.details.run?.runId;
-	assert.match(runId ?? "", /^agt_/);
+	assert.match(runId ?? "", /^r[1-9][0-9]{0,6}$/);
+	assert.equal((runId ?? "").length <= 8, true);
 	assert.equal(started.details.run?.terminal, false);
 	assert.deepEqual(started.details.steps[0]?.effectiveTools, ["read", "grep", "find", "ls"]);
 	assert.deepEqual(started.details.steps[0]?.extensionTools, []);
 	assert.deepEqual(started.details.steps[0]?.callerSkills, []);
 	assert.match(started.content[0].text, /## Effective step tools/);
+	assert.match(started.content[0].text, /Next: keep the short runId/);
+	assert.match(started.content[0].text, /Run: r[1-9][0-9]{0,6}/);
 	assert.match(started.content[0].text, /effectiveTools=read,grep,find,ls/);
 	const compact = await waitTerminal(root, runId ?? "", options, 20, false);
 	assert.equal(compact.details.run?.status, "succeeded");
@@ -376,6 +379,69 @@ test("start returns a registered runId and run_status exposes final output", asy
 	assert.equal(debug.details.run?.lastEvent, "terminal: succeeded");
 	assert.equal(harness.messages[0]?.type, "prompt");
 	assert.equal(harness.messages[0]?.message.includes("Objective:"), true);
+});
+
+test("cleanup does not recycle short runId handles in one process", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-runid-reuse-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("auto");
+	const options = makeOptions(root, harness.spawn);
+	const first = await runAgentTeam(graph(), options);
+	const firstRunId = first.details.run?.runId ?? "";
+	await waitTerminal(root, firstRunId, options);
+	await runAgentTeam({ action: "cleanup", runId: firstRunId }, options);
+	const second = await runAgentTeam(graph(), options);
+	const secondRunId = second.details.run?.runId ?? "";
+	assert.match(secondRunId, /^r[1-9][0-9]{0,6}$/);
+	assert.notEqual(secondRunId, firstRunId);
+	await waitTerminal(root, secondRunId, options);
+	await runAgentTeam({ action: "cleanup", runId: secondRunId }, options);
+});
+
+test("short runId handles are owned by the starting session", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-runid-owner-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("hold");
+	const ownerOptions = makeOptions(root, harness.spawn, { sessionId: "session-a" });
+	const otherOptions = makeOptions(root, harness.spawn, { sessionId: "session-b" });
+	const started = await runAgentTeam(graph(), ownerOptions);
+	const runId = started.details.run?.runId ?? "";
+	assert.match(runId, /^r[1-9][0-9]{0,6}$/);
+	const otherStatus = await runAgentTeam({ action: "run_status", runId }, otherOptions);
+	assert.equal(otherStatus.details.error?.code, "run-not-found");
+	assert.equal(otherStatus.details.run, undefined);
+	assert.doesNotMatch(otherStatus.content[0].text, new RegExp(`${runId}:running`));
+	const otherCancel = await runAgentTeam({ action: "cancel", runId, reason: "wrong session" }, otherOptions);
+	assert.equal(otherCancel.details.error?.code, "run-not-found");
+	const ownerLive = await runAgentTeam({ action: "run_status", runId }, ownerOptions);
+	assert.equal(ownerLive.details.run?.status, "running");
+	harness.release("owner done");
+	await waitTerminal(root, runId, ownerOptions);
+	const otherCleanup = await runAgentTeam({ action: "cleanup", runId }, otherOptions);
+	assert.equal(otherCleanup.details.error?.code, "run-not-found");
+	const ownerCleanup = await runAgentTeam({ action: "cleanup", runId }, ownerOptions);
+	assert.equal(ownerCleanup.details.cleanup?.runId, runId);
+});
+
+test("capacity denial copy does not expose other-session run handles", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-capacity-owner-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("hold");
+	const ownerOptions = makeOptions(root, harness.spawn, { sessionId: "session-a" });
+	const otherOptions = makeOptions(root, harness.spawn, { sessionId: "session-b" });
+	const runIds: string[] = [];
+	for (let index = 0; index < MAX_LIVE_DETACHED_RUNS; index += 1) {
+		const started = await runAgentTeam(graph(), ownerOptions);
+		const runId = started.details.run?.runId ?? "";
+		assert.match(runId, /^r[1-9][0-9]{0,6}$/);
+		runIds.push(runId);
+	}
+	const denied = await runAgentTeam(graph(), otherOptions);
+	assert.equal(denied.details.error?.code, "detached-run-live-cap-reached");
+	assert.match(denied.content[0].text, /other sessions: 16 live/);
+	for (const runId of runIds) assert.doesNotMatch(denied.content[0].text, new RegExp(`${runId}:running`));
+	for (const runId of runIds) await runAgentTeam({ action: "cancel", runId, reason: "test cleanup" }, ownerOptions);
+	for (const runId of runIds) {
+		await waitTerminal(root, runId, ownerOptions);
+		await runAgentTeam({ action: "cleanup", runId }, ownerOptions);
+	}
 });
 
 test("run snapshots expose the launch-time child model lane", async () => {
@@ -1887,7 +1953,7 @@ test("start fails before launching children when preflight or authority fails", 
 	await writeFile(join(root, ".pi", "settings.json"), "{}");
 	const harness = rpcHarness("auto");
 	const options = makeOptions(root, harness.spawn);
-	const invalidAction = await runAgentTeam({ action: "run", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one" } as AgentTeamInput, options);
+	const invalidAction = await runAgentTeam({ action: "run", runId: "r1", stepId: "one" } as AgentTeamInput, options);
 	assert.equal(invalidAction.details.ok, false);
 	assert.equal(invalidAction.details.diagnostics.some((item) => item.code === "action-invalid" || item.code === "input-schema-invalid"), true);
 	assert.equal(invalidAction.content[0].text.startsWith("# agent_team error"), true);
@@ -1897,17 +1963,23 @@ test("start fails before launching children when preflight or authority fails", 
 	assert.equal(invalidCatalog.details.error?.code, "catalog-control-fields-denied");
 	assert.equal(invalidCatalog.content[0].text.startsWith("# agent_team error"), true);
 	assert.match(invalidCatalog.content[0].text, /library\.query/);
-	const invalidChannel = await runAgentTeam({ action: "message", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", channel: "chat", text: "x" } as AgentTeamInput, options);
+	const legacyRunId = await runAgentTeam({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" } as AgentTeamInput, options);
+	assert.equal(legacyRunId.details.diagnostics.some((item) => item.code === "input-schema-invalid" && item.path === "/runId"), true);
+	assert.equal(legacyRunId.details.error?.code, "input-schema-invalid");
+	assert.match(legacyRunId.content[0].text, /^# agent_team error/);
+	assert.match(legacyRunId.content[0].text, /shaped like r1/);
+	assert.equal(harness.children.length, 0);
+	const invalidChannel = await runAgentTeam({ action: "message", runId: "r1", stepId: "one", channel: "chat", text: "x" } as AgentTeamInput, options);
 	assert.equal(invalidChannel.details.diagnostics.some((item) => item.code === "input-schema-invalid"), true);
-	const invalidMaxBytes = await runAgentTeam({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", maxBytes: 0 } as AgentTeamInput, options);
+	const invalidMaxBytes = await runAgentTeam({ action: "run_status", runId: "r1", maxBytes: 0 } as AgentTeamInput, options);
 	assert.equal(invalidMaxBytes.details.diagnostics.some((item) => item.code === "input-schema-invalid"), true);
 	assert.match(invalidMaxBytes.content[0].text, /preview:true/);
 	assert.match(invalidMaxBytes.content[0].text, /debugEvents:true/);
-	const multiInvalid = await runAgentTeam({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "Bad Step", cursor: "", waitSeconds: 0, maxBytes: 0, preview: "yes", debugEvents: "no" } as AgentTeamInput, options);
+	const multiInvalid = await runAgentTeam({ action: "run_status", runId: "r1", stepId: "Bad Step", cursor: "", waitSeconds: 0, maxBytes: 0, preview: "yes", debugEvents: "no" } as AgentTeamInput, options);
 	const schemaDiagnostics = multiInvalid.details.diagnostics.filter((item) => item.code === "input-schema-invalid");
 	assert.equal(schemaDiagnostics.length, 5);
 	assert.equal(schemaDiagnostics.every((item) => item.repair && item.repair.length > 0), true);
-	const invalidPreviewControls = await runAgentTeam({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", maxBytes: 0, preview: "yes", debugEvents: "no" } as AgentTeamInput, options);
+	const invalidPreviewControls = await runAgentTeam({ action: "run_status", runId: "r1", maxBytes: 0, preview: "yes", debugEvents: "no" } as AgentTeamInput, options);
 	const repairsByPath = new Map(invalidPreviewControls.details.diagnostics.filter((item) => item.code === "input-schema-invalid").map((item) => [item.path, item.repair ?? ""]));
 	assert.match(repairsByPath.get("/maxBytes") ?? "", /maxBytes/);
 	assert.match(repairsByPath.get("/preview") ?? "", /preview/);
@@ -1928,7 +2000,7 @@ test("start fails before launching children when preflight or authority fails", 
 	assert.match(misplacedExtensionTool.content[0].text, /agent\.tools accepts only built-in child tools/);
 	assert.match(misplacedExtensionTool.content[0].text, /steps\[\]\.agent\.extensionTools/);
 	assert.match(misplacedExtensionTool.content[0].text, /catalog-copied/);
-	const invalidText = await runAgentTeam({ action: "message", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", channel: "steer", text: 42 }, options);
+	const invalidText = await runAgentTeam({ action: "message", runId: "r1", stepId: "one", channel: "steer", text: 42 }, options);
 	assert.equal(invalidText.details.diagnostics.some((item) => item.code === "input-schema-invalid"), true);
 	const denied = await runAgentTeam(graph([{ id: "one", agent: { system: "x", tools: ["bash"] }, task: "x" }]), options);
 	assert.equal(denied.details.error?.code, "start-planning-failed");

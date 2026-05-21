@@ -73,7 +73,7 @@ function extensionToolAuthorityCopy(tool: AgentTeamDetails["extensionTools"][num
 }
 
 function formatStart(details: AgentTeamDetails): string {
-	return ["# agent_team start", "", TRUST_NOTICE, errorLine(details), details.run ? formatRunSnapshot(details.run) : "No run snapshot.", formatEffectiveStepTools(details.steps), "", "Next: keep the runId. No action is needed while work is healthy; wait for pushed notices or terminal state. Use run_status only for manual compact inspection or waitSeconds; use step_result {runId, stepId} for one step. Preserve artifact paths before cleanup; cleanup deletes retained evidence.", diag(details)].filter(Boolean).join("\n");
+	return ["# agent_team start", "", TRUST_NOTICE, errorLine(details), details.run ? formatRunSnapshot(details.run) : "No run snapshot.", formatEffectiveStepTools(details.steps), "", "Next: keep the short runId. No action is needed while work is healthy; wait for pushed notices or terminal state. Use run_status only for manual compact inspection or waitSeconds; use step_result {runId, stepId} for one step. Preserve artifact paths before cleanup; cleanup deletes retained evidence.", diag(details)].filter(Boolean).join("\n");
 }
 
 function formatRunStatus(details: AgentTeamDetails): string {

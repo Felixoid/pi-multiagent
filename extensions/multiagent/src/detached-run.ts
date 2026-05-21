@@ -28,6 +28,7 @@ import { DEFAULT_RESULT_PREVIEW_MAX_BYTES as PREVIEW_BYTES } from "./types.ts";
 
 export class DetachedRun {
 	readonly id: string;
+	readonly ownerKey: string;
 	readonly createdAt = new Date().toISOString();
 	private readonly graph: ResolvedGraph;
 	private readonly options: AgentTeamRuntimeOptions;
@@ -49,6 +50,7 @@ export class DetachedRun {
 
 	constructor(id: string, graph: ResolvedGraph, options: AgentTeamRuntimeOptions, library: LibraryOptions) {
 		this.id = id;
+		this.ownerKey = runOwnerKey(options.sessionId);
 		this.graph = graph;
 		this.options = options;
 		this.library = library;
@@ -63,6 +65,10 @@ export class DetachedRun {
 		this.maxRunTimer = setTimeout(() => this.expire(), this.graph.options.maxRunSeconds * 1000);
 		unrefTimer(this.maxRunTimer);
 		queueMicrotask(() => void this.schedule());
+	}
+
+	isOwnedBy(sessionId: string | undefined): boolean {
+		return this.ownerKey === runOwnerKey(sessionId);
 	}
 
 	hasStep(stepId: string) {
@@ -339,6 +345,10 @@ export class DetachedRun {
 		this.updatedAt = now();
 		this.runUi(() => this.options.onRunUpdate?.(this.details("run_status")));
 	}
+}
+
+function runOwnerKey(sessionId: string | undefined): string {
+	return sessionId ?? "process";
 }
 
 function now(): string {

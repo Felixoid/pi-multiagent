@@ -79,7 +79,7 @@ async function loadPackageRoot(root: string, label: string): Promise<void> {
 			{ action: "catalog", library: { sources: ["package"], query: "review" } },
 			undefined,
 			undefined,
-			{ cwd: root, hasUI: false, model: undefined, ui: { confirm: async () => false } },
+			extensionCtx(root),
 		);
 		assert.equal(catalog.content[0].text.includes("package:reviewer"), true, `${label}: catalog should include package:reviewer`);
 		const webCatalog = await tool.execute(
@@ -87,7 +87,7 @@ async function loadPackageRoot(root: string, label: string): Promise<void> {
 			{ action: "catalog", library: { sources: ["package"], query: "web research" } },
 			undefined,
 			undefined,
-			{ cwd: root, hasUI: false, model: undefined, ui: { confirm: async () => false } },
+			extensionCtx(root),
 		);
 		assert.equal(webCatalog.content[0].text.includes("package:web-researcher"), true, `${label}: catalog should include package:web-researcher`);
 		const validationCatalog = await tool.execute(
@@ -95,10 +95,14 @@ async function loadPackageRoot(root: string, label: string): Promise<void> {
 			{ action: "catalog", library: { sources: ["package"], query: "run validation commands" } },
 			undefined,
 			undefined,
-			{ cwd: root, hasUI: false, model: undefined, ui: { confirm: async () => false } },
+			extensionCtx(root),
 		);
 		assert.equal(validationCatalog.content[0].text.includes("package:validator"), true, `${label}: catalog should include package:validator`);
 	}
+}
+
+function extensionCtx(root: string): object {
+	return { cwd: root, hasUI: false, model: undefined, sessionManager: { getSessionId: () => `load-${root}` }, ui: { confirm: async () => false } };
 }
 
 async function assertSkillManifest(root: string, label: string, skills: unknown): Promise<void> {

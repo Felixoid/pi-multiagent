@@ -11,9 +11,9 @@ const theme = {
 
 test("renderAgentTeamCall summarizes detached actions", () => {
 	assert.match(renderAgentTeamCall({ action: "start", graph: { objective: "x", steps: [{ id: "one", agent: { system: "x" }, task: "x" }] } }, theme, undefined).render(120).join("\n"), /launch 1 step/);
-	assert.match(renderAgentTeamCall({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" }, theme, undefined).render(120).join("\n"), /status/);
-	assert.match(renderAgentTeamCall({ action: "cancel", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" }, theme, undefined).render(120).join("\n"), /stop run/);
-	assert.match(renderAgentTeamCall({ action: "cleanup", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" }, theme, undefined).render(120).join("\n"), /delete evidence/);
+	assert.match(renderAgentTeamCall({ action: "run_status", runId: "r1" }, theme, undefined).render(120).join("\n"), /status/);
+	assert.match(renderAgentTeamCall({ action: "cancel", runId: "r1" }, theme, undefined).render(120).join("\n"), /stop run/);
+	assert.match(renderAgentTeamCall({ action: "cleanup", runId: "r1" }, theme, undefined).render(120).join("\n"), /delete evidence/);
 });
 
 test("renderAgentTeamResult reports catalog and run state", () => {
@@ -38,7 +38,7 @@ test("renderAgentTeamResult renders cancel as a human stop receipt", () => {
 		],
 	});
 	const rendered = renderAgentTeamResult({ content: [], details: canceling }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
-	assert.match(rendered, /agent_team stop requested agt_/);
+	assert.match(rendered, /agent_team stop requested r1/);
 	assert.match(rendered, /0\/4 complete  4 working/);
 	assert.match(rendered, /working now runtime-safety prompt sent; \+3 more lanes/);
 	assert.match(rendered, /last update tui-human: terminalizing \[canceled\]/);
@@ -88,15 +88,15 @@ test("renderAgentTeamLiveRunsWidget lets attention outrank objective text", () =
 
 test("renderAgentTeamLiveRunsWidget distinguishes multiple live runs", () => {
 	const first = details("run_status", {
-		run: run({ runId: "agt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", objective: "TUI rewrite", liveStepIds: ["review"], counts: counts({ running: 1, succeeded: 2 }) }),
+		run: run({ runId: "r1", objective: "TUI rewrite", liveStepIds: ["review"], counts: counts({ running: 1, succeeded: 2 }) }),
 		steps: [step({ id: "review", agentRef: "package:reviewer", status: "running", lastActivity: "assistant writing" })],
 	});
 	const second = details("run_status", {
-		run: run({ runId: "agt_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", objective: "Release proof", liveStepIds: ["fix"], counts: counts({ running: 1, failed: 1 }) }),
+		run: run({ runId: "r2", objective: "Release proof", liveStepIds: ["fix"], counts: counts({ running: 1, failed: 1 }) }),
 		steps: [step({ id: "validator", agentRef: "package:validator", status: "failed", errorMessage: "gate failed" }), step({ id: "fix", agentRef: "package:worker", status: "running", lastActivity: "tool read running" })],
 	});
 	const third = details("run_status", {
-		run: run({ runId: "agt_cccccccccccccccccccccccccccccccc", objective: "Docs audit", liveStepIds: ["docs"], counts: counts({ running: 1 }) }),
+		run: run({ runId: "r3", objective: "Docs audit", liveStepIds: ["docs"], counts: counts({ running: 1 }) }),
 		steps: [step({ id: "docs", agentRef: "package:docs-auditor", status: "running", lastActivity: "assistant writing" })],
 	});
 	const rendered = renderAgentTeamLiveRunsWidget([first, second, third], theme).render(120).join("\n");
@@ -127,10 +127,10 @@ test("renderAgentTeamResult keeps run context for run-backed errors", () => {
 		ok: false,
 		error: { code: "message-not-delivered", message: "Step is not live or messageable." },
 		run: run({ objective: "detached", liveStepIds: [], sinkStepIds: ["one"], lastEvent: "one: finish", counts: counts({ succeeded: 1 }) }),
-		message: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", channel: "steer", clientMessageId: "m", accepted: false, undeliveredReason: "Step is not live or messageable." },
+		message: { runId: "r1", stepId: "one", channel: "steer", clientMessageId: "m", accepted: false, undeliveredReason: "Step is not live or messageable." },
 	});
 	const rendered = renderAgentTeamResult({ content: [], details: denied }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
-	assert.match(rendered, /agent_team message denied agt_/);
+	assert.match(rendered, /agent_team message denied r1/);
 	assert.match(rendered, /needs attention/);
 	assert.match(rendered, /message-not-delivered/);
 	assert.match(rendered, /message one Step is not live or messageable/);
@@ -160,7 +160,7 @@ test("renderAgentTeamResult summarizes pushed notices with visible artifacts", (
 	const notice = details("run_status", {
 		run: run({ objective: "detached", status: "succeeded", terminal: true, liveStepIds: [], sinkStepIds: ["one"], lastEvent: "terminal: succeeded", expiresAt: "2030-01-01T00:00:00.000Z", canMessage: false, canCancel: false, canCleanup: true, counts: counts({ succeeded: 1 }) }),
 		outputs: [{ stepId: "one", status: "succeeded", text: undefined, filePath: "/tmp/one-final.md", chars: 100 }],
-		notice: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", mode: "milestones", terminal: true, reasons: ["terminal:succeeded"], noticeCount: 1, noticeLimitReached: false },
+		notice: { runId: "r1", mode: "milestones", terminal: true, reasons: ["terminal:succeeded"], noticeCount: 1, noticeLimitReached: false },
 	});
 	const rendered = renderAgentTeamResult({ content: [], details: notice }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
 	assert.match(rendered, /terminal notice terminal:succeeded/);
@@ -168,7 +168,7 @@ test("renderAgentTeamResult summarizes pushed notices with visible artifacts", (
 	assert.match(rendered, /expiresAt=2030-01-01T00:00:00\.000Z/);
 	const fallback = formatAgentTeamNoticeText(notice);
 	assert.match(fallback, /agent_team succeeded detached/);
-	assert.match(fallback, /runId=agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_/);
+	assert.match(fallback, /runId=r1/);
 	assert.match(fallback, /final evidence one succeeded one-final.md/);
 	assert.match(fallback, /artifact paths one=\/tmp\/one-final\.md/);
 	assert.match(fallback, /expiresAt=2030-01-01T00:00:00\.000Z/);
@@ -192,7 +192,7 @@ test("renderAgentTeamResult terminal notices surface upstream terminal artifact 
 			step({ id: "sink", agentRef: "inline:sink", status: "succeeded", needs: ["upstream"], outputFilePath: "/tmp/sink-final.md", outputChars: 9 }),
 		],
 		outputs: [{ stepId: "sink", status: "succeeded", text: undefined, filePath: "/tmp/sink-final.md", chars: 9 }],
-		notice: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", mode: "milestones", terminal: true, reasons: ["terminal:succeeded"], noticeCount: 1, noticeLimitReached: false },
+		notice: { runId: "r1", mode: "milestones", terminal: true, reasons: ["terminal:succeeded"], noticeCount: 1, noticeLimitReached: false },
 	});
 	const rendered = renderAgentTeamResult({ content: [], details: notice }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
 	assert.match(rendered, /artifactPaths=sink=\/tmp\/sink-final\.md, upstream=\/tmp\/upstream-final\.md/);
@@ -212,7 +212,7 @@ test("renderAgentTeamResult terminal notices cap large artifact path lists", () 
 			step({ id: "d", agentRef: "inline:d", status: "succeeded", outputFilePath: "/tmp/d-final.md", outputChars: 1 }),
 		],
 		outputs: [{ stepId: "sink", status: "succeeded", text: undefined, filePath: "/tmp/sink-final.md", chars: 1 }],
-		notice: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", mode: "milestones", terminal: true, reasons: ["terminal:succeeded"], noticeCount: 1, noticeLimitReached: false },
+		notice: { runId: "r1", mode: "milestones", terminal: true, reasons: ["terminal:succeeded"], noticeCount: 1, noticeLimitReached: false },
 	});
 	const fallback = formatAgentTeamNoticeText(notice);
 	assert.match(fallback, /artifact paths sink=\/tmp\/sink-final\.md, a=\/tmp\/a-final\.md, b=\/tmp\/b-final\.md, \+2 more; use run_status\/step_result/);
@@ -228,7 +228,7 @@ test("renderAgentTeamResult keeps milestone notices compact", () => {
 	const notice = details("run_status", {
 		run: run({ objective: "detached", status: "running", terminal: false, liveStepIds: ["one"], sinkStepIds: ["one"], lastEvent: "sink one running", counts: counts({ running: 1 }) }),
 		outputs: [{ stepId: "one", status: "running", text: undefined, filePath: "/tmp/one-live.md", chars: 100 }],
-		notice: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", mode: "milestones", terminal: false, reasons: ["sink one running"], noticeCount: 1, noticeLimitReached: false },
+		notice: { runId: "r1", mode: "milestones", terminal: false, reasons: ["sink one running"], noticeCount: 1, noticeLimitReached: false },
 	});
 	const rendered = renderAgentTeamResult({ content: [], details: notice }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
 	assert.match(rendered, /milestone notice sink one running/);
@@ -252,7 +252,7 @@ test("renderAgentTeamResult summarizes multiple sink finals", () => {
 test("renderAgentTeamResult reports cleanup as evidence deletion", () => {
 	const cleanup = details("cleanup", {
 		run: run({ objective: "detached", status: "succeeded", terminal: true, liveStepIds: [], sinkStepIds: ["one"], canMessage: false, canCancel: false, canCleanup: false, counts: counts({ succeeded: 1 }) }),
-		cleanup: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", deletedPaths: ["/tmp/one-final.md"] },
+		cleanup: { runId: "r1", deletedPaths: ["/tmp/one-final.md"] },
 	});
 	const rendered = renderAgentTeamResult({ content: [], details: cleanup }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
 	assert.match(rendered, /agent_team evidence deleted/);
@@ -265,14 +265,14 @@ test("renderAgentTeamResult reports cleanup as evidence deletion", () => {
 
 test("renderAgentTeamResult reports actual cleanup receipt shape without run snapshot", () => {
 	const cleanup = details("cleanup", {
-		cleanup: { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", deletedPaths: ["/tmp/one-final.md", "/tmp/run"] },
+		cleanup: { runId: "r1", deletedPaths: ["/tmp/one-final.md", "/tmp/run"] },
 	});
 	const rendered = renderAgentTeamResult({ content: [], details: cleanup }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
-	assert.match(rendered, /agent_team evidence deleted agt_/);
+	assert.match(rendered, /agent_team evidence deleted r1/);
 	assert.match(rendered, /evidence deleted 2 retained path/);
 	assert.doesNotMatch(rendered, /cleanup ok|no run/);
 	const plain = formatAgentTeamNoticeText(cleanup);
-	assert.match(plain, /agent_team evidence deleted agt_/);
+	assert.match(plain, /agent_team evidence deleted r1/);
 	assert.match(plain, /evidence deleted 2 retained path/);
 	assert.doesNotMatch(plain, /run_status|step_result|artifacts/);
 });
@@ -284,12 +284,12 @@ test("renderAgentTeamResult keeps cleanup denial distinct from evidence deletion
 		run: run({ objective: "detached", liveStepIds: ["one"], sinkStepIds: ["one"], lastEvent: "one: running", counts: counts({ running: 1 }) }),
 	});
 	const rendered = renderAgentTeamResult({ content: [], details: denied }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
-	assert.match(rendered, /agent_team cleanup denied agt_/);
+	assert.match(rendered, /agent_team cleanup denied r1/);
 	assert.match(rendered, /cleanup-run-live/);
 	assert.match(rendered, /cleanup cleanup-run-live/);
 	assert.doesNotMatch(rendered, /evidence deleted/);
 	const plain = formatAgentTeamNoticeText(denied);
-	assert.match(plain, /agent_team cleanup denied agt_/);
+	assert.match(plain, /agent_team cleanup denied r1/);
 	assert.match(plain, /cleanup cleanup-run-live/);
 	assert.doesNotMatch(plain, /evidence deleted/);
 });
@@ -301,12 +301,12 @@ test("renderAgentTeamResult keeps cleanup failure distinct from evidence deletio
 		run: run({ objective: "detached", status: "succeeded", terminal: true, liveStepIds: [], sinkStepIds: ["one"], lastEvent: "terminal: succeeded", canMessage: false, canCancel: false, canCleanup: true, counts: counts({ succeeded: 1 }) }),
 	});
 	const rendered = renderAgentTeamResult({ content: [], details: failed }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
-	assert.match(rendered, /agent_team cleanup failed agt_/);
+	assert.match(rendered, /agent_team cleanup failed r1/);
 	assert.match(rendered, /cleanup-artifacts-failed/);
 	assert.match(rendered, /cleanup cleanup-artifacts-failed/);
 	assert.doesNotMatch(rendered, /evidence deleted/);
 	const plain = formatAgentTeamNoticeText(failed);
-	assert.match(plain, /agent_team cleanup failed agt_/);
+	assert.match(plain, /agent_team cleanup failed r1/);
 	assert.match(plain, /cleanup cleanup-artifacts-failed/);
 	assert.doesNotMatch(plain, /evidence deleted/);
 });
@@ -316,7 +316,7 @@ function details(action: AgentTeamDetails["action"], fields: Partial<AgentTeamDe
 }
 
 function run(fields: Partial<RunSnapshot>): RunSnapshot {
-	return { runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", objective: "detached", status: "running", terminal: false, createdAt: "now", updatedAt: "now", expiresAt: undefined, liveStepIds: [], sinkStepIds: [], lastEvent: undefined, canMessage: true, canCancel: true, canCleanup: false, counts: counts({}), ...fields };
+	return { runId: "r1", objective: "detached", status: "running", terminal: false, createdAt: "now", updatedAt: "now", expiresAt: undefined, liveStepIds: [], sinkStepIds: [], lastEvent: undefined, canMessage: true, canCancel: true, canCleanup: false, counts: counts({}), ...fields };
 }
 
 function step(fields: Partial<StepSnapshot> & { id: string; agentRef: string; status: StepStatus }): StepSnapshot {

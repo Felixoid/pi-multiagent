@@ -164,7 +164,7 @@ export const AgentTeamSchema = Type.Object(
 		graph: Type.Optional(GraphSchema),
 		graphFile: Type.Optional(nonEmptyText("Start-only relative path to a pure detached graph JSON file.", MAX_PATH_FIELD_CHARS)),
 		options: Type.Optional(StartOptionsSchema),
-		runId: Type.Optional(Type.String({ description: "Detached run bearer capability returned by start.", minLength: 28, maxLength: 100, pattern: RUN_ID_PATTERN })),
+		runId: Type.Optional(Type.String({ description: "Short process-local detached run handle returned by start for this Pi session.", minLength: 2, maxLength: 8, pattern: RUN_ID_PATTERN })),
 		cursor: Type.Optional(Type.String({ description: "run_status cursor returned by a prior run_status call.", minLength: 1, maxLength: 128 })),
 		stepId: Type.Optional(publicId("Step id for run_status wait/debug targeting only, or the required target for step_result/message. run_status stepId does not select step text; use step_result for one-step output.")),
 		waitSeconds: Type.Optional(Type.Number({ description: "run_status-only bounded wait/read control. Before returning the same compact run_status snapshot, wait until a material parent-visible event occurs or this timeout expires: run terminal/cancel/expiry, sink or targeted step finish, failed/blocked/timed-out/canceled step, or error diagnostic. Routine assistant/tool activity does not wake run_status.", minimum: 1, maximum: MAX_RUN_STATUS_WAIT_SECONDS, multipleOf: 1 })),

@@ -39,7 +39,7 @@ After installing in a running Pi session, use `/reload`. Reload requests cancell
 | Action | Human meaning |
 | --- | --- |
 | `catalog` | Discover package/user/project specialists, routing tags, default built-in tool profiles, and active extension-tool provenance. |
-| `start` | Launch exactly one inline graph or trusted workspace `graphFile`; return a process-local `runId`. |
+| `start` | Launch exactly one inline graph or trusted workspace `graphFile`; return a short process-local `runId` such as `r1`. |
 | `run_status` | Compact run/artifact snapshot, diagnostics, effective tools/model lane, or bounded wait with `waitSeconds`. Assistant text previews require `preview:true`; raw events require `debugEvents:true`. |
 | `step_result` | Inspect one step's live or terminal artifact/text surface. Assistant text previews require `preview:true`. |
 | `message` | Queue live clarification or scope repair to one running step. |
@@ -78,7 +78,7 @@ Let pushed notices report progress. Need state or artifact paths:
 ```json
 {
   "action": "run_status",
-  "runId": "agt_REPLACE_WITH_START_RUN_ID",
+  "runId": "r1",
   "waitSeconds": 30
 }
 ```
@@ -88,19 +88,19 @@ Need one step's text or final artifact:
 ```json
 {
   "action": "step_result",
-  "runId": "agt_REPLACE_WITH_START_RUN_ID",
+  "runId": "r1",
   "stepId": "inspect",
   "preview": true
 }
 ```
 
-Cleanup is evidence deletion, not routine hygiene. Preserve `runId`, status, terminal artifact paths, and any needed full text before cleanup.
+Cleanup is evidence deletion, not routine hygiene. Preserve the short `runId`, status, terminal artifact paths, and any needed full text before cleanup.
 
 ## Lifecycle and evidence
 
-`start` returns a usable registered `runId` or leaves no child process alive. Parent abort before registration cancels setup; parent abort after `runId` does not kill the detached run. Live and retained run registries are process-local; on Pi session shutdown or reload the extension requests cancellation of live registered runs, but `agent_team` is not crash-resumable and in-memory `runId`s should not be treated as recoverable after reload.
+`start` returns a usable short registered `runId` such as `r1` or leaves no child process alive. The handle is not a secret or high-entropy bearer token; it is a convenience handle inside the current Pi session and extension process. Follow-up actions from another Pi session in the same process treat the handle as not found. Parent abort before registration cancels setup; parent abort after `runId` does not kill the detached run. Live and retained run registries are process-local; on Pi session shutdown or reload the extension requests cancellation of live registered runs owned by that session, but `agent_team` is not crash-resumable and in-memory `runId`s should not be treated as recoverable after reload.
 
-In short, pushed notices are compact human receipts and omit the full child transcript. Terminal notices include terminal step artifact paths and retention expiry when available; milestone notices stay compact. Use `run_status` for sink artifact indexes, all terminal step artifact metadata, diagnostics, bounded task previews, cwd/upstream references, and stop/status hints; use `step_result` for one non-sink or sink step. Full assistant finals are retained in tmp artifact files until retention expiry or cleanup. If a child Pi reports context overflow and then Pi compacts/continues to a later valid assistant final, `agent_team` treats the overflow as a recovery boundary; stale pre-overflow text is not accepted as success. If no valid post-recovery final arrives before closeout or timeout, the step fails with an unrecovered-overflow diagnostic and `needs` dependents stay blocked.
+In short, pushed notices are compact human receipts and omit the full child transcript. Terminal notices include terminal step artifact paths and retention expiry when available; milestone notices stay compact. Pushed notices are delivered only while the Pi session that started the short `runId` is still the active delivery target; if you switch sessions, use `run_status` after returning to the starting session. Use `run_status` for sink artifact indexes, all terminal step artifact metadata, diagnostics, bounded task previews, cwd/upstream references, and stop/status hints; use `step_result` for one non-sink or sink step. Full assistant finals are retained in tmp artifact files until retention expiry or cleanup. If a child Pi reports context overflow and then Pi compacts/continues to a later valid assistant final, `agent_team` treats the overflow as a recovery boundary; stale pre-overflow text is not accepted as success. If no valid post-recovery final arrives before closeout or timeout, the step fails with an unrecovered-overflow diagnostic and `needs` dependents stay blocked.
 
 Retained detached runs keep terminal metadata and artifact paths only inside the current extension process. Cleanup frees only terminal retained runs and deletes package-owned retained evidence. Preserve artifacts before cleanup when they may support handoff, compaction recovery, chained graphs, or release proof.
 
@@ -178,7 +178,8 @@ Before starting a mutation-capable graph, verify: exact parent authorization, co
 | `run_status` wait | `waitSeconds` max 60 seconds |
 | Live detached runs | 16 live runs per extension process; completion or cancel frees live capacity |
 | Retained detached runs | 64 retained runs per extension process, including live and terminal runs; cleanup frees only terminal retained runs |
-| Pushed notices | `none`, `final`, or `milestones`; default `milestones`; max 100 non-terminal notices; default 12; minimum interval default 10 seconds, max 3600 |
+| Run handle | Short process-local `runId` values `r1` through `r9999999`; not a secret, cross-session identifier, or recycled within one extension process; usable only by the Pi session that started the run |
+| Pushed notices | `none`, `final`, or `milestones`; default `milestones`; max 100 non-terminal notices; default 12; minimum interval default 10 seconds, max 3600; session-owned delivery only while the starting Pi session is active |
 | Inline upstream handoff | 12000 chars per dependency; larger upstream sends a 2000-char preview plus artifact path |
 | `run_status`/`step_result` model-facing output | Compact formatter cap is owned by Pi/package display; `preview` defaults false, and full artifacts are not trimmed |
 | Final preview per step | Optional `preview:true`; 6000 chars plus full tmp artifact path |

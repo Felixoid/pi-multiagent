@@ -13,11 +13,11 @@ const graph = {
 
 test("AgentTeamSchema exposes detached-only action set and rejects run", () => {
 	for (const action of ["catalog", "start", "run_status", "step_result", "message", "cancel", "cleanup"]) {
-		const input = action === "start" ? { action, graph } : action === "step_result" ? { action, runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one" } : action === "message" ? { action, runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one", channel: "steer", text: "continue" } : action === "catalog" ? { action } : { action, runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" };
+		const input = action === "start" ? { action, graph } : action === "step_result" ? { action, runId: "r1", stepId: "one" } : action === "message" ? { action, runId: "r1", stepId: "one", channel: "steer", text: "continue" } : action === "catalog" ? { action } : { action, runId: "r1" };
 		assert.equal(validate.Check(input), true, action);
 	}
-	assert.equal(validate.Check({ action: "run", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one" }), false, "run must stay absent");
-	assert.equal(validate.Check({ action: "unknown", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", stepId: "one" }), false, "unknown actions must stay absent");
+	assert.equal(validate.Check({ action: "run", runId: "r1", stepId: "one" }), false, "run must stay absent");
+	assert.equal(validate.Check({ action: "unknown", runId: "r1", stepId: "one" }), false, "unknown actions must stay absent");
 });
 
 test("AgentTeamSchema preserves public field bounds and defaults", () => {
@@ -29,6 +29,9 @@ test("AgentTeamSchema preserves public field bounds and defaults", () => {
 	assert.equal(root.graphFile.maxLength, MAX_PATH_FIELD_CHARS);
 	assert.equal(root.text.maxLength, MAX_PARENT_MESSAGE_CHARS);
 	assert.equal(root.clientMessageId.maxLength, MAX_CLIENT_MESSAGE_ID_CHARS);
+	assert.equal(root.runId.minLength, 2);
+	assert.equal(root.runId.maxLength, 8);
+	assert.match(root.runId.description, /Short process-local/);
 	assert.equal(root.maxBytes.maximum, MAX_RESULT_PREVIEW_BYTES);
 	assert.equal(root.maxBytes.multipleOf, 1);
 	assert.equal(root.waitSeconds.maximum, MAX_RUN_STATUS_WAIT_SECONDS);
@@ -74,11 +77,16 @@ test("AgentTeamSchema keeps start graph pure and bounded", () => {
 	assert.equal(validate.Check({ action: "start", graph, options: { terminalRetentionSeconds: 1.5 } }), false);
 	assert.equal(validate.Check({ action: "start", graph, options: { notify: { minIntervalSeconds: 0.5 } } }), false);
 	assert.equal(validate.Check({ action: "start", graph: { ...graph, limits: { timeoutSecondsPerStep: 1.5 } } }), false);
-	assert.equal(validate.Check({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", maxBytes: 1.5 }), false);
+	assert.equal(validate.Check({ action: "run_status", runId: "r1", maxBytes: 1.5 }), false);
 });
 
 test("AgentTeamSchema bounds run_status and message controls", () => {
-	const runId = "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_";
+	const runId = "r1";
+	assert.equal(validate.Check({ action: "run_status", runId: "r9999999" }), true);
+	assert.equal(validate.Check({ action: "run_status", runId: "r0" }), false);
+	assert.equal(validate.Check({ action: "run_status", runId: "r01" }), false);
+	assert.equal(validate.Check({ action: "run_status", runId: "r10000000" }), false);
+	assert.equal(validate.Check({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_" }), false);
 	assert.equal(validate.Check({ action: "run_status", runId, maxBytes: DEFAULT_RESULT_PREVIEW_MAX_BYTES, debugEvents: true }), true);
 	assert.equal(validate.Check({ action: "run_status", runId, stepId: "one", waitSeconds: 1 }), true);
 	assert.equal(validate.Check({ action: "run_status", runId, waitSeconds: MAX_RUN_STATUS_WAIT_SECONDS + 1 }), false);

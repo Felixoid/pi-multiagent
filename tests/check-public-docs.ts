@@ -130,11 +130,11 @@ function checkPublicSurfaceOwnership(): void {
 	const skill = readFileSync(join(packageRoot, "skills/pi-multiagent/SKILL.md"), "utf8");
 	const cookbook = readFileSync(join(packageRoot, "skills/pi-multiagent/references/graph-cookbook.md"), "utf8");
 	// Keep these as active public contract invariants rather than a broad prose fossil list.
-	requireFragments("README.md", readme, ["human/operator path", "minimum read-only run", "Cleanup is evidence deletion, not routine hygiene", "cleanup frees only terminal retained runs", "not path confinement", "does not add a read sandbox", "Copy/adapt warning", "release-readiness-review.json", "pnpm run gate"]);
+	requireFragments("README.md", readme, ["human/operator path", "minimum read-only run", "short process-local `runId`", "Cleanup is evidence deletion, not routine hygiene", "cleanup frees only terminal retained runs", "not path confinement", "does not add a read sandbox", "Copy/adapt warning", "release-readiness-review.json", "pnpm run gate"]);
 	requireFragments("README.md", readme, ["pushed notices are compact human receipts and omit the full child transcript", "terminal step artifact paths", "all terminal step artifact metadata", "Assistant text previews require `preview:true`", "raw events require `debugEvents:true`"]);
 	requireFragments("README.md", readme, ["Every child process keeps at least the filesystem read/discovery suite", "effective tools/model lane", "launch time", "context overflow", "Exact duplicate keys reuse the original receipt, whether accepted, denied, or timed out"]);
 	requireFragments("README.md", readme, ["model/provider availability follows normal Pi extension discovery", "callable extension-tool grants", "Graph authority does not disable or gate this normal Pi extension discovery", "project/local explicit `extensionTools` grants", "--agent-team-subagent-skills enabled|disabled", "default `enabled`", "steps[].agent.skills` is rejected"]);
-	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["Action controls are strict", "Pseudo-schema, by action", "Tool profile decision matrix", "Graph design ladder", "coarse child-process authority", "not path-scoped authority", "cwd` narrows launch working context", "not path confinement", "does not add a read sandbox", "mutationScope", "Improving this package"]);
+	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["Action controls are strict", "Pseudo-schema, by action", "short process-local `runId`", "Tool profile decision matrix", "Graph design ladder", "coarse child-process authority", "not path-scoped authority", "cwd` narrows launch working context", "not path confinement", "does not add a read sandbox", "mutationScope", "Improving this package"]);
 	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["all terminal step artifact metadata", "bounded task previews", "cwd/upstream artifact references", "run_status.stepId", "compact pushed notices are untrusted human receipts and omit the full child transcript", "assistant text previews require `preview:true`", "raw events require `debugEvents:true`"]);
 	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["Every child keeps mandatory read/discovery", "launch time", "context overflow", "Exact duplicate keys reuse the original receipt, whether accepted, denied, or timed out", "normal Pi extension discovery for model providers", "callable tool-name allowlist", "Graph authority does not disable or gate this normal Pi extension discovery", "project/local explicit `extensionTools` grants", "--agent-team-subagent-skills enabled|disabled", "default is `enabled`", "`steps[].agent.skills` is rejected"]);
 	requireFragments("skills/pi-multiagent/references/graph-cookbook.md", cookbook, ["Choose a graph shape first", "Graph design ladder", "Task packet templates", "Parent graph packet", "Artifact handoff packet", "Failure Recovery and Partial Evidence Triage", "Alternative Plan Tournament", "Web Research to Local Decision", "validation-matrix-gate.json"]);
@@ -155,9 +155,10 @@ function checkActiveNegativeDocContracts(file: string, text: string): void {
 
 
 function checkActionSnippetHygiene(): void {
-	for (const file of ["README.md", "skills/pi-multiagent/references/graph-cookbook.md"]) {
+	for (const file of ["README.md", "skills/pi-multiagent/SKILL.md", "skills/pi-multiagent/references/graph-cookbook.md", ...collectFiles("examples", ".json")]) {
 		const text = readFileSync(join(packageRoot, file), "utf8");
 		if (text.includes('"cursor": "0"')) failures.push(`${file}: routine run_status snippets must not include cursor:"0"; cursor is for prior run_status/debug backfill`);
+		if (text.includes("agt_REPLACE_WITH_START_RUN_ID") || /\"runId\"\s*:\s*\"agt_/.test(text)) failures.push(`${file}: public runId snippets must use short handles such as r1, not long agt_ placeholders`);
 	}
 }
 

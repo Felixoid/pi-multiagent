@@ -34,11 +34,14 @@ export default function multiagentExtension(pi: ExtensionAPI) {
 
 /** Register agent_team with optional host process-launch override for deterministic integration tests. */
 export function registerMultiagentExtension(pi: ExtensionAPI, extensionOptions: MultiagentExtensionOptions = {}) {
-	const liveRunCards = new Map<string, AgentTeamDetails>();
-	const liveRunWidgetState: LiveRunWidgetState = { component: undefined };
-	pi.on("session_shutdown", (event: { reason?: string }) => {
+	const liveRunUiBySession = new Map<string, LiveRunUiState>();
+	const closedUiSessions = new Set<string>();
+	pi.on("session_shutdown", (event: { reason?: string }, ctx) => {
 		const reason = event.reason ? `Parent Pi session shutdown: ${event.reason}.` : "Parent Pi session shutdown.";
-		for (const run of listDetachedRuns()) if (!run.snapshot().terminal) run.cancel(reason, { forceKill: true });
+		const sessionId = ctx.sessionManager.getSessionId();
+		closedUiSessions.add(sessionId);
+		for (const run of listDetachedRuns()) if (run.isOwnedBy(sessionId) && !run.snapshot().terminal) run.cancel(reason, { forceKill: true });
+		clearRunWidget(ctx, sessionId, liveRunUiBySession);
 	});
 	pi.registerMessageRenderer<AgentTeamDetails>(NOTICE_MESSAGE_TYPE, (message, options, theme) => renderAgentTeamNoticeMessage(message.details, message.content, options, theme));
 	pi.registerFlag(SUBAGENT_SKILLS_FLAG, { description: "Subagent Pi skill propagation: enabled or disabled. Default enabled gives each child all caller-visible skills.", type: "string", default: "enabled" });
@@ -68,7 +71,10 @@ export function registerMultiagentExtension(pi: ExtensionAPI, extensionOptions: 
 		],
 		parameters: AgentTeamSchema,
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const runUi = createRunUiHandlers(pi, ctx, liveRunCards, liveRunWidgetState);
+			const sessionId = ctx.sessionManager.getSessionId();
+			closedUiSessions.delete(sessionId);
+			reconcileRunWidget(ctx, sessionId, liveRunUiBySession);
+			const runUi = createRunUiHandlers(pi, ctx, sessionId, liveRunUiBySession, closedUiSessions);
 			const subagentSkills = readSubagentSkillConfig(pi.getFlag(SUBAGENT_SKILLS_FLAG));
 			const preflight = validatePreflightShape(params);
 			const schemaValid = validateAgentTeamInput.Check(params);
@@ -79,6 +85,7 @@ export function registerMultiagentExtension(pi: ExtensionAPI, extensionOptions: 
 				materializationDiagnostics: subagentSkills.diagnostics,
 				catalogLibrary: catalogPreparation.library,
 				catalogPreparationDiagnostics: catalogPreparation.diagnostics,
+				sessionId,
 				defaults: getInvocationDefaults(pi, ctx),
 				parentTools: getParentToolInventory(pi),
 				parentSkills: getParentSkillInventory(pi),
@@ -95,49 +102,81 @@ export function registerMultiagentExtension(pi: ExtensionAPI, extensionOptions: 
 	});
 }
 
-function createRunUiHandlers(pi: ExtensionAPI, ctx: ExtensionContext, liveRunCards: Map<string, AgentTeamDetails>, liveRunWidgetState: LiveRunWidgetState): { update: (details: AgentTeamDetails) => string | undefined; notice: (details: AgentTeamDetails) => string | undefined } {
+function createRunUiHandlers(pi: ExtensionAPI, ctx: ExtensionContext, sessionId: string, liveRunUiBySession: Map<string, LiveRunUiState>, closedUiSessions: Set<string>): { update: (details: AgentTeamDetails) => string | undefined; notice: (details: AgentTeamDetails) => string | undefined } {
 	return {
 		update(details) {
-			return updateRunWidget(ctx, details, liveRunCards, liveRunWidgetState);
+			return updateRunWidget(ctx, sessionId, details, liveRunUiBySession, closedUiSessions);
 		},
 		notice(details) {
-			return sendNoticeMessage(pi, details);
+			return sendNoticeMessage(pi, ctx, sessionId, closedUiSessions, details);
 		},
 	};
 }
 
-interface LiveRunWidgetState {
+interface LiveRunUiState {
+	cards: Map<string, AgentTeamDetails>;
 	component: AgentTeamLiveRunsWidget | undefined;
 }
 
-function updateRunWidget(ctx: ExtensionContext, details: AgentTeamDetails, liveRunCards: Map<string, AgentTeamDetails>, state: LiveRunWidgetState): string | undefined {
+function updateRunWidget(ctx: ExtensionContext, sessionId: string, details: AgentTeamDetails, liveRunUiBySession: Map<string, LiveRunUiState>, closedUiSessions: Set<string>): string | undefined {
 	if (!ctx.hasUI || !details.run) return undefined;
 	try {
-		if (details.run.terminal) liveRunCards.delete(details.run.runId);
-		else liveRunCards.set(details.run.runId, details);
-		const liveRuns = [...liveRunCards.values()];
-		if (liveRuns.length === 0) {
-			state.component = undefined;
-			ctx.ui.setWidget("agent_team:live", undefined);
-			ctx.ui.setStatus("agent_team", undefined);
-		} else if (state.component) {
-			state.component.setDetails(liveRuns);
-			ctx.ui.setStatus("agent_team", formatAgentTeamLiveStatus(liveRuns));
-		} else {
-			ctx.ui.setWidget("agent_team:live", (tui, theme) => {
-				const component = new AgentTeamLiveRunsWidget(liveRuns, theme, () => tui.requestRender());
-				state.component = component;
-				return component;
-			});
-			ctx.ui.setStatus("agent_team", formatAgentTeamLiveStatus(liveRuns));
+		const closed = closedUiSessions.has(sessionId);
+		let state = liveRunUiBySession.get(sessionId);
+		if (!state && !closed && !details.run.terminal) {
+			state = { cards: new Map(), component: undefined };
+			liveRunUiBySession.set(sessionId, state);
 		}
+		if (state) {
+			if (details.run.terminal || closed) state.cards.delete(details.run.runId);
+			else state.cards.set(details.run.runId, details);
+			if (state.cards.size === 0) liveRunUiBySession.delete(sessionId);
+		}
+		if (closed || ctx.sessionManager.getSessionId() !== sessionId) return undefined;
+		const liveRuns = state ? [...state.cards.values()] : [];
+		if (liveRuns.length === 0) clearRunWidget(ctx, sessionId, liveRunUiBySession);
+		else if (state) setRunWidget(ctx, state, liveRuns, false);
 		return undefined;
 	} catch (error) {
 		return `Could not update agent_team widget: ${errorMessage(error)}`;
 	}
 }
 
-function sendNoticeMessage(pi: ExtensionAPI, details: AgentTeamDetails): string | undefined {
+function reconcileRunWidget(ctx: ExtensionContext, sessionId: string, liveRunUiBySession: Map<string, LiveRunUiState>): void {
+	if (!ctx.hasUI) return;
+	try {
+		const state = liveRunUiBySession.get(sessionId);
+		const liveRuns = state ? [...state.cards.values()] : [];
+		if (liveRuns.length === 0) clearRunWidget(ctx, sessionId, liveRunUiBySession);
+		else if (state) setRunWidget(ctx, state, liveRuns, true);
+	} catch {
+		// Best-effort UI reconciliation must not block the tool call.
+	}
+}
+
+function setRunWidget(ctx: ExtensionContext, state: LiveRunUiState, liveRuns: AgentTeamDetails[], reinstall: boolean): void {
+	if (state.component && !reinstall) {
+		state.component.setDetails(liveRuns);
+		ctx.ui.setStatus("agent_team", formatAgentTeamLiveStatus(liveRuns));
+		return;
+	}
+	ctx.ui.setWidget("agent_team:live", (tui, theme) => {
+		const component = new AgentTeamLiveRunsWidget(liveRuns, theme, () => tui.requestRender());
+		state.component = component;
+		return component;
+	});
+	ctx.ui.setStatus("agent_team", formatAgentTeamLiveStatus(liveRuns));
+}
+
+function clearRunWidget(ctx: ExtensionContext, sessionId: string, liveRunUiBySession: Map<string, LiveRunUiState>): void {
+	liveRunUiBySession.delete(sessionId);
+	if (!ctx.hasUI) return;
+	ctx.ui.setWidget("agent_team:live", undefined);
+	ctx.ui.setStatus("agent_team", undefined);
+}
+
+function sendNoticeMessage(pi: ExtensionAPI, ctx: ExtensionContext, sessionId: string, closedUiSessions: Set<string>, details: AgentTeamDetails): string | undefined {
+	if (closedUiSessions.has(sessionId) || ctx.sessionManager.getSessionId() !== sessionId) return undefined;
 	try {
 		pi.sendMessage<AgentTeamDetails>({ customType: NOTICE_MESSAGE_TYPE, content: formatAgentTeamNoticeText(details), display: true, details: compactNoticeDetails(details) }, { deliverAs: "steer", triggerTurn: true });
 		return undefined;

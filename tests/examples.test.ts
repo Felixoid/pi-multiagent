@@ -233,7 +233,7 @@ test("research and release examples expose later authorization and command scope
 	assert.match(stepMutationScope(approved, "implementation-worker"), /Allowed files\/globs/);
 	assert.match(stepTask(approved, "validation-proof"), /REPLACE_WITH_EXACT_APPROVED_VALIDATION_COMMANDS/);
 	const chained = await readGraphExample("artifact-chained-decision.json");
-	assert.match(stepTask(chained, "artifact-review"), /REPLACE_WITH_PRIOR_RUN_ID_AND_ARTIFACT_PATHS/);
+	assert.match(stepTask(chained, "artifact-review"), /REPLACE_WITH_PRIOR_RUN_HANDLE_AND_ARTIFACT_PATHS/);
 	assert.match(stepTask(chained, "artifact-review"), /prior run\/artifact paths/);
 	assert.match(stepTask(chained, "artifact-review"), /cleanup may have deleted needed evidence/);
 	assert.match(stepTask(chained, "final-decision"), /preserve needed artifacts before cleanup/);

@@ -21,6 +21,7 @@ interface ExtensionCtx {
 	cwd: string;
 	hasUI: boolean;
 	model: undefined;
+	sessionManager: { getSessionId: () => string };
 	ui: {
 		confirm: () => Promise<boolean>;
 		setWidget: (id: string, value: unknown) => void;
@@ -28,7 +29,7 @@ interface ExtensionCtx {
 	};
 }
 
-type ShutdownHandler = (event: { reason?: string }) => void;
+type ShutdownHandler = (event: { reason?: string }, ctx: ExtensionCtx) => void | Promise<void>;
 
 class FakeChild extends EventEmitter {
 	stdin = new PassThrough();
@@ -56,6 +57,8 @@ const flagValues = new Map<string, boolean | string>();
 const customMessages: { message: unknown; options: unknown }[] = [];
 const statusValues: (string | undefined)[] = [];
 const widgetValues: unknown[] = [];
+const uiEvents: { sessionId: string; kind: "status" | "widget"; value: unknown }[] = [];
+const delayedNoticeChildren: FakeChild[] = [];
 const tasks: string[] = [];
 const shutdownHandlers: ShutdownHandler[] = [];
 
@@ -122,7 +125,8 @@ const started = await tool.execute(
 	makeCtx(true),
 );
 const runId = started.details.run?.runId ?? "";
-assert.match(runId, /^agt_/);
+assert.match(runId, /^r[1-9][0-9]{0,6}$/);
+assert.equal(runId.length <= 8, true);
 assert.equal(started.details.run?.terminal, false);
 
 let terminal = await tool.execute("smoke-run_status-0", { action: "run_status", runId, preview: true }, undefined, undefined, makeCtx(true));
@@ -152,7 +156,8 @@ const graphFileRoot = await mkdir(join(tmpdir(), `pi-multiagent-smoke-graph-file
 await writeFile(join(graphFileRoot, "graph.json"), JSON.stringify({ objective: "smoke graphFile", authority: { allowFilesystemRead: true }, steps: [{ id: "from-file", agent: { system: "Return smoke-ok." }, task: "graph file task" }], limits: { timeoutSecondsPerStep: 30 } }));
 const graphFileStarted = await tool.execute("smoke-graph-file-start", { action: "start", graphFile: "graph.json", options: { terminalRetentionSeconds: 30, notify: { mode: "none" } } }, undefined, undefined, makeCtx(true, async () => false, graphFileRoot));
 const graphFileRunId = graphFileStarted.details.run?.runId ?? "";
-assert.match(graphFileRunId, /^agt_/);
+assert.match(graphFileRunId, /^r[1-9][0-9]{0,6}$/);
+assert.notEqual(graphFileRunId, runId);
 let graphFileTerminal = await tool.execute("smoke-graph-file-run_status-0", { action: "run_status", runId: graphFileRunId, preview: true }, undefined, undefined, makeCtx(true, async () => false, graphFileRoot));
 for (let attempt = 0; !graphFileTerminal.details.run?.terminal && attempt < 20; attempt += 1) {
 	await new Promise((resolve) => setTimeout(resolve, 5));
@@ -172,10 +177,37 @@ const holdStarted = await tool.execute(
 	makeCtx(true),
 );
 const holdRunId = holdStarted.details.run?.runId ?? "";
-assert.match(holdRunId, /^agt_/);
+assert.match(holdRunId, /^r[1-9][0-9]{0,6}$/);
+assert.notEqual(holdRunId, graphFileRunId);
 assert.equal(holdStarted.details.run?.status, "running");
 assert.equal(shutdownHandlers.length, 1);
-shutdownHandlers[0]({ reason: "smoke reload" });
+const otherUiEventStart = uiEvents.length;
+const otherHoldStarted = await tool.execute(
+	"smoke-start-other-session-hold",
+	{ action: "start", graph: { objective: "other session smoke", authority: { allowFilesystemRead: true }, steps: [{ id: "hold", agent: { system: "Wait until canceled." }, task: "other hold task" }], limits: { timeoutSecondsPerStep: 30 } }, options: { terminalRetentionSeconds: 30, notify: { mode: "none" } } },
+	undefined,
+	undefined,
+	makeCtx(true, async () => false, packageRoot, "other-session"),
+);
+const otherHoldRunId = otherHoldStarted.details.run?.runId ?? "";
+assert.match(otherHoldRunId, /^r[1-9][0-9]{0,6}$/);
+assert.notEqual(otherHoldRunId, holdRunId);
+assert.equal(await waitForSessionStatusAfter("other-session", otherUiEventStart), "1 lane");
+const otherWidgetText = latestSessionWidgetText("other-session");
+assert.match(otherWidgetText, /other session smoke/);
+assert.doesNotMatch(otherWidgetText, /shutdown smoke|2 runs/);
+await shutdownHandlers[0]({ reason: "other session" }, makeCtx(true, async () => false, packageRoot, "other-session"));
+let otherCanceled = await tool.execute("smoke-run_status-other-hold-0", { action: "run_status", runId: otherHoldRunId }, undefined, undefined, makeCtx(true, async () => false, packageRoot, "other-session"));
+for (let attempt = 0; !otherCanceled.details.run?.terminal && attempt < 20; attempt += 1) {
+	await new Promise((resolve) => setTimeout(resolve, 5));
+	otherCanceled = await tool.execute(`smoke-run_status-other-hold-${attempt + 1}`, { action: "run_status", runId: otherHoldRunId, cursor: otherCanceled.details.cursor }, undefined, undefined, makeCtx(true, async () => false, packageRoot, "other-session"));
+}
+assert.equal(otherCanceled.details.run?.status, "canceled");
+const otherHoldCleanup = await tool.execute("smoke-cleanup-other-hold", { action: "cleanup", runId: otherHoldRunId }, undefined, undefined, makeCtx(true, async () => false, packageRoot, "other-session"));
+assert.equal(otherHoldCleanup.details.cleanup?.runId, otherHoldRunId);
+const stillRunning = await tool.execute("smoke-run_status-hold-still-running", { action: "run_status", runId: holdRunId }, undefined, undefined, makeCtx(true, async () => false, packageRoot, "default-session"));
+assert.equal(stillRunning.details.run?.status, "running");
+await shutdownHandlers[0]({ reason: "smoke reload" }, makeCtx(true, async () => false, packageRoot, "default-session"));
 let canceled = await tool.execute("smoke-run_status-hold-0", { action: "run_status", runId: holdRunId }, undefined, undefined, makeCtx(true));
 for (let attempt = 0; !canceled.details.run?.terminal && attempt < 20; attempt += 1) {
 	await new Promise((resolve) => setTimeout(resolve, 5));
@@ -185,6 +217,56 @@ assert.equal(canceled.details.run?.status, "canceled");
 assert.equal(canceled.details.steps[0]?.errorMessage?.includes("smoke reload"), true);
 const holdCleanup = await tool.execute("smoke-cleanup-hold", { action: "cleanup", runId: holdRunId }, undefined, undefined, makeCtx(true));
 assert.equal(holdCleanup.details.cleanup?.runId, holdRunId);
+
+let activeNoticeSession = "notice-session-a";
+const noticeCtx = () => makeCtx(true, async () => false, packageRoot, () => activeNoticeSession);
+const customMessageCountBeforeInactiveNotice = customMessages.length;
+const delayedNoticeStarted = await tool.execute(
+	"smoke-start-delayed-notice",
+	{ action: "start", graph: { objective: "inactive notice smoke", authority: { allowFilesystemRead: true }, steps: [{ id: "delayed", agent: { system: "Return notice-ok." }, task: "delayed notice task" }], limits: { timeoutSecondsPerStep: 30 } }, options: { terminalRetentionSeconds: 30, notify: { mode: "final" } } },
+	undefined,
+	undefined,
+	noticeCtx(),
+);
+const delayedNoticeRunId = delayedNoticeStarted.details.run?.runId ?? "";
+assert.match(delayedNoticeRunId, /^r[1-9][0-9]{0,6}$/);
+activeNoticeSession = "notice-session-b";
+finishDelayedNoticeChild("notice-ok");
+await new Promise((resolve) => setTimeout(resolve, 20));
+assert.equal(customMessages.length, customMessageCountBeforeInactiveNotice);
+activeNoticeSession = "notice-session-a";
+const inactiveTerminalClearStart = uiEvents.length;
+let delayedNoticeTerminal = await tool.execute("smoke-run_status-delayed-notice-0", { action: "run_status", runId: delayedNoticeRunId, preview: true }, undefined, undefined, noticeCtx());
+for (let attempt = 0; !delayedNoticeTerminal.details.run?.terminal && attempt < 20; attempt += 1) {
+	await new Promise((resolve) => setTimeout(resolve, 5));
+	delayedNoticeTerminal = await tool.execute(`smoke-run_status-delayed-notice-${attempt + 1}`, { action: "run_status", runId: delayedNoticeRunId, cursor: delayedNoticeTerminal.details.cursor, preview: true }, undefined, undefined, noticeCtx());
+}
+assert.equal(delayedNoticeTerminal.details.run?.status, "succeeded");
+assert.equal(delayedNoticeTerminal.details.outputs[0]?.text, "notice-ok");
+assert.equal(uiEvents.slice(inactiveTerminalClearStart).some((event) => event.sessionId === "notice-session-a" && event.kind === "widget" && event.value === undefined), true);
+assert.equal(uiEvents.slice(inactiveTerminalClearStart).some((event) => event.sessionId === "notice-session-a" && event.kind === "status" && event.value === undefined), true);
+const delayedNoticeCleanup = await tool.execute("smoke-cleanup-delayed-notice", { action: "cleanup", runId: delayedNoticeRunId }, undefined, undefined, noticeCtx());
+assert.equal(delayedNoticeCleanup.details.cleanup?.runId, delayedNoticeRunId);
+const freshUiEventStart = uiEvents.length;
+const freshStarted = await tool.execute(
+	"smoke-start-fresh-after-inactive-terminal",
+	{ action: "start", graph: { objective: "fresh notice session smoke", authority: { allowFilesystemRead: true }, steps: [{ id: "hold", agent: { system: "Wait until canceled." }, task: "fresh hold task" }], limits: { timeoutSecondsPerStep: 30 } }, options: { terminalRetentionSeconds: 30, notify: { mode: "none" } } },
+	undefined,
+	undefined,
+	noticeCtx(),
+);
+const freshRunId = freshStarted.details.run?.runId ?? "";
+assert.match(freshRunId, /^r[1-9][0-9]{0,6}$/);
+assert.equal(await waitForSessionStatusAfter("notice-session-a", freshUiEventStart), "1 lane");
+await tool.execute("smoke-cancel-fresh-after-inactive-terminal", { action: "cancel", runId: freshRunId, reason: "fresh cleanup" }, undefined, undefined, noticeCtx());
+let freshCanceled = await tool.execute("smoke-run_status-fresh-0", { action: "run_status", runId: freshRunId }, undefined, undefined, noticeCtx());
+for (let attempt = 0; !freshCanceled.details.run?.terminal && attempt < 20; attempt += 1) {
+	await new Promise((resolve) => setTimeout(resolve, 5));
+	freshCanceled = await tool.execute(`smoke-run_status-fresh-${attempt + 1}`, { action: "run_status", runId: freshRunId, cursor: freshCanceled.details.cursor }, undefined, undefined, noticeCtx());
+}
+assert.equal(freshCanceled.details.run?.status, "canceled");
+const freshCleanup = await tool.execute("smoke-cleanup-fresh-after-inactive-terminal", { action: "cleanup", runId: freshRunId }, undefined, undefined, noticeCtx());
+assert.equal(freshCleanup.details.cleanup?.runId, freshRunId);
 
 function spawnProcess(_command: string, args: string[], spawnOptions: SpawnOptions): ChildProcessWithoutNullStreams {
 	assert.equal(args.includes("smoke task"), false);
@@ -207,7 +289,9 @@ function spawnProcess(_command: string, args: string[], spawnOptions: SpawnOptio
 			const command = JSON.parse(line) as { id: string; type: string; message?: string };
 			if (command.message) tasks.push(command.message);
 			child.stdout.write(`${JSON.stringify({ type: "response", id: command.id, command: command.type, success: true })}\n`);
-			if (command.type === "prompt" && command.message?.includes("hold task") !== true) {
+			if (command.type === "prompt" && command.message?.includes("delayed notice task") === true) {
+				delayedNoticeChildren.push(child);
+			} else if (command.type === "prompt" && command.message?.includes("hold task") !== true) {
 				child.stdout.write(`${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "smoke-ok" }] } })}\n`);
 				child.stdout.write(`${JSON.stringify({ type: "agent_end", messages: [] })}\n`);
 				child.close(0);
@@ -218,21 +302,49 @@ function spawnProcess(_command: string, args: string[], spawnOptions: SpawnOptio
 	return child as unknown as ChildProcessWithoutNullStreams;
 }
 
-function makeCtx(hasUI: boolean, confirm: () => Promise<boolean> = async () => false, cwd = packageRoot): ExtensionCtx {
+function makeCtx(hasUI: boolean, confirm: () => Promise<boolean> = async () => false, cwd = packageRoot, sessionId: string | (() => string) = "default-session"): ExtensionCtx {
+	const getSessionId = typeof sessionId === "function" ? sessionId : () => sessionId;
 	return {
 		cwd,
 		hasUI,
 		model: undefined,
+		sessionManager: { getSessionId },
 		ui: {
 			confirm,
 			setWidget(_id, value) {
 				widgetValues.push(value);
+				uiEvents.push({ sessionId: getSessionId(), kind: "widget", value });
 			},
 			setStatus(_id, value) {
 				statusValues.push(value);
+				uiEvents.push({ sessionId: getSessionId(), kind: "status", value });
 			},
 		},
 	};
+}
+
+function finishDelayedNoticeChild(text: string): void {
+	const child = delayedNoticeChildren.shift();
+	assert.ok(child);
+	child.stdout.write(`${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text }] } })}\n`);
+	child.stdout.write(`${JSON.stringify({ type: "agent_end", messages: [] })}\n`);
+	child.close(0);
+}
+
+async function waitForSessionStatusAfter(sessionId: string, afterIndex: number): Promise<string | undefined> {
+	for (let attempt = 0; attempt < 20; attempt += 1) {
+		const event = uiEvents.slice(afterIndex).find((item) => item.sessionId === sessionId && item.kind === "status" && typeof item.value === "string");
+		if (event && typeof event.value === "string") return event.value;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+	return undefined;
+}
+
+function latestSessionWidgetText(sessionId: string): string {
+	const event = [...uiEvents].reverse().find((item) => item.sessionId === sessionId && item.kind === "widget" && typeof item.value === "function");
+	if (!event || typeof event.value !== "function") return "";
+	const component = event.value({ requestRender() {} }, { fg: (_color: string, text: string) => text, bold: (text: string) => text });
+	return component.render(120).join("\n");
 }
 
 function assertNotice(notice: { message: unknown; options: unknown } | undefined): void {
@@ -245,7 +357,7 @@ function assertNotice(notice: { message: unknown; options: unknown } | undefined
 	assert.equal(notice.message.display, true);
 	assert.equal(typeof notice.message.content, "string");
 	assert.match(notice.message.content, /agent_team succeeded smoke run/);
-	assert.match(notice.message.content, /runId=agt_/);
+	assert.match(notice.message.content, /runId=r[1-9][0-9]{0,6}/);
 	assert.match(notice.message.content, /final evidence step succeeded .*\.md/);
 	assert.match(notice.message.content, /untrusted status evidence; run_status\/step_result for artifacts/);
 	assert.doesNotMatch(notice.message.content, /# agent_team terminal notice|Objective:|Run:|Exceptional controls|artifact=|\/tmp\/|Next:|cleanup|cursor|debugEvents|smoke-ok/i);

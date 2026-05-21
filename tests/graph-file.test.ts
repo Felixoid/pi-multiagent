@@ -33,7 +33,7 @@ test("materializeAgentTeamInput rejects oversized graph files", async () => {
 test("materializeAgentTeamInput rejects non-start, mixed, and control-field graph files", async () => {
 	const root = await mkdir(join(tmpdir(), `pi-multiagent-graph-deny-${Date.now()}`), { recursive: true });
 	await writeFile(join(root, "graph.json"), JSON.stringify({ action: "start", ...graph }));
-	assert.equal(materializeAgentTeamInput({ action: "run_status", runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_", graphFile: "graph.json" }, root).diagnostics.some((item) => item.code === "graph-file-start-only"), true);
+	assert.equal(materializeAgentTeamInput({ action: "run_status", runId: "r1", graphFile: "graph.json" }, root).diagnostics.some((item) => item.code === "graph-file-start-only"), true);
 	assert.equal(materializeAgentTeamInput({ action: "start", graph, graphFile: "graph.json" }, root).diagnostics.some((item) => item.code === "graph-file-inline-graph-denied"), true);
 	assert.equal(materializeAgentTeamInput({ action: "start", graphFile: "graph.json" }, root).diagnostics.some((item) => item.code === "graph-file-control-fields-denied"), true);
 });

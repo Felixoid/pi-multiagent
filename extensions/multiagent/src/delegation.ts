@@ -1,6 +1,5 @@
 /** Public detached agent_team action dispatcher. */
 
-import { randomBytes } from "node:crypto";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { Compile } from "typebox/compile";
 import { catalogAgents, discoverAgents, normalizeLibraryOptions } from "./agents.ts";
@@ -53,17 +52,19 @@ function start(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnost
 	const discovery = discoverAgents({ cwd: options.cwd, packageAgentsDir: options.packageAgentsDir, library });
 	const resolved = resolveDetachedGraph(graph, discovery.agents, [...diagnostics, ...discovery.diagnostics], { cwd: options.cwd, invocationCwd: options.cwd, parentTools: options.parentTools ?? unavailableTools(), parentSkills: options.parentSkills, subagentSkillMode: options.subagentSkills?.mode }, input.options);
 	if (resolved.steps.length !== graph.steps.length || hasDiagnosticError(resolved.diagnostics)) return makeDetails("start", false, resolved.diagnostics, options, { library: { ...library, sources: discovery.sources } }, { code: "start-planning-failed", message: "Detached graph planning failed; no child process was launched." });
-	const capacityError = detachedRunCapacityError();
+	const capacityError = detachedRunCapacityError(options);
 	if (capacityError) return makeDetails("start", false, resolved.diagnostics, options, { library: { ...library, sources: discovery.sources } }, capacityError);
-	const run = new DetachedRun(createRunId(), resolved, detachedRunOptions(options), { ...library, sources: discovery.sources });
+	const runId = createRunId();
+	if (!runId) return makeDetails("start", false, resolved.diagnostics, options, { library: { ...library, sources: discovery.sources } }, { code: "run-id-exhausted", message: "No short process-local runId is available; reload Pi to reset process-local handles." });
+	const run = new DetachedRun(runId, resolved, detachedRunOptions(options), { ...library, sources: discovery.sources });
 	registerDetachedRun(run);
 	run.start();
 	return run.details("start");
 }
 
 async function run_status(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): Promise<AgentTeamDetails> {
-	const run = getDetachedRun(input.runId);
-	if (!run) return makeDetails("run_status", false, diagnostics, options, undefined, runNotFoundError());
+	const run = getOwnedDetachedRun(input.runId, options);
+	if (!run) return makeDetails("run_status", false, diagnostics, options, undefined, runNotFoundError(options));
 	const requestDiagnostics = runStatusRequestDiagnostics(input);
 	if (input.stepId && !run.hasStep(input.stepId)) return run.details("run_status", { stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES, preview: input.preview === true, diagnostics: requestDiagnostics, ok: false, error: { code: "step-not-found", message: "No step in the retained detached run matches stepId." } });
 	if (input.waitSeconds !== undefined) await run.waitForChange({ stepId: input.stepId, cursor: input.cursor, seconds: input.waitSeconds });
@@ -76,30 +77,30 @@ function runStatusRequestDiagnostics(input: AgentTeamInput): AgentDiagnostic[] {
 }
 
 function step_result(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): AgentTeamDetails {
-	const run = getDetachedRun(input.runId);
-	if (!run) return makeDetails("step_result", false, diagnostics, options, undefined, runNotFoundError());
+	const run = getOwnedDetachedRun(input.runId, options);
+	if (!run) return makeDetails("step_result", false, diagnostics, options, undefined, runNotFoundError(options));
 	if (!input.stepId || !run.hasStep(input.stepId)) return run.details("step_result", { stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES, preview: input.preview === true, ok: false, error: { code: "step-not-found", message: "No step in the retained detached run matches stepId." } });
 	return run.details("step_result", { stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES, preview: input.preview === true });
 }
 
 async function message(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): Promise<AgentTeamDetails> {
-	const run = getDetachedRun(input.runId);
-	if (!run) return makeDetails("message", false, diagnostics, options, undefined, runNotFoundError());
+	const run = getOwnedDetachedRun(input.runId, options);
+	if (!run) return makeDetails("message", false, diagnostics, options, undefined, runNotFoundError(options));
 	if (!input.stepId || !run.hasStep(input.stepId)) return run.details("message", { stepId: input.stepId, ok: false, error: { code: "step-not-found", message: "No step in the retained detached run matches stepId." } });
 	const receipt = await run.message(input.stepId, input.channel ?? "steer", input.text ?? "", input.clientMessageId);
 	return run.details("message", { message: receipt, ok: receipt.accepted, error: receipt.accepted ? undefined : { code: "message-not-delivered", message: receipt.undeliveredReason ?? "Message was not delivered." } });
 }
 
 function cancel(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): AgentTeamDetails {
-	const run = getDetachedRun(input.runId);
-	if (!run) return makeDetails("cancel", false, diagnostics, options, undefined, runNotFoundError());
+	const run = getOwnedDetachedRun(input.runId, options);
+	if (!run) return makeDetails("cancel", false, diagnostics, options, undefined, runNotFoundError(options));
 	run.cancel(input.reason);
 	return run.details("cancel");
 }
 
 function cleanup(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagnostics: AgentDiagnostic[]): AgentTeamDetails {
-	const run = getDetachedRun(input.runId);
-	if (!run) return makeDetails("cleanup", false, diagnostics, options, undefined, runNotFoundError());
+	const run = getOwnedDetachedRun(input.runId, options);
+	if (!run) return makeDetails("cleanup", false, diagnostics, options, undefined, runNotFoundError(options));
 	if (!run.snapshot().terminal) return run.details("cleanup", { ok: false, error: { code: "cleanup-run-live", message: "Cleanup is denied while the run is live; let healthy work finish, or cancel only when stopping is explicit, then run_status terminal state first." } });
 	try {
 		const receipt = run.cleanup();
@@ -110,22 +111,37 @@ function cleanup(input: AgentTeamInput, options: AgentTeamRuntimeOptions, diagno
 	}
 }
 
-function runNotFoundError(): { code: string; message: string } {
-	const runs = listDetachedRuns().map((run) => run.snapshot());
+function runNotFoundError(options: AgentTeamRuntimeOptions): { code: string; message: string } {
+	const runs = listDetachedRuns().filter((run) => run.isOwnedBy(options.sessionId)).map((run) => run.snapshot());
 	const recent = summarizeRunCapacity(runs);
-	return { code: "run-not-found", message: `No retained detached run matches runId. Run ids are process/session-local and can disappear after retention expiry, cleanup, extension reload, or session shutdown; preserve artifact paths before cleanup. Retained runs now: ${runs.length}; recent: ${recent}.` };
+	return { code: "run-not-found", message: `No retained detached run matches runId. Run handles are process/session-local and can disappear after retention expiry, cleanup, extension reload, or session shutdown; preserve artifact paths before cleanup. Retained runs now: ${runs.length}; recent: ${recent}.` };
 }
 
-function detachedRunCapacityError(): { code: string; message: string } | undefined {
-	return detachedRunCapacityErrorForSnapshots(listDetachedRuns().map((run) => run.snapshot()));
+function getOwnedDetachedRun(runId: string | undefined, options: AgentTeamRuntimeOptions): DetachedRun | undefined {
+	const run = getDetachedRun(runId);
+	return run?.isOwnedBy(options.sessionId) ? run : undefined;
 }
 
-export function detachedRunCapacityErrorForSnapshots(snapshots: RunSnapshot[]): { code: string; message: string } | undefined {
+function detachedRunCapacityError(options: AgentTeamRuntimeOptions): { code: string; message: string } | undefined {
+	const runs = listDetachedRuns();
+	return detachedRunCapacityErrorForSnapshots(runs.map((run) => run.snapshot()), runs.filter((run) => run.isOwnedBy(options.sessionId)).map((run) => run.snapshot()));
+}
+
+export function detachedRunCapacityErrorForSnapshots(snapshots: RunSnapshot[], ownedSnapshots: RunSnapshot[] = snapshots): { code: string; message: string } | undefined {
 	const liveRuns = snapshots.filter((run) => !run.terminal);
 	const terminalRuns = snapshots.filter((run) => run.terminal);
-	if (liveRuns.length >= MAX_LIVE_DETACHED_RUNS) return { code: "detached-run-live-cap-reached", message: `Too many live detached runs (${liveRuns.length}); run_status and preserve evidence, then cancel only runs that are stuck, obsolete, unsafe, or explicitly lower value than the new work. Maximum live runs: ${MAX_LIVE_DETACHED_RUNS}. Live runs: ${summarizeRunCapacity(liveRuns)}.` };
-	if (snapshots.length >= MAX_RETAINED_DETACHED_RUNS) return { code: "detached-run-retained-cap-reached", message: `Too many retained detached runs (${snapshots.length}); free capacity by cleaning up terminal runs only after preserving needed artifacts, or by canceling live runs only when they are stuck, obsolete, unsafe, or explicitly lower value than the new work. Maximum retained runs: ${MAX_RETAINED_DETACHED_RUNS}. Live runs (${liveRuns.length}): ${summarizeRunCapacity(liveRuns)}. Terminal runs (${terminalRuns.length}): ${summarizeRunCapacity(terminalRuns)}.` };
+	const ownedLiveRuns = ownedSnapshots.filter((run) => !run.terminal);
+	const ownedTerminalRuns = ownedSnapshots.filter((run) => run.terminal);
+	if (liveRuns.length >= MAX_LIVE_DETACHED_RUNS) return { code: "detached-run-live-cap-reached", message: `Too many live detached runs (${liveRuns.length}); run_status and preserve evidence, then cancel only runs that are stuck, obsolete, unsafe, or explicitly lower value than the new work. Maximum live runs: ${MAX_LIVE_DETACHED_RUNS}. Live runs: ${summarizeScopedRunCapacity(liveRuns, ownedLiveRuns, "live")}.` };
+	if (snapshots.length >= MAX_RETAINED_DETACHED_RUNS) return { code: "detached-run-retained-cap-reached", message: `Too many retained detached runs (${snapshots.length}); free capacity by cleaning up terminal runs only after preserving needed artifacts, or by canceling live runs only when they are stuck, obsolete, unsafe, or explicitly lower value than the new work. Maximum retained runs: ${MAX_RETAINED_DETACHED_RUNS}. Live runs (${liveRuns.length}): ${summarizeScopedRunCapacity(liveRuns, ownedLiveRuns, "live")}. Terminal runs (${terminalRuns.length}): ${summarizeScopedRunCapacity(terminalRuns, ownedTerminalRuns, "terminal")}.` };
 	return undefined;
+}
+
+function summarizeScopedRunCapacity(allRuns: RunSnapshot[], ownedRuns: RunSnapshot[], label: string): string {
+	const otherCount = Math.max(0, allRuns.length - ownedRuns.length);
+	const owned = summarizeRunCapacity(ownedRuns);
+	if (otherCount === 0) return owned;
+	return `owned: ${owned}; other sessions: ${otherCount} ${label}`;
 }
 
 function summarizeRunCapacity(runs: RunSnapshot[]): string {
@@ -158,6 +174,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
 
-function createRunId(): string {
-	return `agt_${randomBytes(32).toString("base64url")}`;
+const MAX_RUN_ID_SERIAL = 9_999_999;
+let nextRunIdSerial = 1;
+
+function createRunId(): string | undefined {
+	while (nextRunIdSerial <= MAX_RUN_ID_SERIAL) {
+		const candidate = `r${nextRunIdSerial}`;
+		nextRunIdSerial += 1;
+		if (!getDetachedRun(candidate)) return candidate;
+	}
+	return undefined;
 }

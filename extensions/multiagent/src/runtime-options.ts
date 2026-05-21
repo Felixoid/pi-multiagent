@@ -13,6 +13,8 @@ export interface AgentTeamRuntimeOptions {
 	materializationDiagnostics: AgentDiagnostic[];
 	catalogLibrary: LibraryOptions;
 	catalogPreparationDiagnostics: AgentDiagnostic[];
+	/** Stable owner for process-local retained runs; follow-up actions only see runs from the same Pi session when available. */
+	sessionId?: string;
 	defaults: AgentInvocationDefaults;
 	parentTools?: ParentToolInventory;
 	parentSkills?: ParentSkillInventory;

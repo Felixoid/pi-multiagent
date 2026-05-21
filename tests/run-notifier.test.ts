@@ -27,7 +27,7 @@ test("RunNotifier coalesces milestones inside minInterval and preserves terminal
 	const diagnostics: string[] = [];
 	const notices: AgentTeamDetails[] = [];
 	const notifier = new RunNotifier({
-		runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_",
+		runId: "r1",
 		notify: { mode: "milestones", maxNotices: 3, minIntervalSeconds: 0.03 },
 		runtimeOptions: runtimeOptions((details) => notices.push(details)),
 		recordDiagnostic: (code, _label, message) => diagnostics.push(`${code}:${message}`),
@@ -51,7 +51,7 @@ test("RunNotifier coalesces milestones inside minInterval and preserves terminal
 test("RunNotifier records notice callback failures without throwing", () => {
 	const diagnostics: string[] = [];
 	const notifier = new RunNotifier({
-		runId: "agt_abcdefghijklmnopqrstuvwxyzABCDEF1234567890-_",
+		runId: "r1",
 		notify: { mode: "final", maxNotices: 0, minIntervalSeconds: 0 },
 		runtimeOptions: runtimeOptions(() => { throw new Error("notice failed"); }),
 		recordDiagnostic: (code, label, message) => diagnostics.push(`${code}:${label}:${message}`),

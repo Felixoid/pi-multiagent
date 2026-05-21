@@ -22,7 +22,7 @@ export function schemaRepair(input: unknown, path: string): string {
 
 function schemaRepairForPath(path: string): string | undefined {
 	if (path === "/action") return `action must be one of ${AGENT_TEAM_ACTION_VALUES.join(", ")}; action:\"run\" is not supported.`;
-	if (path === "/runId") return "runId must be a retained detached run id returned by start, shaped like agt_...; retained ids are process/session-local.";
+	if (path === "/runId") return "runId must be the short retained detached run handle returned by start for this Pi session, shaped like r1; retained ids are process/session-local.";
 	if (path === "/stepId") return "stepId must be an existing graph step id matching lowercase letters, numbers, and dashes; use run_status to list available step ids or step_result for one step.";
 	if (path === "/cursor") return "cursor must be a non-empty cursor returned by a prior run_status call; omit cursor for a fresh snapshot.";
 	if (path === "/waitSeconds") return "waitSeconds is valid only on run_status and must be an integer from 1 to 60.";

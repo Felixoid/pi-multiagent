@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.8.7 - 2026-05-21
+
+- Replaced model-facing detached-run identifiers with short process-local, session-owned `runId` handles such as `r1`, including schema validation, start output, repair copy, live widget/status scoping, same-session notice delivery, capacity-denial redaction, docs, examples, rendering expectations, and focused runtime tests; legacy `agt_...` values are now invalid inputs rather than aliases.
+
 ## 0.8.6 - 2026-05-21
 
 - Added richer terminal artifact metadata: finalized step artifacts now include full task text, cwd, dependency edges, upstream artifact references, and stop/status hints, while `run_status` surfaces bounded task previews plus all terminal step artifacts instead of sinks only.
