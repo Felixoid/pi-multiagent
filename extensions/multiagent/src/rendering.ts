@@ -91,9 +91,9 @@ function formatCall(args: AgentTeamInput, theme: Theme): string {
 	const stepId = stringProperty(args, "stepId");
 	const channel = stringProperty(args, "channel");
 	if (action === "start") return `${title} ${theme.fg("accent", "launch")} ${theme.fg("dim", startTarget(args))}`;
-	if (action === "run_status") return `${title} ${theme.fg("accent", args.debugEvents === true ? "status debug" : "status")} ${theme.fg("dim", shortRunId(runId))}`;
+	if (action === "run_status") return `${title} ${theme.fg("accent", typeof args.waitSeconds === "number" ? `wait ${args.waitSeconds}s` : args.debugEvents === true ? "status debug" : "status")} ${theme.fg("dim", shortRunId(runId))}`;
 	if (action === "step_result") return `${title} ${theme.fg("accent", "inspect step")} ${theme.fg("dim", `${shortRunId(runId)} ${stepId ?? ""}`.trim())}`;
-	if (action === "message") return `${title} ${theme.fg("accent", channel === "follow_up" ? "queue follow-up" : "steer live step")} ${theme.fg("dim", `${stepId ?? "step"} ${channel ?? ""}`.trim())}`;
+	if (action === "message") return `${title} ${theme.fg("accent", channel === "follow_up" ? "send follow-up" : "steer live step")} ${theme.fg("dim", `${stepId ?? "step"} ${channel ?? ""}`.trim())}`;
 	if (action === "cancel") return `${title} ${theme.fg("accent", "stop run")} ${theme.fg("dim", shortRunId(runId))}`;
 	if (action === "cleanup") return `${title} ${theme.fg("accent", "delete evidence")} ${theme.fg("dim", shortRunId(runId))}`;
 	const query = catalogQuery(args);
@@ -145,7 +145,8 @@ function plainProgressMeter(counts: RunSnapshot["counts"]): string {
 }
 
 function formatPlainResultTail(details: AgentTeamDetails): string {
-	if (details.message) return `message ${details.message.stepId} ${details.message.accepted ? "queued" : details.message.undeliveredReason ?? "denied"}`;
+	if (details.message) return `message ${details.message.stepId} ${details.message.accepted ? "accepted for delivery" : details.message.undeliveredReason ?? "denied"}`;
+	if (details.wait) return plainWaitSummary(details.wait);
 	if (details.action === "cleanup" && details.error) return `cleanup ${details.error.code}`;
 	if (details.cleanup) return `evidence deleted ${details.cleanup.deletedPaths.length} retained path(s)`;
 	if (details.outputs.length > 0) return `final evidence ${summarizePlainOutputs(details.outputs)}`;
@@ -159,6 +160,20 @@ function formatPlainTerminalEvidence(details: AgentTeamDetails): string[] {
 	if (artifacts.length > 0) lines.push(`artifact paths ${summarizeFullArtifactPaths(artifacts)}`);
 	if (details.run?.expiresAt) lines.push(`expiresAt=${details.run.expiresAt}`);
 	return lines;
+}
+
+function plainWaitSummary(wait: NonNullable<AgentTeamDetails["wait"]>): string {
+	const target = wait.stepId ? ` ${wait.stepId}` : "";
+	return `wait ${waitOutcomeCopy(wait.outcome)}${target} ${waitCursorCopy(wait)}`;
+}
+
+function waitOutcomeCopy(outcome: NonNullable<AgentTeamDetails["wait"]>["outcome"]): string {
+	if (outcome === "already-material") return "already material";
+	return outcome;
+}
+
+function waitCursorCopy(wait: NonNullable<AgentTeamDetails["wait"]>): string {
+	return `${wait.requestedSeconds}s cursor ${wait.cursorBefore}->${wait.cursorAfter}`;
 }
 
 function summarizePlainOutputs(outputs: AgentTeamDetails["outputs"]): string {
@@ -198,12 +213,12 @@ function formatResultHeader(details: AgentTeamDetails, run: RunSnapshot, theme: 
 }
 
 function runIdSubjectState(state: string): boolean {
-	return state === "stop requested" || state === "message queued" || state === "message denied" || state === "cleanup denied" || state === "cleanup failed" || state === "cleanup error" || state === "cleanup ok" || state === "evidence deleted";
+	return state === "stop requested" || state === "message accepted" || state === "message denied" || state === "cleanup denied" || state === "cleanup failed" || state === "cleanup error" || state === "cleanup ok" || state === "evidence deleted";
 }
 
 function humanResultState(details: AgentTeamDetails, run: RunSnapshot): string {
 	if (details.action === "cancel") return run.terminal ? humanRunStatus(run.status) : "stop requested";
-	if (details.action === "message") return details.message?.accepted === false ? "message denied" : "message queued";
+	if (details.action === "message") return details.message?.accepted === false ? "message denied" : "message accepted";
 	if (details.action === "cleanup") {
 		if (details.cleanup) return "evidence deleted";
 		if (details.error?.code === "cleanup-run-live") return "cleanup denied";
@@ -218,7 +233,8 @@ function humanResultState(details: AgentTeamDetails, run: RunSnapshot): string {
 }
 
 function formatResultTail(details: AgentTeamDetails, theme: Theme): string {
-	if (details.message) return `${theme.fg("muted", "message")} ${details.message.stepId} ${details.message.accepted ? theme.fg("success", "queued") : theme.fg("error", details.message.undeliveredReason ?? "denied")}`;
+	if (details.message) return `${theme.fg("muted", "message")} ${details.message.stepId} ${details.message.accepted ? theme.fg("success", "accepted for delivery") : theme.fg("error", details.message.undeliveredReason ?? "denied")}`;
+	if (details.wait) return `${theme.fg("muted", "wait")} ${theme.fg(details.wait.outcome === "timeout" ? "warning" : "success", waitOutcomeCopy(details.wait.outcome))} ${theme.fg("dim", `${details.wait.stepId ? `${details.wait.stepId} ` : ""}${waitCursorCopy(details.wait)}`)}`;
 	if (details.action === "cleanup" && details.error) return `${theme.fg("muted", "cleanup")} ${theme.fg("error", details.error.code)}`;
 	if (details.cleanup) return `${theme.fg("muted", "evidence deleted")} ${theme.fg("dim", `${details.cleanup.deletedPaths.length} retained path(s)`)}`;
 	if (details.notice) return `${theme.fg("muted", details.notice.terminal ? "terminal notice" : "milestone notice")} ${theme.fg("accent", summarizeNotice(details))}${formatNoticeArtifactCopy(details, theme)}${formatNoticeExpiry(details, theme)}`;

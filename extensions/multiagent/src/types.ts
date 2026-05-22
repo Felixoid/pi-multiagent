@@ -382,6 +382,16 @@ export interface StepOutput {
 	chars: number;
 }
 
+export type RunStatusWaitOutcome = "material" | "timeout" | "already-material" | "terminal";
+
+export interface RunStatusWaitReceipt {
+	requestedSeconds: number;
+	outcome: RunStatusWaitOutcome;
+	stepId: string | undefined;
+	cursorBefore: string;
+	cursorAfter: string;
+}
+
 export interface MessageReceipt {
 	runId: string;
 	stepId: string;
@@ -446,6 +456,7 @@ export interface AgentTeamDetails {
 	events: BackgroundEvent[];
 	steps: StepSnapshot[];
 	outputs: StepOutput[];
+	wait: RunStatusWaitReceipt | undefined;
 	message: MessageReceipt | undefined;
 	cleanup: CleanupReceipt | undefined;
 	notice: AgentTeamNotice | undefined;

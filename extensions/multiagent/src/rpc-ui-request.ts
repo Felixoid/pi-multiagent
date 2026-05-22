@@ -18,7 +18,7 @@ export function handleUnattendedUiRequest(options: UnattendedUiRequestOptions): 
 	const method = typeof options.record.method === "string" ? options.record.method : "unknown";
 	const id = typeof options.record.id === "string" ? options.record.id : undefined;
 	if (FIRE_AND_FORGET_UI_METHODS.has(method)) {
-		options.onEvent({ type: "ui", label: method, preview: "UI request ignored", status: "done" });
+		options.onEvent({ type: "ui", label: method, preview: "UI request suppressed", status: "done" });
 		return;
 	}
 	options.onEvent({ type: "ui", label: method, preview: "UI request denied", status: "error" });

@@ -126,7 +126,7 @@ function repairFor(action: ExecutionAction, fields: string[]): string {
 	if (fieldSet.has("extensionTools")) return "Place extensionTools under steps[].agent.extensionTools with catalog-copied provenance; agent.tools accepts only built-in child tools.";
 	if (action === "catalog" && fieldSet.has("maxBytes")) return "Remove maxBytes; use library.query to narrow catalog results. maxBytes is valid only on run_status/step_result: it bounds assistant previews when preview:true and raw debug events when debugEvents:true.";
 	if (fieldSet.has("preview")) return "Use preview only on run_status or step_result; it defaults to false and opts into bounded assistant text previews. Use maxBytes there only to bound those previews or run_status debug events.";
-	if (action === "message" && fieldSet.has("kind")) return 'Replace kind with channel:"steer" or channel:"follow_up"; accepted means queued/delivered to Pi, not child compliance.';
+	if (action === "message" && fieldSet.has("kind")) return 'Replace kind with channel:"steer" or channel:"follow_up"; accepted means accepted for delivery to live child Pi, not child compliance, output, completion, or terminal resurrection.';
 	if (fieldSet.has("waitSeconds")) return "Use waitSeconds only on run_status for a bounded wait/read snapshot that wakes on material parent-visible events or timeout.";
 	if (fieldSet.has("debugEvents")) return "Use debugEvents only on run_status when raw background events are needed; maxBytes may bound raw debug event previews there.";
 	if (fieldSet.has("cursor")) return "Use cursor only on run_status for debug/backfill pagination.";

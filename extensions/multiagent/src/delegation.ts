@@ -67,8 +67,8 @@ async function run_status(input: AgentTeamInput, options: AgentTeamRuntimeOption
 	if (!run) return makeDetails("run_status", false, diagnostics, options, undefined, runNotFoundError(options));
 	const requestDiagnostics = runStatusRequestDiagnostics(input);
 	if (input.stepId && !run.hasStep(input.stepId)) return run.details("run_status", { stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES, preview: input.preview === true, diagnostics: requestDiagnostics, ok: false, error: { code: "step-not-found", message: "No step in the retained detached run matches stepId." } });
-	if (input.waitSeconds !== undefined) await run.waitForChange({ stepId: input.stepId, cursor: input.cursor, seconds: input.waitSeconds });
-	return run.details("run_status", { cursor: input.cursor, stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES, preview: input.preview === true, includeEvents: input.debugEvents === true, diagnostics: requestDiagnostics });
+	const wait = input.waitSeconds !== undefined ? await run.waitForChange({ stepId: input.stepId, cursor: input.cursor, seconds: input.waitSeconds }) : undefined;
+	return run.details("run_status", { cursor: input.cursor, stepId: input.stepId, maxBytes: input.maxBytes ?? DEFAULT_RESULT_PREVIEW_MAX_BYTES, preview: input.preview === true, includeEvents: input.debugEvents === true, diagnostics: requestDiagnostics, wait });
 }
 
 function runStatusRequestDiagnostics(input: AgentTeamInput): AgentDiagnostic[] {

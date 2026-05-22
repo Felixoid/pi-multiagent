@@ -324,6 +324,39 @@ test("resolveDetachedGraph grants source-verified extension tools only with exte
 	assert.deepEqual(denied.steps, []);
 });
 
+test("resolveDetachedGraph fails package:web-researcher closed without callable web search and fetch grants", async () => {
+	const parent = await mkdir(join(tmpdir(), `pi-multiagent-plan-web-researcher-${Date.now()}`), { recursive: true });
+	const cwd = await mkdir(join(parent, "workspace"), { recursive: true });
+	const extensionPath = join(parent, "web-extension.ts");
+	const otherExtensionPath = join(parent, "other-extension.ts");
+	await writeFile(extensionPath, "export default function extension() {}\n");
+	await writeFile(otherExtensionPath, "export default function extension() {}\n");
+	const searchTool: ParentToolInfo = { name: "exa_search", description: "Search the web", active: true, sourceInfo: { path: extensionPath, source: "user:exa", scope: "user", origin: "package", baseDir: parent } };
+	const fetchTool: ParentToolInfo = { name: "exa_fetch", description: "Fetch a URL", active: true, sourceInfo: { path: extensionPath, source: "user:exa", scope: "user", origin: "package", baseDir: parent } };
+	const otherTool: ParentToolInfo = { name: "jira_read", description: "Read Jira", active: true, sourceInfo: { path: otherExtensionPath, source: "user:jira", scope: "user", origin: "package", baseDir: parent } };
+	const tools: ParentToolInventory = { apiAvailable: true, errorMessage: undefined, tools: [...activeBuiltinTools(), searchTool, fetchTool, otherTool] };
+	const webAgent = packageAgent("web-researcher", ["read"]);
+	const baseStep = { id: "web", agent: { ref: "package:web-researcher" }, task: "Research current docs." };
+	const noGrants = resolveDetachedGraph({ objective: "web", authority: { allowFilesystemRead: true }, steps: [baseStep] }, [webAgent], [], { cwd, invocationCwd: cwd, parentTools: tools, parentSkills }, undefined);
+	assert.equal(noGrants.diagnostics.some((item) => item.code === "web-researcher-extension-tools-required"), true);
+	assert.deepEqual(noGrants.steps, []);
+
+	const extensionTools = [{ name: "exa_search", from: { source: "user:exa", scope: "user", origin: "package" } }, { name: "exa_fetch", from: { source: "user:exa", scope: "user", origin: "package" } }];
+	const missingAuthority = resolveDetachedGraph({ objective: "web", authority: { allowFilesystemRead: true }, steps: [{ ...baseStep, agent: { ref: "package:web-researcher", extensionTools } }] }, [webAgent], [], { cwd, invocationCwd: cwd, parentTools: tools, parentSkills }, undefined);
+	assert.equal(missingAuthority.diagnostics.some((item) => item.code === "extension-code-authority-required"), true);
+	assert.deepEqual(missingAuthority.steps, []);
+
+	const nonWebGrant = resolveDetachedGraph({ objective: "web", authority: { allowFilesystemRead: true, allowExtensionCode: true }, steps: [{ ...baseStep, agent: { ref: "package:web-researcher", extensionTools: [{ name: "jira_read", from: { source: "user:jira", scope: "user", origin: "package" } }] } }] }, [webAgent], [], { cwd, invocationCwd: cwd, parentTools: tools, parentSkills }, undefined);
+	assert.equal(nonWebGrant.diagnostics.some((item) => item.code === "web-researcher-extension-tools-required"), true);
+	assert.deepEqual(nonWebGrant.steps, []);
+
+	const allowed = resolveDetachedGraph({ objective: "web", authority: { allowFilesystemRead: true, allowExtensionCode: true }, steps: [{ ...baseStep, agent: { ref: "package:web-researcher", extensionTools } }] }, [webAgent], [], { cwd, invocationCwd: cwd, parentTools: tools, parentSkills }, undefined);
+	assert.equal(allowed.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(allowed.steps[0]?.agent.extensionTools.map((tool) => tool.name), ["exa_search", "exa_fetch"]);
+	assert.equal(allowed.steps[0]?.agent.extensionTools[0]?.source.realpath, await realpath(extensionPath));
+	assert.deepEqual(allowed.steps[0]?.agent.tools, READONLY_CHILD_TOOL_NAMES);
+});
+
 test("resolveDetachedGraph gates project and workspace-local caller skills on allowProjectCode", async () => {
 	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-skills-${Date.now()}`), { recursive: true });
 	const skillPath = join(cwd, "project-skill.md");

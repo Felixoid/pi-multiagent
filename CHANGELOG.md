@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.9.0 - 2026-05-22
+
+- Tightened `agent_team` supervision contracts: fire-and-forget child UI updates now render as suppressed non-error activity, `run_status(waitSeconds)` returns a structured wait receipt without waking on routine activity, and message/follow_up acceptance is explicit accepted-for-delivery transport proof rather than child compliance or completion proof.
+- Made `package:web-researcher` fail closed during graph planning unless explicit callable `exa_search` and `exa_fetch` `extensionTools` are granted with extension authority, while keeping the role prompt's `BLOCKED` branch as defense-in-depth.
+- Updated README, `/skill:pi-multiagent`, cookbook guidance, model-facing tool registration copy, public-doc/package-load checks, and focused tests for the new supervision and web-capability contracts.
+
 ## 0.8.7 - 2026-05-21
 
 - Replaced model-facing detached-run identifiers with short process-local, session-owned `runId` handles such as `r1`, including schema validation, start output, repair copy, live widget/status scoping, same-session notice delivery, capacity-denial redaction, docs, examples, rendering expectations, and focused runtime tests; legacy `agt_...` values are now invalid inputs rather than aliases.

@@ -14,6 +14,7 @@ import { resolveMutationScope } from "./mutation-scope.ts";
 import { resolveAgentToolAccess } from "./tool-policy.ts";
 import { resolveBuiltinToolProfile } from "./builtin-tool-profile.ts";
 import { DEFAULT_SUBAGENT_SKILL_MODE } from "./subagent-skills-config.ts";
+import { validateWebResearcherExtensionTools } from "./web-researcher-policy.ts";
 
 const PUBLIC_ID_REGEX = new RegExp(PUBLIC_ID_PATTERN);
 const SOURCE_REF_REGEX = new RegExp(SOURCE_QUALIFIED_LIBRARY_REF_PATTERN);
@@ -116,6 +117,7 @@ function resolveLibraryAgent(stepId: string, spec: GraphSpec["steps"][number]["a
 	if (!tools) return undefined;
 	const toolAccess = resolveToolAccess(stepId, spec, tools, authority, diagnostics, context, path);
 	if (!toolAccess) return undefined;
+	if (!validateWebResearcherExtensionTools(agent.ref, toolAccess.extensionTools, diagnostics, `${path}/extensionTools`)) return undefined;
 	const skills = resolveAgentCallerSkills({ mode: context.subagentSkillMode ?? DEFAULT_SUBAGENT_SKILL_MODE, tools: toolAccess.tools, label: `step agent ${stepId}`, path: `${path}/skills`, allowProjectCode: authority.allowProjectCode, diagnostics, context: skillContext });
 	if (!skills) return undefined;
 	return { id: stepId, ref: agent.ref, name: agent.name, kind: "library", description: agent.description, tools: toolAccess.tools, extensionTools: toolAccess.extensionTools, callerSkills: skills, systemPrompt: agent.systemPrompt, model: agent.model, thinking: agent.thinking, source: agent.source, filePath: agent.filePath, sha256: agent.sha256 };
@@ -295,6 +297,6 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-export function makeDiagnostic(code: string, message: string, severity: AgentDiagnostic["severity"], path?: string): AgentDiagnostic {
+function makeDiagnostic(code: string, message: string, severity: AgentDiagnostic["severity"], path?: string): AgentDiagnostic {
 	return { code, message, severity, path };
 }

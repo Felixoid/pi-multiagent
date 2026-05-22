@@ -40,7 +40,7 @@ After installing in a running Pi session, use `/reload`. Reload requests cancell
 | --- | --- |
 | `catalog` | Discover package/user/project specialists, routing tags, default built-in tool profiles, and active extension-tool provenance. |
 | `start` | Launch exactly one inline graph or trusted workspace `graphFile`; return a short process-local `runId` such as `r1`. |
-| `run_status` | Compact run/artifact snapshot, diagnostics, effective tools/model lane, or bounded wait with `waitSeconds`. Assistant text previews require `preview:true`; raw events require `debugEvents:true`. |
+| `run_status` | Compact run/artifact snapshot, diagnostics, effective tools/model lane, or bounded wait with a structured `waitSeconds` receipt. Assistant text previews require `preview:true`; raw events require `debugEvents:true`. |
 | `step_result` | Inspect one step's live or terminal artifact/text surface. Assistant text previews require `preview:true`. |
 | `message` | Queue live clarification or scope repair to one running step. |
 | `cancel` | Stop a live run when stopping is explicit, unsafe/stuck/obsolete, or lower value than freeing capacity. |
@@ -110,7 +110,7 @@ Graphs are static DAGs. Bind each step to either inline `agent.system` or a sour
 
 Every child process keeps at least the filesystem read/discovery suite (`read`, `grep`, `find`, `ls`), so every runnable graph needs `authority.allowFilesystemRead:true`. Omit `agent.tools` for a catalog role to inherit its catalog `defaultTools` capped by graph authority; explicit `agent.tools` replaces the whole profile and then mandatory read/discovery is added. Use `agent.tools:[]` only to drop non-read catalog defaults while keeping read/discovery.
 
-Child Pi launches use normal Pi extension discovery so extension-provided model providers are available. Ambient trusted extensions may run startup code, provider hooks, tool hooks, and resource discovery as normal Pi behavior. `--tools` remains the callable tool-name allowlist; it is not an extension-code sandbox and extension tools can shadow tool names under normal Pi semantics. Graph authority does not disable or gate this normal Pi extension discovery. Child RPC is unattended: fire-and-forget extension UI updates such as status, notifications, widgets, titles, and editor text are recorded and ignored, while blocking or unknown UI requests fail closed.
+Child Pi launches use normal Pi extension discovery so extension-provided model providers are available. Ambient trusted extensions may run startup code, provider hooks, tool hooks, and resource discovery as normal Pi behavior. `--tools` remains the callable tool-name allowlist; it is not an extension-code sandbox and extension tools can shadow tool names under normal Pi semantics. Graph authority does not disable or gate this normal Pi extension discovery. Child RPC is unattended: fire-and-forget extension UI updates such as status, notifications, widgets, titles, and editor text are recorded as suppressed non-error activity, while blocking or unknown UI requests fail closed.
 
 Subagent skills are not graph-controlled: `steps[].agent.skills` is rejected. The product flag `--agent-team-subagent-skills enabled|disabled` defaults to `enabled`; enabled children receive every caller-visible Pi skill that is safe under the same project-code policy, and their prompt reminds them to use relevant available skills. Skills never grant tools, graph authority, mutation permission, or broader task scope. Enabled mode is all-or-nothing: unreadable visible skill sources or an inactive parent `read` tool fail planning; use `--agent-team-subagent-skills disabled` to pass no caller skills. If enabled skills come from project, temporary, or workspace-local files, set `graph.authority.allowProjectCode:true` only when that source is trusted.
 
@@ -147,13 +147,13 @@ After `start`:
 
 - Running notice and no evidence needed: keep working.
 - Need compact state, artifact paths, diagnostics, effective tools, or the launch-time child model lane: `run_status`.
-- Need to wait without polling: `run_status` with `waitSeconds`; it wakes on material events, not routine assistant/tool activity.
+- Need to wait without polling: `run_status` with `waitSeconds`; it wakes on material events, not routine assistant/tool/UI activity, and returns a receipt such as `material`, `timeout`, `already-material`, or `terminal`.
 - Need one step's live/final text or non-sink artifact: `step_result` with `preview:true` only when text belongs in context.
 - Need scope repair: `message` one live step.
 - Work is unsafe, obsolete, stuck, or explicitly stopped: `cancel`.
 - Run is terminal and evidence is preserved or discarded: `cleanup`.
 
-`message` is not post-terminal chat. `steer` queues after the current child assistant turn finishes tool calls and before the next LLM call. `follow_up` defers a live follow-up until the child is quiescent before terminalization, if still messageable. Exact duplicate keys reuse the original receipt, whether accepted, denied, or timed out. Accepted means queued, not obeyed, completed, or safe to stop early.
+`message` is not post-terminal chat. `steer` queues delivery after the current child assistant turn finishes tool calls and before the next LLM call. `follow_up` defers a live follow-up until the child is quiescent before terminalization, if still messageable. Exact duplicate keys reuse the original receipt, whether accepted, denied, or timed out. Accepted means accepted for delivery to the live child, not read, obeyed, included in output, completed, terminalized, or safe to stop early.
 
 ## Graph examples
 
@@ -161,7 +161,7 @@ Copy/adapt warning: packaged examples that say "scoped question" are skeletons. 
 
 The packaged set covers single-specialist, inline fan-in, cwd-scoped fanout, read-only fanout, map-reduce, sharded map-reduce, artifact-chained follow-up, human-gated planning, approved implementation, implementation with independent validator, command validation, validation matrix, completed proof review, docs/example alignment, implementation review, model-facing docs audit, release readiness, and release-fix foundry. Browse [`examples/graphs`](examples/graphs) and the [graph cookbook](skills/pi-multiagent/references/graph-cookbook.md).
 
-Use `release-readiness-review.json` for the default non-mutating read/shell release proof path. Use `public-release-foundry.json` only after exact current release-fix mutation authorization. The cookbook includes a Web Research to Local Decision pattern, but it is intentionally cookbook-only until fake extension provenance tests exist.
+Use `release-readiness-review.json` for the default non-mutating read/shell release proof path. Use `public-release-foundry.json` only after exact current release-fix mutation authorization. `package:web-researcher` fails planning before child launch unless the step grants explicit callable `exa_search` and `exa_fetch` `extensionTools` copied from live `catalog` provenance with `allowExtensionCode:true`; cookbook web patterns stay copy/adapt because public examples cannot know local provenance.
 
 Before starting a mutation-capable graph, verify: exact parent authorization, concrete `mutationScope`, graph authority limited to needed grants, and no placeholder or `REPLACE` text left in mutation scopes. Graph gates are model-level dependencies, not human approval checkpoints; use separate runs when a human decision must occur before mutation.
 
@@ -205,7 +205,7 @@ Before starting a mutation-capable graph, verify: exact parent authorization, co
 | Which model did a child run? | Check `run_status` step rows; they report the launch-time model/thinking lane. Parent model changes after `start` do not affect live children. |
 | Provider model is unavailable in a child | Install or enable the provider extension through normal Pi extension discovery for the child cwd/agent dir; one-off parent `pi -e` provider extensions are not inherited. |
 | Bash child is refused | Step cwd is inside a tree with `.pi/settings.json`; remove `bash`, change cwd, or run outside that settings tree. |
-| Message is denied or seems ignored | Target step may not be live, the run may be terminal/canceling, budget may be spent, or the accepted message may still be queued. |
+| Message is denied or seems ignored | Target step may not be live, the run may be terminal/canceling, budget may be spent, or the accepted-for-delivery receipt may not have produced child output/compliance. |
 | Need upstream output | Use `step_result` for that step; add `preview:true` for bounded text or read the artifact path for full text. |
 | Terminal step has empty final text | Treat it as failed evidence; current runtime marks empty assistant finals failed with `assistant-final-empty`. |
 | Context overflow appears in child RPC | Recoverable overflow waits for Pi compaction/continue and only succeeds on a later valid final; unrecovered overflow fails and blocks `needs` dependents. |

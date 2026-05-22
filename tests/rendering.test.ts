@@ -27,6 +27,17 @@ test("renderAgentTeamResult reports catalog and run state", () => {
 	assert.doesNotMatch(rendered, /objective|active=|sinks=|Can:|cursor|cleanup=true|updated|Artifact:/i);
 });
 
+test("renderAgentTeamResult surfaces run_status wait receipts", () => {
+	const status = details("run_status", {
+		run: run({ objective: "detached", liveStepIds: ["one"], sinkStepIds: ["one"], counts: counts({ running: 1 }) }),
+		wait: { requestedSeconds: 30, outcome: "timeout", stepId: "one", cursorBefore: "4", cursorAfter: "4" },
+	});
+	const rendered = renderAgentTeamResult({ content: [], details: status }, { expanded: false, isPartial: false }, theme, undefined).render(120).join("\n");
+	assert.match(rendered, /wait timeout one 30s cursor 4->4/);
+	const plain = formatAgentTeamNoticeText(status);
+	assert.match(plain, /wait timeout one 30s cursor 4->4/);
+});
+
 test("renderAgentTeamResult renders cancel as a human stop receipt", () => {
 	const canceling = details("cancel", {
 		run: run({ objective: "Adversarial read-only review of the entire pending pi-multiagent working-tree changeset", status: "canceling", liveStepIds: ["runtime-safety", "docs-contracts", "tests-packaging", "tui-human"], sinkStepIds: ["runtime-safety", "docs-contracts", "tests-packaging", "tui-human"], lastEvent: "tui-human: terminalizing [canceled]", counts: counts({ running: 4 }) }),
@@ -312,7 +323,7 @@ test("renderAgentTeamResult keeps cleanup failure distinct from evidence deletio
 });
 
 function details(action: AgentTeamDetails["action"], fields: Partial<AgentTeamDetails>): AgentTeamDetails {
-	return { kind: "agent_team", action, ok: true, diagnostics: [], error: undefined, library: undefined, catalog: [], extensionTools: [], run: undefined, cursor: undefined, events: [], steps: [], outputs: [], message: undefined, cleanup: undefined, notice: undefined, ...fields };
+	return { kind: "agent_team", action, ok: true, diagnostics: [], error: undefined, library: undefined, catalog: [], extensionTools: [], run: undefined, cursor: undefined, events: [], steps: [], outputs: [], wait: undefined, message: undefined, cleanup: undefined, notice: undefined, ...fields };
 }
 
 function run(fields: Partial<RunSnapshot>): RunSnapshot {

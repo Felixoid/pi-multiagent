@@ -23,7 +23,7 @@ import { buildRunSnapshot, buildStepSnapshots, countStepStatuses, findSinkStepId
 import { createStepOutputArtifact } from "./step-output-artifact.ts";
 import { stalledStepBlockerMessage } from "./stalled-step-diagnostics.ts";
 import { collectUpstreamOutputs } from "./upstream-outputs.ts";
-import type { AgentDiagnostic, AgentTeamDetails, LibraryOptions, MessageChannel, ResolvedGraph, RunStatus, StepArtifactReference, StepStatus, TeamStepSpec } from "./types.ts";
+import type { AgentDiagnostic, AgentTeamDetails, LibraryOptions, MessageChannel, ResolvedGraph, RunStatus, RunStatusWaitReceipt, StepArtifactReference, StepStatus, TeamStepSpec } from "./types.ts";
 import { DEFAULT_RESULT_PREVIEW_MAX_BYTES as PREVIEW_BYTES } from "./types.ts";
 
 export class DetachedRun {
@@ -75,11 +75,26 @@ export class DetachedRun {
 		return this.states.has(stepId);
 	}
 
-	async waitForChange(input: { stepId?: string; cursor?: string; seconds: number }): Promise<void> {
-		if (input.seconds <= 0 || this.snapshot().terminal) return;
-		const sinks = this.sinkStepIds();
-		if (this.events.hasMaterialAfter(input.cursor ?? this.events.currentCursor(), input.stepId, sinks)) return;
-		await this.waiters.add({ stepId: input.stepId, sinkStepIds: sinks, milliseconds: input.seconds * 1000 });
+	async waitForChange(input: { stepId?: string; cursor?: string; seconds: number }): Promise<RunStatusWaitReceipt> {
+		const cursorBefore = input.cursor ?? this.events.currentCursor();
+		let outcome: RunStatusWaitReceipt["outcome"];
+		if (this.snapshot().terminal) {
+			outcome = "terminal";
+		} else {
+			const sinks = this.sinkStepIds();
+			if (this.events.hasMaterialAfter(cursorBefore, input.stepId, sinks)) {
+				outcome = "already-material";
+			} else {
+				outcome = await this.waiters.add({ stepId: input.stepId, sinkStepIds: sinks, milliseconds: input.seconds * 1000 });
+			}
+		}
+		return {
+			requestedSeconds: input.seconds,
+			outcome,
+			stepId: input.stepId,
+			cursorBefore,
+			cursorAfter: this.events.currentCursor(),
+		};
 	}
 
 	async message(stepId: string, channel: MessageChannel, text: string, clientMessageId: string | undefined) {
@@ -113,7 +128,7 @@ export class DetachedRun {
 	details(action: AgentTeamDetails["action"], options: DetachedRunDetailsOptions = {}): AgentTeamDetails {
 		const includeEvents = options.includeEvents === true;
 		const delta = includeEvents ? this.events.delta(options.cursor, options.stepId, options.maxBytes ?? PREVIEW_BYTES) : { events: [], cursor: this.events.currentCursor() };
-		return makeDetails(action, options.ok ?? true, [...this.diagnostics, ...(options.diagnostics ?? [])], this.options, { library: this.library, run: this.snapshot(), cursor: delta.cursor, events: delta.events, steps: this.stepSnapshots(), outputs: selectOutputsForAction(action, options.stepId, options.maxBytes ?? PREVIEW_BYTES, options.preview === true, this.states.values(), this.sinkStepIds()), message: options.message, cleanup: options.cleanup, notice: options.notice }, options.error);
+		return makeDetails(action, options.ok ?? true, [...this.diagnostics, ...(options.diagnostics ?? [])], this.options, { library: this.library, run: this.snapshot(), cursor: delta.cursor, events: delta.events, steps: this.stepSnapshots(), outputs: selectOutputsForAction(action, options.stepId, options.maxBytes ?? PREVIEW_BYTES, options.preview === true, this.states.values(), this.sinkStepIds()), wait: options.wait, message: options.message, cleanup: options.cleanup, notice: options.notice }, options.error);
 	}
 
 	snapshot() {

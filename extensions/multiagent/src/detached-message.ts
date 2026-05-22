@@ -42,6 +42,6 @@ export async function sendDetachedMessage(input: {
 }
 
 function messageReceipt(runId: string, appendEvent: (event: DetachedRunEventInput) => void, stepId: string, channel: MessageChannel, clientMessageId: string | undefined, accepted: boolean, undeliveredReason: string | undefined, recordEvent = true): MessageReceipt {
-	if (recordEvent) appendEvent({ stepId, type: "parent_message", label: channel, preview: accepted ? "accepted/queued" : undeliveredReason, status: accepted ? "done" : "error" });
+	if (recordEvent) appendEvent({ stepId, type: "parent_message", label: channel, preview: accepted ? "accepted for delivery" : undeliveredReason, status: accepted ? "done" : "error" });
 	return { runId, stepId, channel, clientMessageId, accepted, undeliveredReason, reused: false };
 }

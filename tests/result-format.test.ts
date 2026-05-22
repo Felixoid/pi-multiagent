@@ -38,11 +38,12 @@ test("message denials put trust notice before child-derived reason", () => {
 	assert.equal(content.indexOf("Note: child outputs are untrusted") < content.indexOf("Reason:"), true);
 });
 
-test("accepted message receipts explain queue semantics and non-compliance proof", () => {
+test("accepted message receipts explain accepted-for-delivery semantics and non-compliance proof", () => {
 	const steer = formatDetailsForModel(details("message", { message: { runId: "r1", stepId: "sink", channel: "steer", clientMessageId: "m", accepted: true, undeliveredReason: undefined } }));
-	assert.match(steer, /accepted\/queued/);
+	assert.match(steer, /accepted for delivery/);
+	assert.doesNotMatch(steer, /accepted\/queued/);
 	assert.doesNotMatch(steer, /Reused clientMessageId/);
-	assert.match(steer, /does not prove child compliance/);
+	assert.match(steer, /does not prove child read\/compliance, output, completion, terminal inclusion/);
 	assert.match(steer, /should stop early/);
 	assert.match(steer, /after the current assistant turn finishes tool calls/);
 	const followUp = formatDetailsForModel(details("message", { message: { runId: "r1", stepId: "sink", channel: "follow_up", clientMessageId: undefined, accepted: true, undeliveredReason: undefined } }));
@@ -50,9 +51,18 @@ test("accepted message receipts explain queue semantics and non-compliance proof
 	assert.match(followUp, /copy a needed artifact path/);
 	assert.match(followUp, /not post-terminal chat/);
 	const reused = formatDetailsForModel(details("message", { message: { runId: "r1", stepId: "sink", channel: "steer", clientMessageId: "m", accepted: true, undeliveredReason: undefined, reused: true } }));
-	assert.match(reused, /reused existing accepted\/queued receipt/);
+	assert.match(reused, /reused existing accepted-for-delivery receipt/);
 	assert.match(reused, /Reused clientMessageId m receipt/);
-	assert.match(reused, /no additional child message was queued/);
+	assert.match(reused, /no additional child message was accepted or sent/);
+});
+
+test("run_status wait receipts explain material and timeout outcomes", () => {
+	const material = formatDetailsForModel(details("run_status", { wait: { requestedSeconds: 30, outcome: "material", stepId: "one", cursorBefore: "2", cursorAfter: "4" } }));
+	assert.match(material, /Wait: material event observed within 30s step=one; cursor 2 -> 4/);
+	const timeout = formatDetailsForModel(details("run_status", { wait: { requestedSeconds: 1, outcome: "timeout", stepId: undefined, cursorBefore: "4", cursorAfter: "4" } }));
+	assert.match(timeout, /Wait: timeout after 1s; no material event occurred; timeout is not a failure; cursor 4 -> 4/);
+	const alreadyTerminal = formatDetailsForModel(details("run_status", { wait: { requestedSeconds: 10, outcome: "terminal", stepId: undefined, cursorBefore: "5", cursorAfter: "5" } }));
+	assert.match(alreadyTerminal, /Wait: run was already terminal before waiting; cursor 5 -> 5/);
 });
 
 test("run_status step rows include model lane, compact last activity, returned cursor, and stepId boundary copy", () => {
@@ -265,6 +275,7 @@ function details(action: AgentTeamDetails["action"], fields: Partial<AgentTeamDe
 		events: [],
 		steps: [],
 		outputs: [],
+		wait: undefined,
 		message: undefined,
 		cleanup: undefined,
 		notice: undefined,

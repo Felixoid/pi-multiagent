@@ -32,7 +32,7 @@ export function summarizeStepActivity(event: BackgroundEvent): string {
 	if (event.type === "assistant_final") return "assistant final";
 	if (event.type === "parent_message") return summarizeParentMessage(event);
 	if (event.type === "diagnostic") return summarizeDiagnostic(event);
-	if (event.type === "ui") return `UI request ${event.status === "done" ? "ignored" : "denied"}${event.label ? `: ${event.label}` : ""}`;
+	if (event.type === "ui") return `UI request ${event.status === "done" ? "suppressed" : "denied"}${event.label ? `: ${event.label}` : ""}`;
 	if (event.type === "run") return summarizeRun(event);
 	return event.preview ?? event.status ?? event.type;
 }
@@ -70,7 +70,7 @@ function summarizeRpc(event: BackgroundEvent): string {
 
 function summarizeParentMessage(event: BackgroundEvent): string {
 	const kind = event.label ?? "message";
-	if (event.status === "done") return `parent ${kind} accepted/queued`;
+	if (event.status === "done") return `parent ${kind} accepted for delivery`;
 	if (event.status === "error") return `parent ${kind} denied`;
 	return withStatus(`parent ${kind}`, event.status);
 }

@@ -612,7 +612,7 @@ test("unattended blocking or unknown extension UI requests fail closed", async (
 	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
-test("unattended fire-and-forget extension UI requests are ignored without failing the child", async () => {
+test("unattended fire-and-forget extension UI requests are suppressed without failing the child", async () => {
 	const root = await mkdir(join(tmpdir(), `pi-multiagent-ui-fire-and-forget-${Date.now()}`), { recursive: true });
 	const harness = rpcHarness("ui-fire-and-forget");
 	const options = makeOptions(root, harness.spawn);
@@ -1015,7 +1015,7 @@ test("non-text assistant message updates become compact activity", async () => {
 	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
-test("fire-and-forget UI requests show ignored liveness instead of denied", async () => {
+test("fire-and-forget UI requests show suppressed liveness instead of denied", async () => {
 	const root = await mkdir(join(tmpdir(), `pi-multiagent-ui-liveness-${Date.now()}`), { recursive: true });
 	const harness = rpcHarness("hold");
 	const options = makeOptions(root, harness.spawn);
@@ -1026,10 +1026,10 @@ test("fire-and-forget UI requests show ignored liveness instead of denied", asyn
 	let status: AgentToolResult<AgentTeamDetails> | undefined;
 	for (let attempt = 0; attempt < 20; attempt += 1) {
 		status = await runAgentTeam({ action: "run_status", runId, debugEvents: true }, options);
-		if (/UI request ignored: setStatus/.test(status.details.steps[0]?.lastActivity ?? "")) break;
+		if (/UI request suppressed: setStatus/.test(status.details.steps[0]?.lastActivity ?? "")) break;
 		await new Promise((resolve) => setTimeout(resolve, 5));
 	}
-	assert.match(status?.details.steps[0]?.lastActivity ?? "", /UI request ignored: setStatus/);
+	assert.match(status?.details.steps[0]?.lastActivity ?? "", /UI request suppressed: setStatus/);
 	assert.doesNotMatch(status?.details.steps[0]?.lastActivity ?? "", /denied/);
 	assert.equal(status?.details.events.some((event) => event.type === "ui" && event.label === "setStatus" && event.status === "done"), true);
 	harness.release("done");
@@ -1048,13 +1048,24 @@ test("run_status waitSeconds ignores routine activity and wakes for material com
 	const live = await runAgentTeam({ action: "run_status", runId }, options);
 	assert.equal(live.details.run?.terminal, false);
 	assert.equal(harness.messages[0]?.type, "prompt");
-	const waiting = runAgentTeam({ action: "run_status", runId, cursor: live.details.cursor, waitSeconds: 1, preview: true }, options);
+	const timedOut = await runAgentTeam({ action: "run_status", runId, cursor: live.details.cursor, waitSeconds: 1 }, options);
+	assert.equal(timedOut.details.run?.terminal, false);
+	assert.equal(timedOut.details.wait?.outcome, "timeout");
+	assert.equal(timedOut.details.wait?.cursorBefore, live.details.cursor);
+	assert.equal(timedOut.details.wait?.cursorAfter, timedOut.details.cursor);
+	assert.match(timedOut.content[0].text, /Wait: timeout after 1s/);
+	assert.match(timedOut.content[0].text, /timeout is not a failure/);
+	const waiting = runAgentTeam({ action: "run_status", runId, cursor: timedOut.details.cursor, waitSeconds: 1, preview: true }, options);
 	setTimeout(() => sendAssistantLiveText(harness.children[0], "draft text that must not wake run_status"), 10);
 	setTimeout(() => harness.release("done"), 50);
 	const changed = await waiting;
 	assert.equal(changed.details.run?.status, "succeeded");
+	assert.equal(changed.details.wait?.outcome, "material");
+	assert.equal(changed.details.wait?.cursorBefore, timedOut.details.cursor);
+	assert.equal(changed.details.wait?.cursorAfter, changed.details.cursor);
 	assert.equal(changed.details.outputs[0]?.text, "done");
 	assert.match(changed.content[0].text, /# agent_team run_status/);
+	assert.match(changed.content[0].text, /Wait: material event observed/);
 	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
@@ -1459,7 +1470,7 @@ test("message writes bounded live channel messages to a running step only", asyn
 	const duplicate = await runAgentTeam({ action: "message", runId, stepId: "one", channel: "steer", text: "tighten scope", clientMessageId: "m1" }, options);
 	assert.equal(duplicate.details.message?.accepted, true);
 	assert.equal(duplicate.details.message?.reused, true);
-	assert.match(duplicate.content[0].text, /no additional child message was queued/);
+	assert.match(duplicate.content[0].text, /no additional child message was accepted or sent/);
 	const conflicting = await runAgentTeam({ action: "message", runId, stepId: "one", channel: "steer", text: "different scope", clientMessageId: "m1" }, options);
 	assert.equal(conflicting.details.ok, false);
 	assert.equal(conflicting.details.message?.accepted, false);

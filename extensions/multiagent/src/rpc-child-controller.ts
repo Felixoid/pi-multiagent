@@ -92,7 +92,7 @@ export class RpcChildController {
 		if (budgetError) return { success: false, error: budgetError };
 		const commandType = channel === "steer" ? "steer" : "follow_up";
 		const ack = await this.sendCommand({ type: commandType, message: envelopeParentMessage(channel, text) });
-		this.options.onEvent({ type: "parent_message", label: channel, preview: ack.success ? "queued" : ack.error, status: ack.success ? "done" : "error" });
+		this.options.onEvent({ type: "parent_message", label: channel, preview: ack.success ? "accepted for delivery" : ack.error, status: ack.success ? "done" : "error" });
 		this.maybeFinalize();
 		return ack;
 	}
