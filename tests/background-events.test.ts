@@ -22,6 +22,9 @@ test("BackgroundEventStore detects only material run_status-wait changes", () =>
 	const cursor = store.currentCursor();
 	store.append({ stepId: "one", type: "step", label: "start", preview: "one", status: "running" });
 	store.append({ stepId: "one", type: "assistant_delta", label: "text", preview: "draft", status: "running" });
+	store.append({ stepId: "one", type: "tool", label: "read", preview: "start", status: "running" });
+	store.append({ stepId: "one", type: "tool", label: "read", preview: "done", status: "done" });
+	store.append({ stepId: "one", type: "ui", label: "setStatus", preview: "UI request ignored", status: "done" });
 	assert.equal(store.hasMaterialAfter(cursor, "one", ["one"]), false);
 	store.append({ stepId: "one", type: "step", label: "finish", preview: "done", status: "succeeded" });
 	assert.equal(store.hasMaterialAfter(cursor, "one", ["one"]), true);

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.9.1 - 2026-05-24
+
+- Marked package-returned `agent_team` `ok:false` results as Pi tool-result errors through the supported `tool_result` hook, while keeping successful receipts non-error.
+- Preserved child `tool_execution_end.isError` as debug-visible error-status tool activity and compact `lastActivity` without failing steps that later recover.
+- Added bounded `Non-final assistant evidence` to failed/canceled/timed-out step artifacts when no successful final exists, and expanded final artifact metadata with launch-time tools, extension tools, model/thinking lane, and mutation scope.
+- Added focused regression tests and public docs for error observability, recovered child tool errors, non-final artifact evidence, and detached ESC/cancel semantics.
+
 ## 0.9.0 - 2026-05-22
 
 - Tightened `agent_team` supervision contracts: fire-and-forget child UI updates now render as suppressed non-error activity, `run_status(waitSeconds)` returns a structured wait receipt without waking on routine activity, and message/follow_up acceptance is explicit accepted-for-delivery transport proof rather than child compliance or completion proof.

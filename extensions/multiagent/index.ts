@@ -2,7 +2,7 @@
 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import { Compile } from "typebox/compile";
 import { findNearestProjectAgentsDir, normalizeLibraryOptions } from "./src/agents.ts";
 import type { SpawnProcess } from "./src/child-launch.ts";
@@ -44,6 +44,7 @@ export function registerMultiagentExtension(pi: ExtensionAPI, extensionOptions: 
 		clearRunWidget(ctx, sessionId, liveRunUiBySession);
 	});
 	pi.registerMessageRenderer<AgentTeamDetails>(NOTICE_MESSAGE_TYPE, (message, options, theme) => renderAgentTeamNoticeMessage(message.details, message.content, options, theme));
+	pi.on("tool_result", (event) => agentTeamToolResultErrorOverride(event));
 	pi.registerFlag(SUBAGENT_SKILLS_FLAG, { description: "Subagent Pi skill propagation: enabled or disabled. Default enabled gives each child all caller-visible skills.", type: "string", default: "enabled" });
 	pi.registerTool({
 		name: "agent_team",
@@ -100,6 +101,13 @@ export function registerMultiagentExtension(pi: ExtensionAPI, extensionOptions: 
 		renderCall: renderAgentTeamCall,
 		renderResult: renderAgentTeamResult,
 	});
+}
+
+export function agentTeamToolResultErrorOverride(event: ToolResultEvent): { isError: true } | undefined {
+	if (event.toolName !== "agent_team") return undefined;
+	const details = event.details;
+	if (!isRecord(details) || details.kind !== "agent_team") return undefined;
+	return details.ok === false ? { isError: true } : undefined;
 }
 
 function createRunUiHandlers(pi: ExtensionAPI, ctx: ExtensionContext, sessionId: string, liveRunUiBySession: Map<string, LiveRunUiState>, closedUiSessions: Set<string>): { update: (details: AgentTeamDetails) => string | undefined; notice: (details: AgentTeamDetails) => string | undefined } {

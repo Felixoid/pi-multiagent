@@ -13,6 +13,7 @@ interface StepFinalArtifactInput {
 	endedAt: string;
 	text: string;
 	assistantFinals: string[];
+	nonFinalText: string | undefined;
 	stopReason: string | undefined;
 	upstreamArtifacts: StepArtifactReference[];
 }
@@ -28,6 +29,11 @@ export function buildStepFinalArtifact(input: StepFinalArtifactInput): string {
 		`stopReason: ${input.stopReason ?? input.status}`,
 		`agentRef: ${input.step.agent.ref}`,
 		`agentSource: ${input.step.agent.source}`,
+		`model: ${input.step.agent.model ?? "inherit"}`,
+		`thinking: ${input.step.agent.thinking ?? "inherit"}`,
+		`effectiveTools: ${input.step.agent.tools.length > 0 ? input.step.agent.tools.join(", ") : "none"}`,
+		`extensionTools: ${input.step.agent.extensionTools.length > 0 ? input.step.agent.extensionTools.map((tool) => tool.name).join(", ") : "none"}`,
+		`mutationScope: ${input.step.mutationScope ?? "none"}`,
 		`cwd: ${input.step.cwd ?? "default"}`,
 		`needs: ${input.step.needs.length > 0 ? input.step.needs.join(", ") : "none"}`,
 		`after: ${input.step.after.length > 0 ? input.step.after.join(", ") : "none"}`,
@@ -41,7 +47,7 @@ export function buildStepFinalArtifact(input: StepFinalArtifactInput): string {
 		"",
 		input.step.task,
 		"",
-		formatStepFinalBody(input.text, input.assistantFinals),
+		formatStepFinalBody(input.text, input.assistantFinals, input.nonFinalText),
 	].join("\n");
 }
 
@@ -54,14 +60,19 @@ function formatUpstreamArtifacts(upstreamArtifacts: StepArtifactReference[]): st
 	}).join("\n");
 }
 
-function formatStepFinalBody(text: string, assistantFinals: string[]): string {
+function formatStepFinalBody(text: string, assistantFinals: string[], nonFinalText: string | undefined): string {
 	if (assistantFinals.length === 1) return assistantFinals[0] ?? "";
 	if (assistantFinals.length > 1) return formatAssistantFinalMessages(assistantFinals);
+	if (nonFinalText !== undefined && nonFinalText.trim().length > 0) return formatNonFinalText(nonFinalText);
 	return fallbackFinalText(text);
 }
 
 export function formatAssistantFinalMessages(texts: string[]): string {
 	return texts.map((text, index) => [`## Assistant final ${index + 1}`, "", text].join("\n")).join("\n\n");
+}
+
+export function formatNonFinalText(text: string): string {
+	return ["## Non-final assistant evidence", "", "This text was captured before a successful assistant final. It is retained as bounded failure/cancel/timeout evidence, not as a completed child answer.", "", text].join("\n");
 }
 
 function fallbackFinalText(text: string): string {

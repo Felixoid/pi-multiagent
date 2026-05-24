@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { AssistantOutputBudget, type OutputBudgetFailure } from "./rpc-output-budget.ts";
 import { RpcCommandQueue, type RpcCommandAck } from "./rpc-command-queue.ts";
 import { combinedAssistantFinals, envelopeParentMessage, extractAgentEndErrorMessage, extractAgentEndStopReason, extractAssistantErrorMessage, extractAssistantStopReason, extractAssistantText, extractEventText, hasAgentEndErrorMetadata, isAgentEndContextOverflow, isContextOverflowStop, stringField } from "./rpc-record-utils.ts";
-import { STDERR_PREVIEW_CHARS, type AgentInvocationDefaults, type ResolvedAgent, type StepStatus, type TeamLimits } from "./types.ts";
+import { STDERR_PREVIEW_CHARS, type StepStatus } from "./types.ts";
 import { buildPiArgs, getPiInvocation, killProcessTree, type SpawnProcess } from "./child-launch.ts";
 import { type RpcJsonRecord } from "./rpc-jsonl.ts";
 import { RpcChildListeners } from "./rpc-child-listeners.ts";
@@ -10,28 +10,11 @@ import { handleUnattendedUiRequest } from "./rpc-ui-request.ts";
 import { ParentMessageBudget } from "./rpc-parent-message-budget.ts";
 import { handleAssistantMessageUpdate } from "./rpc-message-update.ts";
 import { terminateRpcChild } from "./rpc-child-termination.ts";
+import { firstNonBlank, toolErrorPreview } from "./rpc-tool-events.ts";
+import type { RpcChildControllerOptions, RpcStepResult } from "./rpc-child-types.ts";
 
 const ACK_TIMEOUT_MS = 10_000;
 const EXIT_CLOSE_GRACE_MS = 500;
-export interface RpcChildControllerOptions {
-	agent: ResolvedAgent;
-	defaults: AgentInvocationDefaults;
-	limits: TeamLimits;
-	cwd: string;
-	promptPath: string;
-	spawnProcess?: SpawnProcess;
-	ackTimeoutMs?: number;
-	onEvent: (input: { type: "rpc" | "assistant_final" | "tool" | "diagnostic" | "parent_message" | "ui"; label?: string; preview?: string; status?: string }) => void;
-	onText?: (text: string) => void;
-}
-
-export interface RpcStepResult {
-	status: StepStatus;
-	text: string;
-	assistantFinals: string[];
-	stderr: string;
-	errorMessage: string | undefined;
-}
 
 export class RpcChildController {
 	private readonly options: RpcChildControllerOptions;
@@ -228,8 +211,11 @@ export class RpcChildController {
 
 	private handleToolEvent(type: string, record: RpcJsonRecord): void {
 		const name = stringField(record.toolName) ?? "tool";
-		const status = type === "tool_execution_end" ? "done" : "running";
-		this.options.onEvent({ type: "tool", label: name, preview: type.replace("tool_execution_", ""), status });
+		const isEnd = type === "tool_execution_end";
+		const isError = isEnd && record.isError === true;
+		const status = isEnd ? (isError ? "error" : "done") : "running";
+		const preview = isError ? toolErrorPreview(record) : type.replace("tool_execution_", "");
+		this.options.onEvent({ type: "tool", label: name, preview, status });
 	}
 
 	private handleUiRequest(record: RpcJsonRecord): void {
@@ -258,7 +244,9 @@ export class RpcChildController {
 	}
 
 	private failureResult(status: StepStatus, message: string): RpcStepResult {
-		return { status, text: this.output, assistantFinals: [...this.assistantFinals], stderr: this.stderr, errorMessage: message };
+		const assistantFinals = [...this.assistantFinals];
+		const nonFinalText = assistantFinals.length === 0 ? firstNonBlank(this.output, this.liveText) : undefined;
+		return { status, text: this.output, assistantFinals, stderr: this.stderr, errorMessage: message, ...(nonFinalText ? { nonFinalText } : {}) };
 	}
 
 	private enterContextOverflowRecovery(label: string, message: string): void {

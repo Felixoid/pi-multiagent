@@ -1,6 +1,6 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { killProcessTree } from "./child-launch.ts";
-import type { RpcStepResult } from "./rpc-child-controller.ts";
+import type { RpcStepResult } from "./rpc-child-types.ts";
 
 const SIGKILL_CONFIRM_MS = 250;
 const SIGTERM_GRACE_MS = 250;

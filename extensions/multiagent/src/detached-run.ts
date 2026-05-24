@@ -12,7 +12,8 @@ import { createStepActivityTracker } from "./step-activity.ts";
 import { validateLaunchCwd } from "./launch-cwd.ts";
 import { findStepLaunchDenial } from "./launch-denial.ts";
 import { createMessageReceiptCache } from "./message-idempotency.ts";
-import { RpcChildController, type RpcStepResult } from "./rpc-child-controller.ts";
+import { RpcChildController } from "./rpc-child-controller.ts";
+import type { RpcStepResult } from "./rpc-child-types.ts";
 import { RunNotifier, stepNoticeReasons, terminalStepNoticeReasons } from "./run-notifier.ts";
 import type { DetachedRunDetailsOptions, DetachedRunEventInput } from "./detached-run-options.ts";
 import { terminalRunStatus } from "./run-terminal-status.ts";
@@ -225,13 +226,13 @@ export class DetachedRun {
 		const status = result.status === "timed_out" || result.status === "canceled" || result.status === "failed" ? result.status : "succeeded";
 		state.finalText = result.text;
 		state.assistantFinals = result.assistantFinals;
-		state.output = this.createStepOutput(state, status, result.text, result.assistantFinals, result.errorMessage);
+		state.output = this.createStepOutput(state, status, result.text, result.assistantFinals, result.errorMessage, result.nonFinalText);
 		if (result.stderr.length > 0) this.appendEvent({ stepId: state.spec.id, type: "diagnostic", label: "stderr", preview: result.stderr, status: "done" });
 		this.finishState(state, status, result.errorMessage);
 	}
 
-	private createStepOutput(state: StepState, status: StepStatus, text: string, assistantFinals: string[] = [], stopReason?: string) {
-		return createStepOutputArtifact({ runId: this.id, objective: this.graph.objective, artifactStore: this.artifactStore, diagnostics: this.diagnostics, events: this.events, state, status, text, assistantFinals, stopReason, upstreamArtifacts: this.upstreamArtifactReferences(state.spec) });
+	private createStepOutput(state: StepState, status: StepStatus, text: string, assistantFinals: string[] = [], stopReason?: string, nonFinalText?: string) {
+		return createStepOutputArtifact({ runId: this.id, objective: this.graph.objective, artifactStore: this.artifactStore, diagnostics: this.diagnostics, events: this.events, state, status, text, assistantFinals, stopReason, upstreamArtifacts: this.upstreamArtifactReferences(state.spec), nonFinalText });
 	}
 
 	private updateLiveText(state: StepState, text: string) {

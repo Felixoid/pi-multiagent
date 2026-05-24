@@ -240,8 +240,9 @@ function sendNestedContextOverflowAgentEnd(child: FakeChild): void {
 	child.stdout.write(`${JSON.stringify({ type: "agent_end", stopReason: "stop", messages: [{ role: "assistant", content: [], stopReason: "error", errorMessage: CONTEXT_OVERFLOW_ERROR }] })}\n`);
 }
 
-function sendToolExecutionEvent(child: FakeChild, type: "tool_execution_start" | "tool_execution_update" | "tool_execution_end", toolName = "read"): void {
-	child.stdout.write(`${JSON.stringify({ type, toolName })}\n`);
+function sendToolExecutionEvent(child: FakeChild, type: "tool_execution_start" | "tool_execution_update" | "tool_execution_end", toolName = "read", isError = false, resultText?: string): void {
+	const result = resultText === undefined ? undefined : { content: [{ type: "text", text: resultText }], details: {} };
+	child.stdout.write(`${JSON.stringify({ type, toolName, ...(type === "tool_execution_end" ? { isError, result } : {}) })}\n`);
 }
 
 function sendExtensionUiRequest(child: FakeChild, method: string): void {
@@ -367,6 +368,11 @@ test("start returns a registered runId and run_status exposes final output", asy
 	assert.match(artifact, /status: succeeded/);
 	assert.match(artifact, /stopReason: succeeded/);
 	assert.match(artifact, /agentRef: inline:one/);
+	assert.match(artifact, /model: inherit/);
+	assert.match(artifact, /thinking: inherit/);
+	assert.match(artifact, /effectiveTools: read, grep, find, ls/);
+	assert.match(artifact, /extensionTools: none/);
+	assert.match(artifact, /mutationScope: none/);
 	assert.match(artifact, /cwd: .*pi-multiagent-detached-/);
 	assert.match(artifact, /needs: none/);
 	assert.match(artifact, /after: none/);
@@ -379,6 +385,32 @@ test("start returns a registered runId and run_status exposes final output", asy
 	assert.equal(debug.details.run?.lastEvent, "terminal: succeeded");
 	assert.equal(harness.messages[0]?.type, "prompt");
 	assert.equal(harness.messages[0]?.message.includes("Objective:"), true);
+});
+
+test("child tool_execution_end error is visible without forcing step failure", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-child-tool-error-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("hold");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	await waitForChildren(harness, 1);
+	const live = await runAgentTeam({ action: "run_status", runId }, options);
+	sendToolExecutionEvent(harness.children[0], "tool_execution_end", "read", true, "ENOENT: missing file");
+	let observed: AgentToolResult<AgentTeamDetails> | undefined;
+	for (let attempt = 0; attempt < 20; attempt += 1) {
+		observed = await runAgentTeam({ action: "run_status", runId, cursor: live.details.cursor, debugEvents: true }, options);
+		if (observed.details.events.some((event) => event.type === "tool" && event.status === "error")) break;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+	const toolEvent = observed?.details.events.find((event) => event.type === "tool" && event.status === "error");
+	assert.equal(toolEvent?.label, "read");
+	assert.match(toolEvent?.preview ?? "", /ENOENT: missing file/);
+	assert.match(observed?.details.steps[0]?.lastActivity ?? "", /tool read error/);
+	harness.release("recovered after tool error");
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "succeeded");
+	assert.equal(terminal.details.outputs[0]?.text, "recovered after tool error");
+	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
 test("cleanup does not recycle short runId handles in one process", async () => {
@@ -584,7 +616,9 @@ test("message_update text streaming without final text is treated as failed term
 	assert.equal(terminal.details.steps[0]?.status, "failed");
 	assert.match(terminal.details.steps[0]?.errorMessage ?? "", /assistant-final-empty/);
 	assert.equal(terminal.details.outputs[0]?.status, "failed");
-	assert.equal(terminal.details.outputs[0]?.chars, 0);
+	assert.equal((terminal.details.outputs[0]?.chars ?? 0) > 0, true);
+	assert.match(terminal.details.outputs[0]?.text ?? "", /Non-final assistant evidence/);
+	assert.match(terminal.details.outputs[0]?.text ?? "", /partial stream without final/);
 	const terminalNotice = notices.find((notice) => notice.notice?.terminal === true);
 	assert.ok(terminalNotice);
 	assert.equal(terminalNotice.outputs.length, 1);
@@ -595,6 +629,8 @@ test("message_update text streaming without final text is treated as failed term
 	const artifact = await readFile(artifactPath, "utf8");
 	assert.match(artifact, /stepId: one/);
 	assert.match(artifact, /status: failed/);
+	assert.match(artifact, /## Non-final assistant evidence/);
+	assert.match(artifact, /partial stream without final/);
 	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
@@ -1667,6 +1703,7 @@ test("cancel marks pending/running work and cleanup removes retained run", async
 	const started = await runAgentTeam(graph(), options);
 	const runId = started.details.run?.runId ?? "";
 	for (let attempt = 0; harness.children.length === 0 && attempt < 20; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+	sendAssistantLiveText(harness.children[0], "partial before cancel");
 	const canceled = await runAgentTeam({ action: "cancel", runId, reason: "test cancel" }, options);
 	assert.equal(canceled.details.run?.status === "canceling" || canceled.details.run?.status === "canceled", true);
 	const terminal = await waitTerminal(root, runId, options);
@@ -1674,6 +1711,14 @@ test("cancel marks pending/running work and cleanup removes retained run", async
 	assert.equal(notices.length, 1);
 	assert.equal(notices[0].run?.status, "canceled");
 	assert.equal(notices[0].notice?.terminal, true);
+	assert.match(terminal.details.outputs[0]?.text ?? "", /Non-final assistant evidence/);
+	assert.match(terminal.details.outputs[0]?.text ?? "", /partial before cancel/);
+	const cancelArtifactPath = terminal.details.outputs[0]?.filePath;
+	assert.ok(cancelArtifactPath);
+	const cancelArtifact = await readFile(cancelArtifactPath, "utf8");
+	assert.match(cancelArtifact, /status: canceled/);
+	assert.match(cancelArtifact, /## Non-final assistant evidence/);
+	assert.match(cancelArtifact, /partial before cancel/);
 	const cleanup = await runAgentTeam({ action: "cleanup", runId }, options);
 	assert.equal(cleanup.details.cleanup?.runId, runId);
 	const missing = await runAgentTeam({ action: "run_status", runId }, options);
@@ -1722,11 +1767,20 @@ test("per-step timeout terminalizes and forces stubborn closeout", async () => {
 	const started = await runAgentTeam({ action: "start", graph: { objective: "timeout", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { system: "Hold forever." }, task: "Hold forever." }], limits: { timeoutSecondsPerStep: 1 } }, options: { terminalRetentionSeconds: 30 } }, options);
 	const runId = started.details.run?.runId ?? "";
 	for (let attempt = 0; harness.children.length === 0 && attempt < 20; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+	sendAssistantLiveText(harness.children[0], "partial before timeout");
 	const terminal = await waitTerminal(root, runId, options, 180);
 	assert.equal(terminal.details.run?.status, "failed");
 	assert.equal(terminal.details.steps[0]?.status, "timed_out");
 	assert.match(terminal.details.steps[0]?.errorMessage ?? "", /timeoutSecondsPerStep=1/);
 	assert.deepEqual(harness.children[0]?.killSignals, ["SIGTERM", "SIGKILL"]);
+	assert.match(terminal.details.outputs[0]?.text ?? "", /Non-final assistant evidence/);
+	assert.match(terminal.details.outputs[0]?.text ?? "", /partial before timeout/);
+	const timeoutArtifactPath = terminal.details.outputs[0]?.filePath;
+	assert.ok(timeoutArtifactPath);
+	const timeoutArtifact = await readFile(timeoutArtifactPath, "utf8");
+	assert.match(timeoutArtifact, /status: timed_out/);
+	assert.match(timeoutArtifact, /## Non-final assistant evidence/);
+	assert.match(timeoutArtifact, /partial before timeout/);
 	const debug = await runAgentTeam({ action: "run_status", runId, debugEvents: true }, options);
 	assert.equal(debug.details.events.some((event) => event.label === "timed_out" && event.preview?.includes("timeoutSecondsPerStep=1")), true);
 	assert.equal(debug.details.events.some((event) => event.label === "SIGKILL" && event.preview?.includes("closeout forced")), true);
