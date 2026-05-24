@@ -32,7 +32,7 @@ After installing in a running Pi session, use `/reload`. Reload requests cancell
 - Bundled package agents such as `package:scout`, `package:web-researcher`, `package:planner`, `package:critic`, `package:docs-auditor`, `package:reviewer`, `package:validator`, `package:worker`, and `package:synthesizer`.
 - Pure graph JSON examples under [`examples/graphs`](examples/graphs).
 
-`catalog` output is authoritative for source-qualified refs, descriptions, routing tags, default built-in tool profiles, source paths, SHA metadata, and active extension-tool provenance. Do not duplicate a role table from memory; inspect `catalog` when role choice, user/project refs, default tools, or extension provenance matter.
+`catalog` output is authoritative for source-qualified refs, descriptions, routing tags, default built-in tool profiles, source paths, SHA metadata, and active extension-tool provenance. Catalog query routing scores role names/ref names (the name portion of source-qualified refs), descriptions, tags, default tools, model, and thinking only; source and file path stay provenance, not ranking signals. Do not duplicate a role table from memory; inspect `catalog` when role choice, user/project refs, default tools, or extension provenance matter.
 
 ## Action rule of thumb
 
@@ -112,7 +112,7 @@ Every child process keeps at least the filesystem read/discovery suite (`read`, 
 
 Child Pi launches use normal Pi extension discovery so extension-provided model providers are available. Ambient trusted extensions may run startup code, provider hooks, tool hooks, and resource discovery as normal Pi behavior. `--tools` remains the callable tool-name allowlist; it is not an extension-code sandbox and extension tools can shadow tool names under normal Pi semantics. Graph authority does not disable or gate this normal Pi extension discovery. Child RPC is unattended: fire-and-forget extension UI updates such as status, notifications, widgets, titles, and editor text are recorded as suppressed non-error activity, while blocking or unknown UI requests fail closed. Child `tool_execution_end` records with `isError:true` are preserved as error-status tool activity in debug events and compact `lastActivity`; they do not automatically fail a step that later recovers and produces a valid final.
 
-Subagent skills are not graph-controlled: `steps[].agent.skills` is rejected. The product flag `--agent-team-subagent-skills enabled|disabled` defaults to `enabled`; enabled children receive every caller-visible Pi skill that is safe under the same project-code policy, and their prompt reminds them to use relevant available skills. Skills never grant tools, graph authority, mutation permission, or broader task scope. Enabled mode is all-or-nothing: unreadable visible skill sources or an inactive parent `read` tool fail planning; use `--agent-team-subagent-skills disabled` to pass no caller skills. If enabled skills come from project, temporary, or workspace-local files, set `graph.authority.allowProjectCode:true` only when that source is trusted.
+Subagent skills are not graph-controlled: `steps[].agent.skills` is rejected. The product flag `--agent-team-subagent-skills enabled|disabled` defaults to `enabled`; enabled children receive every caller-visible Pi skill, and their prompt reminds them to use relevant available skills. Skills never grant tools, graph authority, mutation permission, or broader task scope. Enabled mode is all-or-nothing: unreadable visible skill sources or an inactive parent `read` tool fail planning; use `--agent-team-subagent-skills disabled` to pass no caller skills.
 
 Authority is graph-wide:
 
@@ -122,9 +122,8 @@ Authority is graph-wide:
 | `allowShellTools` | `bash`; bash can mutate through commands. |
 | `allowMutationTools` | Structured `edit` and `write`. |
 | `allowExtensionCode` | Explicit callable extension-tool grants copied from `catalog` as `extensionTools`; not a global switch for normal Pi extension discovery. |
-| `allowProjectCode` | `project:` agents, project library sources, project/local explicit `extensionTools` grants, and project/temporary caller skill sources; it does not disable normal Pi extension discovery. |
 
-`allowShellTools` grants trusted shell execution to child steps whose effective built-in tools include `bash`. Shell commands run with the child process authority, so use shell lanes only for parent-approved command proof or probes, keep the task text exact, and prefer serialized validator lanes for important command evidence. `allowMutationTools` grants trusted mutation execution through `edit` and `write`; use it only for currently authorized implementation work, with the owned files, exclusions, and validation commands stated in the worker task.
+`allowShellTools` grants trusted shell execution to child steps whose effective built-in tools include `bash`. Shell commands run with the child process authority, so use shell lanes only for parent-approved command proof or probes, keep the task text exact, and prefer serialized validator lanes for important command evidence. `package:validator` fails planning unless effective tools include `bash`; use `package:reviewer` for non-command review. `allowMutationTools` grants trusted mutation execution through `edit` and `write`; use it only for currently authorized implementation work, with the owned files, exclusions, and validation commands stated in the worker task. `package:worker` fails planning unless effective tools include `edit` or `write`; use `package:planner` or `package:reviewer` for non-mutating work.
 
 A step `cwd` narrows launch working context to an existing directory inside the invocation cwd. Symlinked, missing, non-directory, and path-escaping cwd values are denied, and cwd identity is rechecked immediately before launch. Bash-enabled steps are refused when the effective `cwd` tree contains `.pi/settings.json`.
 
@@ -147,8 +146,9 @@ After `start`:
 
 - Running notice and no evidence needed: keep working.
 - Need compact state, artifact paths, diagnostics, effective tools, child tool-error breadcrumbs, or the launch-time child model lane: `run_status`.
-- Need to wait without polling: `run_status` with `waitSeconds`; it wakes on material events, not routine assistant/tool/UI activity, and returns a receipt such as `material`, `timeout`, `already-material`, or `terminal`.
-- Need one step's live/final text or non-sink artifact: `step_result` with `preview:true` only when text belongs in context.
+- Need to wait without pushed notices, including JSON/API/headless supervision: `run_status` with `waitSeconds`; it wakes on material events, not routine assistant/tool/UI activity, and returns a receipt such as `material`, `timeout`, `already-material`, or `terminal`.
+- Need incremental wait/debug reads: pass the returned `Cursor` value back as `run_status.cursor`; it is a process-local event cursor, not a run handle or artifact path.
+- Need one step's live/final text or non-sink artifact: `step_result` with `preview:true` only when text belongs in context. `run_status.stepId` filters waits/debug events only; use `step_result` for step text.
 - Need scope repair: `message` one live step.
 - Work is unsafe, obsolete, stuck, or explicitly stopped: `cancel`.
 - Run is terminal and evidence is preserved or discarded: `cleanup`.
@@ -159,7 +159,7 @@ After `start`:
 
 Copy/adapt warning: packaged examples are skeletons for positive graph shapes. Do not run them verbatim; replace objective, paths/components, trusted command list or file set in the task text, stop condition, expected output fields, and human decision question before starting the graph.
 
-The packaged set covers single-specialist, inline fan-in, cwd-launched fanout, read-only fanout, map-reduce, sharded map-reduce, artifact-chained follow-up, human-gated planning, command validation, validation matrix, completed proof review, model-facing docs audit, release readiness, and research-to-change planning. Browse [`examples/graphs`](examples/graphs) and the [graph cookbook](skills/pi-multiagent/references/graph-cookbook.md).
+The packaged set covers single-specialist, inline fan-in, cwd-launched fanout, read-only fanout, map-reduce, tree-reduce, sharded map-reduce, artifact-chained follow-up, product-experience source audit, evidence-trace audit, human-gated planning, command validation, validation matrix, completed proof review, model-facing docs audit, release readiness, and research-to-change planning. Browse [`examples/graphs`](examples/graphs) and the [graph cookbook](skills/pi-multiagent/references/graph-cookbook.md).
 
 Use `release-readiness-review.json` for the default non-mutating read/shell release proof path. `package:web-researcher` fails planning before child launch unless the step grants explicit callable `exa_search` and `exa_fetch` `extensionTools` copied from live `catalog` provenance with `allowExtensionCode:true`; cookbook web patterns stay copy/adapt because public examples cannot know local provenance.
 
@@ -196,11 +196,11 @@ Before starting any graph with `bash`, verify the graph authority is limited to 
 | Symptom | Check |
 | --- | --- |
 | `run` is rejected | Use `start`, then `run_status`; `run` is intentionally absent. |
-| Catalog has no expected role | Omit the query or use concise routing terms; check `library.sources` and package/user/trusted-project scope. |
+| Catalog has no expected role | Omit the query or use concise routing terms; check `library.sources` and package/user/project scope. |
 | Bare ref is rejected | Use a source-qualified ref such as `package:reviewer`. |
-| Project agents do not load | For start, set `graph.library.sources:["project"]` and `graph.authority.allowProjectCode:true`; for catalog, use trusted `library.sources:["project"]` plus `projectAgents:"allow"`. |
+| Project agents do not load | For start, set `graph.library.sources:["project"]`; for catalog, use `library.sources:["project"]`. Project and user library sources load when requested and present. |
 | `graphFile` is rejected | Use a pure relative graph JSON file inside cwd; do not include `action`, `runId`, or nested `graphFile`. |
-| Built-in tool is rejected | Add `allowFilesystemRead:true`; add shell/mutation authority only when the delegated task really needs trusted shell or edit/write tools. |
+| Built-in tool is rejected | Add `allowFilesystemRead:true`; add shell/mutation authority only when the delegated task really needs trusted shell or edit/write tools. `package:validator` requires effective `bash`; `package:worker` requires effective `edit` or `write`. |
 | Extension tool is rejected | Keep callable extension grants in `extensionTools` and copy source/scope/origin from `catalog`. |
 | Which model did a child run? | Check `run_status` step rows; they report the launch-time model/thinking lane. Parent model changes after `start` do not affect live children. |
 | Provider model is unavailable in a child | Install or enable the provider extension through normal Pi extension discovery for the child cwd/agent dir; one-off parent `pi -e` provider extensions are not inherited. |

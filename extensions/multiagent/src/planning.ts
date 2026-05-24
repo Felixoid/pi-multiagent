@@ -7,7 +7,7 @@ import type { GraphSpec } from "./schemas.ts";
 import type { AgentConfig, AgentDiagnostic, CwdIdentity, GraphAuthority, LibrarySource, ParentSkillInventory, ResolvedAgent, ResolvedGraph, SubagentSkillMode, TeamStepSpec } from "./types.ts";
 import { DEFAULT_GRAPH_LIBRARY_SOURCES, LIBRARY_SOURCE_VALUES, PUBLIC_ID_PATTERN, SOURCE_QUALIFIED_LIBRARY_REF_PATTERN } from "./types.ts";
 import { createCallerSkillResolutionContext, resolveAgentCallerSkills } from "./caller-skills.ts";
-import { extensionToolPolicyFromAuthority, normalizeAuthority } from "./authority-policy.ts";
+import { normalizeAuthority } from "./authority-policy.ts";
 import { normalizeLimits, normalizeStartOptions } from "./limits.ts";
 import { resolveAgentToolAccess } from "./tool-policy.ts";
 import { resolveBuiltinToolProfile } from "./builtin-tool-profile.ts";
@@ -78,7 +78,7 @@ function resolveStepAgent(stepId: string, spec: GraphSpec["steps"][number]["agen
 		if (!tools) return undefined;
 		const toolAccess = resolveToolAccess(stepId, spec, tools, authority, diagnostics, context, path);
 		if (!toolAccess) return undefined;
-		const skills = resolveAgentCallerSkills({ mode: context.subagentSkillMode ?? DEFAULT_SUBAGENT_SKILL_MODE, tools: toolAccess.tools, label: `step agent ${stepId}`, path: `${path}/skills`, allowProjectCode: authority.allowProjectCode, diagnostics, context: skillContext });
+		const skills = resolveAgentCallerSkills({ mode: context.subagentSkillMode ?? DEFAULT_SUBAGENT_SKILL_MODE, tools: toolAccess.tools, label: `step agent ${stepId}`, path: `${path}/skills`, diagnostics, context: skillContext });
 		if (!skills) return undefined;
 		return { id: stepId, ref: `inline:${stepId}`, name: stepId, kind: "inline", description: stepId, tools: toolAccess.tools, extensionTools: toolAccess.extensionTools, callerSkills: skills, systemPrompt, model: undefined, thinking: undefined, source: "inline", filePath: undefined, sha256: undefined };
 	}
@@ -102,10 +102,6 @@ function resolveLibraryAgent(stepId: string, spec: GraphSpec["steps"][number]["a
 		diagnostics.push(makeDiagnostic("library-source-not-enabled", `Library source ${source} is not enabled by graph.library.sources.`, "error", `${path}/ref`));
 		return undefined;
 	}
-	if (source === "project" && !authority.allowProjectCode) {
-		diagnostics.push(makeDiagnostic("project-code-authority-required", "project agents require graph.authority.allowProjectCode:true.", "error", `${path}/ref`));
-		return undefined;
-	}
 	const agent = libraryAgents.find((candidate) => candidate.source === source && candidate.name === name);
 	if (!agent) {
 		diagnostics.push(makeDiagnostic("library-agent-unknown", `Unknown library agent: ${ref}. Run catalog or adjust graph.library.sources/authority.`, "error", `${path}/ref`));
@@ -115,14 +111,27 @@ function resolveLibraryAgent(stepId: string, spec: GraphSpec["steps"][number]["a
 	if (!tools) return undefined;
 	const toolAccess = resolveToolAccess(stepId, spec, tools, authority, diagnostics, context, path);
 	if (!toolAccess) return undefined;
+	if (!validatePackageRoleCapabilities(agent.ref, toolAccess.tools, diagnostics, path)) return undefined;
 	if (!validateWebResearcherExtensionTools(agent.ref, toolAccess.extensionTools, diagnostics, `${path}/extensionTools`)) return undefined;
-	const skills = resolveAgentCallerSkills({ mode: context.subagentSkillMode ?? DEFAULT_SUBAGENT_SKILL_MODE, tools: toolAccess.tools, label: `step agent ${stepId}`, path: `${path}/skills`, allowProjectCode: authority.allowProjectCode, diagnostics, context: skillContext });
+	const skills = resolveAgentCallerSkills({ mode: context.subagentSkillMode ?? DEFAULT_SUBAGENT_SKILL_MODE, tools: toolAccess.tools, label: `step agent ${stepId}`, path: `${path}/skills`, diagnostics, context: skillContext });
 	if (!skills) return undefined;
 	return { id: stepId, ref: agent.ref, name: agent.name, kind: "library", description: agent.description, tools: toolAccess.tools, extensionTools: toolAccess.extensionTools, callerSkills: skills, systemPrompt: agent.systemPrompt, model: agent.model, thinking: agent.thinking, source: agent.source, filePath: agent.filePath, sha256: agent.sha256 };
 }
 
 function resolveToolAccess(stepId: string, spec: GraphSpec["steps"][number]["agent"], tools: string[], authority: GraphAuthority, diagnostics: AgentDiagnostic[], context: ResolveGraphContext, path: string): ReturnType<typeof resolveAgentToolAccess> {
-	return resolveAgentToolAccess({ tools, extensionTools: spec.extensionTools, label: `step agent ${stepId}`, toolsPath: `${path}/tools`, extensionToolsPath: `${path}/extensionTools`, diagnostics, context: { parentTools: context.parentTools, extensionToolPolicy: extensionToolPolicyFromAuthority(authority), cwd: context.cwd } });
+	return resolveAgentToolAccess({ tools, extensionTools: spec.extensionTools, label: `step agent ${stepId}`, toolsPath: `${path}/tools`, extensionToolsPath: `${path}/extensionTools`, diagnostics, context: { parentTools: context.parentTools } });
+}
+
+function validatePackageRoleCapabilities(ref: string, tools: string[], diagnostics: AgentDiagnostic[], path: string): boolean {
+	if (ref === "package:validator" && !tools.includes("bash")) {
+		diagnostics.push(makeDiagnostic("validator-shell-capability-required", "package:validator requires effective bash access for command-backed validation; grant graph.authority.allowShellTools:true with default tools, or use package:reviewer for non-command review.", "error", `${path}/tools`));
+		return false;
+	}
+	if (ref === "package:worker" && !tools.some((tool) => tool === "edit" || tool === "write")) {
+		diagnostics.push(makeDiagnostic("worker-mutation-capability-required", "package:worker requires effective edit/write mutation access for implementation; grant graph.authority.allowMutationTools:true for authorized changes, or use package:planner/package:reviewer for non-mutating work.", "error", `${path}/tools`));
+		return false;
+	}
+	return true;
 }
 
 function validateBashCwd(stepId: string, agent: ResolvedAgent, cwd: string, diagnostics: AgentDiagnostic[], path: string): boolean {
@@ -135,7 +144,6 @@ function validateBashCwd(stepId: string, agent: ResolvedAgent, cwd: string, diag
 
 function normalizeGraphSources(sources: LibrarySource[] | undefined, authority: GraphAuthority, diagnostics: AgentDiagnostic[]): LibrarySource[] {
 	const selected = dedupeSources(sources && sources.length > 0 ? sources : DEFAULT_GRAPH_LIBRARY_SOURCES);
-	if (selected.includes("project") && !authority.allowProjectCode) diagnostics.push(makeDiagnostic("project-code-authority-required", "graph.library.sources includes project but allowProjectCode is false.", "error", "/graph/library/sources"));
 	return selected;
 }
 

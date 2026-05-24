@@ -35,7 +35,7 @@ function schemaRepairForPath(path: string): string | undefined {
 	if (path === "/reason") return "reason must be a short cancel reason string; cancel only when stopping is explicit, unsafe, stuck, obsolete, or higher value than completion.";
 	if (path === "/graph") return "start requires a graph object or graphFile; graph contains objective, authority, steps, optional library, and limits.";
 	if (path === "/graphFile") return "graphFile must be a relative path to a trusted workspace-local pure detached graph JSON file; use it only with action:start.";
-	if (path === "/library") return "catalog library controls sources/query/projectAgents; start graph library sources belong under graph.library.";
+	if (path === "/library") return "catalog library controls sources/query; start graph library sources belong under graph.library.";
 	if (path === "/options") return "options is valid only with start and controls retention, maxRunSeconds, and notice behavior.";
 	return undefined;
 }

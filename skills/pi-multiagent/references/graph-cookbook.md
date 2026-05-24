@@ -12,21 +12,24 @@ Graph design ladder:
 4. Read-only audit fanout for independent docs/runtime/risk lanes.
 5. Cwd-launched fanout when each lane should start from a different trusted subtree.
 6. Map-reduce audit fanout when mapper lanes should stay independent until one reducer dedupes owners and decisions.
-7. Sharded map-reduce when the parent can name separate components or retained artifacts.
-8. Artifact-chained follow-up when prior retained artifacts must survive compaction, approval checkpoints, or phase separation.
-9. Web research lane when current external facts matter and explicit extension-tool provenance is available.
-10. Human-gated plan when implementation needs a decision question before any write authority exists.
-11. Command validation or validation matrix when parent-named shell proof should be observed by validator lanes.
-12. Completed-proof review or release-readiness review when final judgment needs evidence from multiple terminal lanes.
+7. Tree-reduce source review when broad mappers need intermediate reducers before one final decision.
+8. Sharded map-reduce when the parent can name separate components or retained artifacts.
+9. Artifact-chained follow-up when prior retained artifacts must survive compaction, approval checkpoints, or phase separation.
+10. Product-experience source audit when first success, trust, recovery, and repeat use need source-grounded review.
+11. Evidence-trace audit when a behavior claim must be followed from source contract through retained artifacts and operator copy.
+12. Web research lane when current external facts matter and explicit extension-tool provenance is available.
+13. Human-gated plan when implementation needs a decision question before any write authority exists.
+14. Command validation or validation matrix when parent-named shell proof should be observed by validator lanes.
+15. Completed-proof review or release-readiness review when final judgment needs evidence from multiple terminal lanes.
 
 ## Tool and authority reminders
 
 - Every child keeps mandatory read/discovery (`read`, `grep`, `find`, `ls`), so graphs need `authority.allowFilesystemRead:true`.
 - Omitted `agent.tools` inherits catalog defaults capped by graph authority. Explicit `agent.tools` replaces the catalog profile, then mandatory read/discovery is added.
-- `allowShellTools` grants trusted shell execution. Put exact trusted commands or a bounded command class in the task, and prefer `package:validator` for command proof.
-- `allowMutationTools` grants trusted mutation execution through `edit` and `write`. Put current human authorization, owned files, exclusions, and validation commands in the worker task.
+- `allowShellTools` grants trusted shell execution. Put exact trusted commands or a bounded command class in the task, and prefer `package:validator` for command proof. `package:validator` fails planning without effective `bash`.
+- `allowMutationTools` grants trusted mutation execution through `edit` and `write`. Put current human authorization, owned files, exclusions, and validation commands in the worker task. `package:worker` fails planning without effective `edit` or `write`.
 - `cwd` changes launch working context and is checked before launch. It is a launch boundary, not a file policy.
-- Extension tools require copied catalog provenance and `allowExtensionCode:true`; project/local provenance also needs `allowProjectCode:true`.
+- Extension tools require copied catalog provenance and `allowExtensionCode:true`.
 - Subagent skills are controlled only by `--agent-team-subagent-skills enabled|disabled` (default enabled/all caller-visible skills), not by `agent.skills`.
 
 ## Task packet templates
@@ -57,6 +60,14 @@ Do not edit, install, publish, deploy, delete, or run network commands unless th
 Return pass/fail/deferred per command with cwd, important output, and failure bucket.
 ```
 
+Product/evidence audit packet:
+
+```text
+Audit this behavior or journey from source only: <claim or user path>.
+Trace first success, trust boundary, recovery state, artifact/evidence path, operator copy, and validation gap.
+Do not edit or run commands. Return source paths, mismatches, proof gaps, and smallest next action.
+```
+
 Mutation packet:
 
 ```text
@@ -76,14 +87,17 @@ Stop if dirty state or evidence shows the owned set is wrong.
 | [`read-only-audit-fanout.json`](../../../examples/graphs/read-only-audit-fanout.json) | Independent read-only audit lanes inform one decision | filesystem read | `final-decision` |
 | [`cwd-launched-audit-fanout.json`](../../../examples/graphs/cwd-launched-audit-fanout.json) | Each read-only lane should start from a different subtree | filesystem read | `audit-decision` |
 | [`map-reduce-audit-fanout.json`](../../../examples/graphs/map-reduce-audit-fanout.json) | Runtime/docs/tests mappers should stay independent | filesystem read | `reduce-decision` |
+| [`tree-reduce-source-review.json`](../../../examples/graphs/tree-reduce-source-review.json) | Broad source review needs intermediate reducers before final fan-in | filesystem read | `final-decision` |
 | [`sharded-map-reduce-audit.json`](../../../examples/graphs/sharded-map-reduce-audit.json) | Parent can name separate components or artifacts | filesystem read | `reduce-decision` |
 | [`artifact-chained-decision.json`](../../../examples/graphs/artifact-chained-decision.json) | Prior retained artifacts are the main evidence | filesystem read | `final-decision` |
+| [`product-experience-source-audit.json`](../../../examples/graphs/product-experience-source-audit.json) | First success, trust, recovery, and repeat use need a source-grounded audit | filesystem read | `experience-decision` |
+| [`evidence-trace-audit.json`](../../../examples/graphs/evidence-trace-audit.json) | One behavior claim must be traced through source, artifacts, and copy | filesystem read | `trace-decision` |
 | [`human-gated-plan-only.json`](../../../examples/graphs/human-gated-plan-only.json) | Need a plan and decision question before mutation | filesystem read | `final-decision` |
 | [`command-validation-only.json`](../../../examples/graphs/command-validation-only.json) | Named trusted commands need observed proof | filesystem read + shell | `final-proof` |
 | [`validation-matrix-gate.json`](../../../examples/graphs/validation-matrix-gate.json) | Independent trusted command lanes need one proof matrix | filesystem read + shell | `final-proof` |
 | [`completed-proof-review.json`](../../../examples/graphs/completed-proof-review.json) | Completed work needs proof, review, and risk lanes | filesystem read + shell | `final-decision` |
 | [`model-facing-docs-audit.json`](../../../examples/graphs/model-facing-docs-audit.json) | Model-facing docs/examples/role routing need audit | filesystem read | `final-opportunities` |
-| [`release-readiness-review.json`](../../../examples/graphs/release-readiness-review.json) | Release readiness needs source mapping plus trusted dry-run proof | filesystem read + shell | `readiness-decision` |
+| [`release-readiness-review.json`](../../../examples/graphs/release-readiness-review.json) | Release readiness needs source mapping plus trusted package gate/dry-run proof | filesystem read + shell | `readiness-decision` |
 | [`research-to-change-gated-loop.json`](../../../examples/graphs/research-to-change-gated-loop.json) | Evidence should become a plan and decision question | filesystem read | `final-report` |
 
 ## Starting a copied graph file
@@ -236,9 +250,10 @@ Web research with explicit catalog-copied provenance:
 ## Supervision quick guide
 
 - Let healthy runs finish; pushed notices are compact receipts.
-- Use `run_status` for compact state or a bounded `waitSeconds` wait/read. The result includes a structured wait receipt; timeout means no material event, not failure.
+- Use `run_status` for compact state or a bounded `waitSeconds` wait/read. In JSON/API/headless use, this is the fallback when pushed notices are unavailable. The result includes a structured wait receipt; timeout means no material event, not failure.
+- Pass the returned `Cursor` back as `run_status.cursor` for incremental wait/debug reads; it is not a run handle or artifact path.
 - Add `preview:true` only when bounded assistant text belongs in context.
-- Use `step_result` for one step's text or artifact.
+- Use `step_result` for one step's text or artifact; `run_status.stepId` filters wait/debug events only.
 - Use `debugEvents:true` only for package debugging.
 - Message only live steps for clarification or scope repair. Accepted-for-delivery transport does not prove child compliance.
 - Cleanup only after retained artifacts are preserved or intentionally discarded.

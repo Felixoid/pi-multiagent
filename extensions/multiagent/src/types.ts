@@ -4,7 +4,6 @@ export type AgentTeamAction = "catalog" | "start" | "run_status" | "step_result"
 export type ExecutionAction = Exclude<AgentTeamAction, "missing/invalid">;
 export type AgentSource = "package" | "user" | "project" | "inline";
 export type LibrarySource = "package" | "user" | "project";
-export type ProjectAgentsPolicy = "deny" | "confirm" | "allow";
 export type InvocationAgentKind = "inline" | "library";
 export type ThinkingLevel = "inherit" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export type RunStatus = "running" | "succeeded" | "mixed" | "failed" | "canceling" | "canceled" | "expired";
@@ -16,9 +15,7 @@ export type EventType = "run" | "step" | "assistant_delta" | "assistant_final" |
 
 export const DEFAULT_LIBRARY_SOURCES: LibrarySource[] = ["package"];
 export const DEFAULT_GRAPH_LIBRARY_SOURCES: LibrarySource[] = ["package"];
-export const DEFAULT_PROJECT_AGENTS_POLICY: ProjectAgentsPolicy = "deny";
 export const LIBRARY_SOURCE_VALUES = ["package", "user", "project"] as const;
-export const PROJECT_AGENTS_POLICY_VALUES = ["deny", "confirm", "allow"] as const;
 export const AGENT_TEAM_ACTION_VALUES = ["catalog", "start", "run_status", "step_result", "message", "cancel", "cleanup"] as const;
 export const INVOCATION_AGENT_KIND_VALUES = ["inline", "library"] as const;
 export const THINKING_LEVEL_VALUES = ["inherit", "off", "minimal", "low", "medium", "high", "xhigh"] as const;
@@ -42,8 +39,6 @@ export const SKILL_NAME_PATTERN = "^(?!.*--)[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?
 export type BuiltinChildToolName = (typeof BUILTIN_CHILD_TOOL_NAMES)[number];
 export type ExtensionSourceScope = (typeof EXTENSION_SOURCE_SCOPE_VALUES)[number];
 export type ExtensionSourceOrigin = (typeof EXTENSION_SOURCE_ORIGIN_VALUES)[number];
-export type ExtensionToolTrustPolicy = "deny" | "allow";
-
 export const MAX_STEPS = 16;
 export const MAX_DEPENDENCIES_PER_STEP = 12;
 export const MAX_CONCURRENCY = 6;
@@ -95,7 +90,6 @@ export interface AgentDiagnostic {
 export interface LibraryOptions {
 	sources: LibrarySource[];
 	query: string | undefined;
-	projectAgents: ProjectAgentsPolicy;
 }
 
 export interface GraphLibraryOptions {
@@ -107,7 +101,6 @@ export interface GraphAuthority {
 	allowShellTools: boolean;
 	allowMutationTools: boolean;
 	allowExtensionCode: boolean;
-	allowProjectCode: boolean;
 }
 
 export interface TeamLimits {
@@ -148,7 +141,6 @@ export interface AgentDiscoveryResult {
 	userAgentsDir: string;
 	projectAgentsDir: string | undefined;
 	sources: LibrarySource[];
-	projectAgents: ProjectAgentsPolicy;
 }
 
 export interface ExtensionToolProvenanceSpec {
@@ -160,11 +152,6 @@ export interface ExtensionToolProvenanceSpec {
 export interface ExtensionToolGrantSpec {
 	name: string;
 	from: ExtensionToolProvenanceSpec;
-}
-
-export interface ExtensionToolPolicy {
-	projectExtensions: ExtensionToolTrustPolicy;
-	localExtensions: ExtensionToolTrustPolicy;
 }
 
 export interface ParentSkillSourceInfo {
@@ -437,7 +424,6 @@ export interface CatalogExtensionToolSummary {
 	description: string | undefined;
 	from: ExtensionToolProvenanceSpec;
 	active: boolean;
-	requiresProjectCode?: boolean;
 }
 
 export interface AgentTeamDetails {

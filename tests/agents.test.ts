@@ -171,7 +171,7 @@ test("discoverAgents reports duplicate source refs only", async () => {
 	await rm(root, { recursive: true, force: true });
 });
 
-test("global Pi directory is not treated as project agents or project-scoped user agents", async () => {
+test("global Pi directory is not treated as project agents", async () => {
 	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-global-pi-"));
 	const globalPiDir = join(root, ".pi");
 	const userDir = join(globalPiDir, "agent", "agents");
@@ -181,150 +181,32 @@ test("global Pi directory is not treated as project agents or project-scoped use
 	await makeAgent(userDir, "user.md", "---\nname: user\ndescription: user agent\n---\nUser prompt");
 	await makeAgent(join(globalPiDir, "agents"), "global-project.md", "---\nname: global-project\ndescription: not project\n---\nGlobal prompt");
 	const projectAgentsDir = findNearestProjectAgentsDir(project, globalPiDir);
-	const discovery = discoverAgents({ cwd: project, packageAgentsDir: packageDir, userAgentsDir: userDir, globalPiDir, library: normalizeLibraryOptions({ sources: ["user", "project"], projectAgents: "allow" }) });
+	const discovery = discoverAgents({ cwd: project, packageAgentsDir: packageDir, userAgentsDir: userDir, globalPiDir, library: normalizeLibraryOptions({ sources: ["user", "project"] }) });
 	assert.equal(projectAgentsDir, undefined);
 	assert.deepEqual(discovery.agents.map((agent) => agent.ref), ["user:user"]);
-	assert.equal(discovery.diagnostics.some((item) => item.code === "user-agents-dir-project-scoped"), false);
 	await rm(root, { recursive: true, force: true });
 });
 
-test("project source is denied by default", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-project-deny-"));
+test("project source loads when requested", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-project-load-"));
 	const packageDir = join(root, "package-agents");
 	const projectDir = join(root, ".pi", "agents");
 	await makeAgent(projectDir, "repo.md", "---\nname: repo\ndescription: repo agent\n---\nRepo prompt");
 	const discovery = discoverAgents({ cwd: root, packageAgentsDir: packageDir, library: normalizeLibraryOptions({ sources: ["project"] }) });
-	assert.equal(discovery.agents.length, 0);
-	assert.equal(discovery.diagnostics[0].code, "project-agents-denied");
+	assert.deepEqual(discovery.agents.map((agent) => agent.ref), ["project:repo"]);
+	assert.equal(discovery.diagnostics.some((item) => item.severity === "error"), false);
 	await rm(root, { recursive: true, force: true });
 });
 
-test("project source confirm fails closed when discovery is not preprocessed", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-project-confirm-"));
-	const packageDir = join(root, "package-agents");
-	const projectDir = join(root, ".pi", "agents");
-	await makeAgent(projectDir, "repo.md", "---\nname: repo\ndescription: repo agent\n---\nRepo prompt");
-	const discovery = discoverAgents({ cwd: root, packageAgentsDir: packageDir, library: normalizeLibraryOptions({ sources: ["project"], projectAgents: "confirm" }) });
-	assert.equal(discovery.agents.length, 0);
-	assert.equal(discovery.diagnostics.some((item) => item.code === "project-agents-confirm-unprepared" && item.severity === "error"), true);
-	await rm(root, { recursive: true, force: true });
-});
-
-test("project-scoped user agent directory is denied", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-user-project-scoped-"));
+test("project-local user agent directories load when explicitly configured", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-user-local-"));
 	const packageDir = join(root, "package-agents");
 	const userDir = join(root, ".pi", "agents");
-	await makeAgent(userDir, "repo.md", "---\nname: repo\ndescription: repo agent\n---\nRepo prompt");
+	await makeAgent(userDir, "repo.md", "---\nname: repo\ndescription: repo user agent\n---\nRepo prompt");
 	const discovery = discoverAgents({ cwd: root, packageAgentsDir: packageDir, userAgentsDir: userDir, library: normalizeLibraryOptions({ sources: ["user"] }) });
-	assert.equal(discovery.agents.length, 0);
-	assert.equal(discovery.diagnostics.some((item) => item.code === "user-agents-dir-project-scoped" && item.severity === "error"), true);
+	assert.deepEqual(discovery.agents.map((agent) => agent.ref), ["user:repo"]);
+	assert.equal(discovery.diagnostics.some((item) => item.severity === "error"), false);
 	await rm(root, { recursive: true, force: true });
-});
-
-test("project-root user agent directory is denied", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-user-project-root-"));
-	const packageDir = join(root, "package-agents");
-	const userDir = join(root, "agents");
-	await mkdir(join(root, ".pi"), { recursive: true });
-	await makeAgent(userDir, "repo.md", "---\nname: repo\ndescription: repo agent\n---\nRepo prompt");
-	const discovery = discoverAgents({ cwd: root, packageAgentsDir: packageDir, userAgentsDir: userDir, library: normalizeLibraryOptions({ sources: ["user"] }) });
-	assert.equal(discovery.agents.length, 0);
-	assert.equal(discovery.diagnostics.some((item) => item.code === "user-agents-dir-project-scoped" && item.severity === "error"), true);
-	await rm(root, { recursive: true, force: true });
-});
-
-test("project-root user agent directory is denied when git marker is a file", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-user-project-git-file-"));
-	const packageDir = join(root, "package-agents");
-	const userDir = join(root, "agents");
-	await writeFile(join(root, ".git"), "gitdir: ../real-git\n", "utf8");
-	await makeAgent(userDir, "repo.md", "---\nname: repo\ndescription: repo agent\n---\nRepo prompt");
-	const discovery = discoverAgents({ cwd: root, packageAgentsDir: packageDir, userAgentsDir: userDir, library: normalizeLibraryOptions({ sources: ["user"] }) });
-	assert.equal(discovery.agents.length, 0);
-	assert.equal(discovery.diagnostics.some((item) => item.code === "user-agents-dir-project-scoped" && item.severity === "error"), true);
-	await rm(root, { recursive: true, force: true });
-});
-
-test("project-root user agent directory is denied when pi marker is a file or symlink", async () => {
-	const cases = ["file", "symlink", "dangling-symlink"] as const;
-	for (const markerKind of cases) {
-		const root = await mkdtemp(join(tmpdir(), `pi-multiagent-user-project-pi-${markerKind}-`));
-		const packageDir = join(root, "package-agents");
-		const userDir = join(root, "agents");
-		const marker = join(root, ".pi");
-		if (markerKind === "file") await writeFile(marker, "settings marker\n", "utf8");
-		else if (markerKind === "symlink") {
-			const target = join(root, "pi-marker-target");
-			await writeFile(target, "settings marker\n", "utf8");
-			await symlink(target, marker);
-		} else await symlink(join(root, "missing-pi-marker-target"), marker);
-		await makeAgent(userDir, "repo.md", "---\nname: repo\ndescription: repo agent\n---\nRepo prompt");
-		const discovery = discoverAgents({ cwd: root, packageAgentsDir: packageDir, userAgentsDir: userDir, library: normalizeLibraryOptions({ sources: ["user"] }) });
-		assert.equal(discovery.agents.length, 0, markerKind);
-		assert.equal(discovery.diagnostics.some((item) => item.code === "user-agents-dir-project-scoped" && item.severity === "error"), true, markerKind);
-		await rm(root, { recursive: true, force: true });
-	}
-});
-
-test("project-root user agent directory is denied through symlink", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-user-project-root-link-"));
-	const outside = await mkdtemp(join(tmpdir(), "pi-multiagent-user-root-link-outside-"));
-	const packageDir = join(root, "package-agents");
-	const projectAgents = join(root, "agents");
-	const userDir = join(outside, "agents-link");
-	await mkdir(join(root, ".pi"), { recursive: true });
-	await makeAgent(projectAgents, "repo.md", "---\nname: repo\ndescription: repo agent\n---\nRepo prompt");
-	await symlink(projectAgents, userDir);
-	const discovery = discoverAgents({ cwd: root, packageAgentsDir: packageDir, userAgentsDir: userDir, library: normalizeLibraryOptions({ sources: ["user"] }) });
-	assert.equal(discovery.agents.length, 0);
-	assert.equal(discovery.diagnostics.some((item) => item.code === "user-agents-dir-project-scoped" && item.severity === "error"), true);
-	await rm(root, { recursive: true, force: true });
-	await rm(outside, { recursive: true, force: true });
-});
-
-test("nested project-scoped user agent directory is denied without project agents dir", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-user-project-nested-"));
-	const packageDir = join(root, "package-agents");
-	const nested = join(root, "src");
-	const userDir = join(root, ".pi", "agent", "agents");
-	await mkdir(nested, { recursive: true });
-	await makeAgent(userDir, "repo.md", "---\nname: repo\ndescription: repo agent\n---\nRepo prompt");
-	const discovery = discoverAgents({ cwd: nested, packageAgentsDir: packageDir, userAgentsDir: userDir, library: normalizeLibraryOptions({ sources: ["user"] }) });
-	assert.equal(discovery.agents.length, 0);
-	assert.equal(discovery.diagnostics.some((item) => item.code === "user-agents-dir-project-scoped" && item.severity === "error"), true);
-	await rm(root, { recursive: true, force: true });
-});
-
-test("nested project-scoped user agent directory is denied through cwd symlink", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-user-project-nested-link-"));
-	const outside = await mkdtemp(join(tmpdir(), "pi-multiagent-user-project-nested-outside-"));
-	const packageDir = join(root, "package-agents");
-	const nested = join(root, "src");
-	const linkedNested = join(outside, "linked-src");
-	const userDir = join(root, ".pi", "agent", "agents");
-	await mkdir(nested, { recursive: true });
-	await makeAgent(userDir, "repo.md", "---\nname: repo\ndescription: repo agent\n---\nRepo prompt");
-	await symlink(nested, linkedNested, "dir");
-	const discovery = discoverAgents({ cwd: linkedNested, packageAgentsDir: packageDir, userAgentsDir: userDir, library: normalizeLibraryOptions({ sources: ["user"] }) });
-	assert.equal(discovery.agents.length, 0);
-	assert.equal(discovery.diagnostics.some((item) => item.code === "user-agents-dir-project-scoped" && item.severity === "error"), true);
-	await rm(root, { recursive: true, force: true });
-	await rm(outside, { recursive: true, force: true });
-});
-
-test("project-scoped user agent directory is denied through symlink", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-user-project-symlink-"));
-	const outside = await mkdtemp(join(tmpdir(), "pi-multiagent-user-link-"));
-	const packageDir = join(root, "package-agents");
-	const projectDir = join(root, ".pi", "agents");
-	const userDir = join(outside, "agents-link");
-	await makeAgent(projectDir, "repo.md", "---\nname: repo\ndescription: repo agent\n---\nRepo prompt");
-	await symlink(projectDir, userDir);
-	const discovery = discoverAgents({ cwd: root, packageAgentsDir: packageDir, userAgentsDir: userDir, library: normalizeLibraryOptions({ sources: ["user"] }) });
-	assert.equal(discovery.agents.length, 0);
-	assert.equal(discovery.diagnostics.some((item) => item.code === "user-agents-dir-project-scoped" && item.severity === "error"), true);
-	await rm(root, { recursive: true, force: true });
-	await rm(outside, { recursive: true, force: true });
 });
 
 test("user agent file symlinks are denied", async () => {
@@ -354,7 +236,7 @@ test("project agents deny symlinks and keep source-qualified refs", async () => 
 	const discovery = discoverAgents({
 		cwd: root,
 		packageAgentsDir: packageDir,
-		library: normalizeLibraryOptions({ sources: ["package", "project"], projectAgents: "allow" }),
+		library: normalizeLibraryOptions({ sources: ["package", "project"] }),
 	});
 	assert.deepEqual(discovery.agents.map((agent) => `${agent.source}:${agent.name}`), ["package:reviewer", "project:reviewer"]);
 	assert.equal(discovery.diagnostics.some((item) => item.code === "project-agent-symlink-denied"), true);
@@ -372,7 +254,7 @@ test("project agents deny symlinked agents directory", async () => {
 	const discovery = discoverAgents({
 		cwd: root,
 		packageAgentsDir: packageDir,
-		library: normalizeLibraryOptions({ sources: ["project"], projectAgents: "allow" }),
+		library: normalizeLibraryOptions({ sources: ["project"] }),
 	});
 	assert.deepEqual(discovery.agents, []);
 	assert.equal(discovery.diagnostics.some((item) => item.code === "project-agent-dir-symlink-denied"), true);
@@ -390,7 +272,7 @@ test("project agents deny symlinked intermediate pi directory", async () => {
 	const discovery = discoverAgents({
 		cwd: root,
 		packageAgentsDir: packageDir,
-		library: normalizeLibraryOptions({ sources: ["project"], projectAgents: "allow" }),
+		library: normalizeLibraryOptions({ sources: ["project"] }),
 	});
 	assert.deepEqual(discovery.agents, []);
 	await rm(root, { recursive: true, force: true });
@@ -564,11 +446,20 @@ test("catalogAgents filters by exact phrase or non-stopword query terms", async 
 	await rm(root, { recursive: true, force: true });
 });
 
-test("catalogAgents does not match short query tokens as substrings of paths", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-catalog-substring-"));
-	const packageDir = join(root, "examples", "agents");
-	await makeAgent(packageDir, "worker.md", "---\nname: worker\ndescription: implements examples\n---\nPrompt");
-	const discovery = discoverAgents({ cwd: root, packageAgentsDir: packageDir, library: normalizeLibraryOptions({ sources: ["package"] }) });
-	assert.deepEqual(catalogAgents(discovery, "exa"), []);
+test("catalogAgents routes without source or file path provenance", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pi-multiagent-catalog-routing-"));
+	const packageDir = join(root, "package-agents");
+	const userDir = join(root, "user-agents");
+	const projectDir = join(root, ".pi", "agents");
+	await makeAgent(packageDir, "alpha.md", "---\nname: alpha\ndescription: first role\ntools: read\n---\nPrompt");
+	await makeAgent(userDir, "beta.md", "---\nname: beta\ndescription: second role\ntags: custom-lane\n---\nPrompt");
+	await makeAgent(projectDir, "gamma.md", "---\nname: gamma\ndescription: third role\nmodel: gpt-test\nthinking: high\n---\nPrompt");
+	const discovery = discoverAgents({ cwd: root, packageAgentsDir: packageDir, userAgentsDir: userDir, library: normalizeLibraryOptions({ sources: ["package", "user", "project"] }) });
+	for (const query of ["package", "user", "project", "package-agents", "pi agents"]) {
+		assert.deepEqual(catalogAgents(discovery, query), [], `${query} should not match source or file path provenance`);
+	}
+	assert.deepEqual(catalogAgents(discovery, "alpha").map((agent) => agent.ref), ["package:alpha"]);
+	assert.deepEqual(catalogAgents(discovery, "custom lane").map((agent) => agent.ref), ["user:beta"]);
+	assert.deepEqual(catalogAgents(discovery, "gpt-test high").map((agent) => agent.ref), ["project:gamma"]);
 	await rm(root, { recursive: true, force: true });
 });

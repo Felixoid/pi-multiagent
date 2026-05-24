@@ -8,7 +8,7 @@ function runtimeOptions(onNotice: (details: AgentTeamDetails) => void) {
 		cwd: process.cwd(),
 		packageAgentsDir: process.cwd(),
 		materializationDiagnostics: [],
-		catalogLibrary: { sources: ["package"], query: undefined, projectAgents: "deny" },
+		catalogLibrary: { sources: ["package"], query: undefined },
 		catalogPreparationDiagnostics: [],
 		defaults: { model: undefined, thinking: undefined },
 		parentTools: { apiAvailable: true, errorMessage: undefined, tools: [] },

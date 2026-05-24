@@ -237,7 +237,39 @@ test("resolveDetachedGraph treats explicit tools as strict overrides", async () 
 	assert.deepEqual(denied.steps, []);
 });
 
-test("resolveDetachedGraph grants mutation tools only with mutation authority", async () => {
+test("resolveDetachedGraph fails package:validator closed without effective shell capability", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-validator-tools-${Date.now()}`), { recursive: true });
+	const validator = packageAgent("validator", ["read", "bash"]);
+	const allowed = resolveDetachedGraph(
+		{ objective: "validator", authority: { allowFilesystemRead: true, allowShellTools: true }, steps: [{ id: "one", agent: { ref: "package:validator" }, task: "Run `git diff --check`." }] },
+		[validator],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(allowed.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(allowed.steps[0]?.agent.tools, [...READONLY_CHILD_TOOL_NAMES, "bash"]);
+	const cappedDefault = resolveDetachedGraph(
+		{ objective: "validator", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { ref: "package:validator" }, task: "Run `git diff --check`." }] },
+		[validator],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(cappedDefault.diagnostics.some((item) => item.code === "validator-shell-capability-required"), true);
+	assert.deepEqual(cappedDefault.steps, []);
+	const explicitReadOnly = resolveDetachedGraph(
+		{ objective: "validator", authority: { allowFilesystemRead: true, allowShellTools: true }, steps: [{ id: "one", agent: { ref: "package:validator", tools: ["read"] }, task: "Review only." }] },
+		[validator],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(explicitReadOnly.diagnostics.some((item) => item.code === "validator-shell-capability-required"), true);
+	assert.deepEqual(explicitReadOnly.steps, []);
+});
+
+test("resolveDetachedGraph fails package:worker closed without effective mutation capability", async () => {
 	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-worker-tools-${Date.now()}`), { recursive: true });
 	const worker = packageAgent("worker", ["read", "bash", "edit", "write"]);
 	const allowed = resolveDetachedGraph(
@@ -256,8 +288,8 @@ test("resolveDetachedGraph grants mutation tools only with mutation authority", 
 		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
 		undefined,
 	);
-	assert.equal(shellOnlyWorker.diagnostics.some((item) => item.severity === "error"), false);
-	assert.deepEqual(shellOnlyWorker.steps[0]?.agent.tools, [...READONLY_CHILD_TOOL_NAMES, "bash"]);
+	assert.equal(shellOnlyWorker.diagnostics.some((item) => item.code === "worker-mutation-capability-required"), true);
+	assert.deepEqual(shellOnlyWorker.steps, []);
 	const inlineWrite = resolveDetachedGraph(
 		{ objective: "inline", authority: { allowFilesystemRead: true, allowMutationTools: true }, steps: [{ id: "one", agent: { system: "x", tools: ["edit"] }, task: "Edit." }] },
 		[],
@@ -274,7 +306,8 @@ test("resolveDetachedGraph grants mutation tools only with mutation authority", 
 		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
 		undefined,
 	);
-	assert.deepEqual(readOnlyWorker.steps[0]?.agent.tools, READONLY_CHILD_TOOL_NAMES);
+	assert.equal(readOnlyWorker.diagnostics.some((item) => item.code === "worker-mutation-capability-required"), true);
+	assert.deepEqual(readOnlyWorker.steps, []);
 });
 
 test("resolveDetachedGraph grants source-verified extension tools only with extension authority", async () => {
@@ -328,7 +361,7 @@ test("resolveDetachedGraph fails package:web-researcher closed without callable 
 	assert.deepEqual(allowed.steps[0]?.agent.tools, READONLY_CHILD_TOOL_NAMES);
 });
 
-test("resolveDetachedGraph gates project and workspace-local caller skills on allowProjectCode", async () => {
+test("resolveDetachedGraph propagates project and workspace-local caller skills by default", async () => {
 	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-skills-${Date.now()}`), { recursive: true });
 	const skillPath = join(cwd, "project-skill.md");
 	const userLink = join(cwd, "user-link.md");
@@ -356,12 +389,9 @@ test("resolveDetachedGraph gates project and workspace-local caller skills on al
 		authority: { allowFilesystemRead: true },
 		steps: [{ id: "one", agent: { system: "x", tools: ["read"] }, task: "x" }],
 	};
-	const denied = resolveDetachedGraph(graph, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills: projectSkills }, undefined);
-	assert.equal(denied.diagnostics.filter((item) => item.code === "caller-skills-project-code-authority-required").length, 2);
-	assert.deepEqual(denied.steps, []);
-	const allowed = resolveDetachedGraph({ ...graph, authority: { allowFilesystemRead: true, allowProjectCode: true } }, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills: projectSkills }, undefined);
-	assert.equal(allowed.diagnostics.some((item) => item.severity === "error"), false);
-	assert.deepEqual(allowed.steps[0]?.agent.callerSkills.map((skill) => skill.name), ["project-skill", "user-link"]);
+	const resolved = resolveDetachedGraph(graph, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills: projectSkills }, undefined);
+	assert.equal(resolved.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(resolved.steps[0]?.agent.callerSkills.map((skill) => skill.name), ["project-skill", "user-link"]);
 
 	const repoRoot = await mkdir(join(tmpdir(), `pi-multiagent-plan-skills-repo-root-${Date.now()}`), { recursive: true });
 	await mkdir(join(repoRoot, ".git"));
@@ -382,12 +412,9 @@ test("resolveDetachedGraph gates project and workspace-local caller skills on al
 		],
 	};
 	const subdirGraph = { objective: "subdir skills", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { system: "x", tools: ["read"] }, task: "x" }] };
-	const subdirDenied = resolveDetachedGraph(subdirGraph, [], [], { cwd: subdir, invocationCwd: subdir, parentTools, parentSkills: repoSkills }, undefined);
-	assert.equal(subdirDenied.diagnostics.some((item) => item.code === "caller-skills-project-code-authority-required"), true);
-	assert.deepEqual(subdirDenied.steps, []);
-	const subdirAllowed = resolveDetachedGraph({ ...subdirGraph, authority: { allowFilesystemRead: true, allowProjectCode: true } }, [], [], { cwd: subdir, invocationCwd: subdir, parentTools, parentSkills: repoSkills }, undefined);
-	assert.equal(subdirAllowed.diagnostics.some((item) => item.severity === "error"), false);
-	assert.deepEqual(subdirAllowed.steps[0]?.agent.callerSkills.map((skill) => skill.name), ["repo-skill"]);
+	const subdirResolved = resolveDetachedGraph(subdirGraph, [], [], { cwd: subdir, invocationCwd: subdir, parentTools, parentSkills: repoSkills }, undefined);
+	assert.equal(subdirResolved.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(subdirResolved.steps[0]?.agent.callerSkills.map((skill) => skill.name), ["repo-skill"]);
 });
 
 test("resolveDetachedGraph propagates all caller skills by default and none when product config disables them", async () => {
@@ -447,7 +474,7 @@ test("readSubagentSkillConfig defaults enabled and rejects invalid values", () =
 	assert.equal(invalid.diagnostics[0]?.code, "subagent-skills-config-invalid");
 });
 
-test("resolveDetachedGraph gates project and local extension sources on allowProjectCode", async () => {
+test("resolveDetachedGraph accepts project and local extension sources with explicit extension authority", async () => {
 	const parent = await mkdir(join(tmpdir(), `pi-multiagent-plan-extension-project-${Date.now()}`), { recursive: true });
 	const cwd = await mkdir(join(parent, "workspace"), { recursive: true });
 	const projectPath = join(parent, "project-extension.ts");
@@ -457,19 +484,14 @@ test("resolveDetachedGraph gates project and local extension sources on allowPro
 	const projectTool: ParentToolInfo = { name: "project_search", description: "Project search", active: true, sourceInfo: { path: projectPath, source: "project:search", scope: "project", origin: "top-level", baseDir: parent } };
 	const localTool: ParentToolInfo = { name: "local_search", description: "Local search", active: true, sourceInfo: { path: localPath, source: "user:local", scope: "temporary", origin: "top-level", baseDir: parent } };
 	const tools: ParentToolInventory = { apiAvailable: true, errorMessage: undefined, tools: [...activeBuiltinTools(), projectTool, localTool] };
+
 	const projectGraph = { objective: "project extension", authority: { allowFilesystemRead: true, allowExtensionCode: true }, steps: [{ id: "one", agent: { system: "x", extensionTools: [{ name: "project_search", from: { source: "project:search", scope: "project", origin: "top-level" } }] }, task: "x" }] };
-	const projectDenied = resolveDetachedGraph(projectGraph, [], [], { cwd, invocationCwd: cwd, parentTools: tools, parentSkills }, undefined);
-	assert.equal(projectDenied.diagnostics.some((item) => item.code === "extension-tool-project-denied"), true);
-	assert.deepEqual(projectDenied.steps, []);
-	const projectAllowed = resolveDetachedGraph({ ...projectGraph, authority: { allowFilesystemRead: true, allowExtensionCode: true, allowProjectCode: true } }, [], [], { cwd, invocationCwd: cwd, parentTools: tools, parentSkills }, undefined);
+	const projectAllowed = resolveDetachedGraph(projectGraph, [], [], { cwd, invocationCwd: cwd, parentTools: tools, parentSkills }, undefined);
 	assert.equal(projectAllowed.diagnostics.some((item) => item.severity === "error"), false);
 	assert.equal(projectAllowed.steps[0]?.agent.extensionTools[0]?.name, "project_search");
 
 	const localGraph = { objective: "local extension", authority: { allowFilesystemRead: true, allowExtensionCode: true }, steps: [{ id: "one", agent: { system: "x", extensionTools: [{ name: "local_search", from: { source: "user:local", scope: "temporary", origin: "top-level" } }] }, task: "x" }] };
-	const localDenied = resolveDetachedGraph(localGraph, [], [], { cwd, invocationCwd: cwd, parentTools: tools, parentSkills }, undefined);
-	assert.equal(localDenied.diagnostics.some((item) => item.code === "extension-tool-local-denied"), true);
-	assert.deepEqual(localDenied.steps, []);
-	const localAllowed = resolveDetachedGraph({ ...localGraph, authority: { allowFilesystemRead: true, allowExtensionCode: true, allowProjectCode: true } }, [], [], { cwd, invocationCwd: cwd, parentTools: tools, parentSkills }, undefined);
+	const localAllowed = resolveDetachedGraph(localGraph, [], [], { cwd, invocationCwd: cwd, parentTools: tools, parentSkills }, undefined);
 	assert.equal(localAllowed.diagnostics.some((item) => item.severity === "error"), false);
 	assert.equal(localAllowed.steps[0]?.agent.extensionTools[0]?.name, "local_search");
 });
@@ -578,7 +600,6 @@ test("resolveDetachedGraph fails closed for authority and dependency violations"
 		undefined,
 	);
 	const codes = graph.diagnostics.map((item) => item.code);
-	assert.equal(codes.includes("project-code-authority-required"), true);
 	assert.equal(codes.includes("filesystem-read-authority-required"), true);
 	assert.equal(codes.includes("shell-authority-required"), true);
 	assert.equal(codes.includes("dependency-unknown"), false);

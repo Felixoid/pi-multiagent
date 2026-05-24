@@ -66,7 +66,7 @@ function makeOptions(): AgentTeamRuntimeOptions {
 		cwd: packageRoot,
 		packageAgentsDir: join(packageRoot, "agents"),
 		materializationDiagnostics: [],
-		catalogLibrary: { sources: ["package"], query: undefined, projectAgents: "deny" },
+		catalogLibrary: { sources: ["package"], query: undefined },
 		catalogPreparationDiagnostics: [],
 		defaults: { model: undefined, thinking: undefined },
 		parentTools: parentTools(),

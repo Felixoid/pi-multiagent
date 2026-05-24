@@ -10,13 +10,12 @@ import type {
 	CatalogAgentSummary,
 	LibraryOptions,
 	LibrarySource,
-	ProjectAgentsPolicy,
 } from "./types.ts";
 import { readAgentFileContent } from "./agent-file-content.ts";
 import { parseAgentTags, parseMarkdownFrontmatter, splitFrontmatterList } from "./agent-frontmatter.ts";
-import { DEFAULT_LIBRARY_SOURCES, DEFAULT_PROJECT_AGENTS_POLICY, LIBRARY_SOURCE_VALUES, TOOL_NAME_PATTERN } from "./types.ts";
+import { DEFAULT_LIBRARY_SOURCES, LIBRARY_SOURCE_VALUES, TOOL_NAME_PATTERN } from "./types.ts";
 import { validateToolNames } from "./tool-policy.ts";
-import { findNearestProjectDir, findNearestProjectMarker, getGlobalPiDir, isContainedPath, safeRealpath } from "./project-root.ts";
+import { findNearestProjectDir, getGlobalPiDir, isContainedPath, safeRealpath } from "./project-root.ts";
 
 const AGENT_NAME_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
 const TOOL_NAME_REGEX = new RegExp(TOOL_NAME_PATTERN);
@@ -200,36 +199,6 @@ function validateProjectAgentsDir(dir: string, diagnostics: AgentDiagnostic[]): 
 	return realProjectDir;
 }
 
-function isProjectScopedUserAgentsDir(userAgentsDir: string, projectAgentsDir: string | undefined, cwd: string, globalPiDir: string): boolean {
-	const userDir = resolve(userAgentsDir);
-	const userRealDir = safeRealpath(userDir);
-	const projectRoots = projectRootCandidates(cwd, projectAgentsDir, globalPiDir);
-	return projectRoots.some((root) => isContainedPath(root, userDir) || (userRealDir !== undefined && isContainedPath(root, userRealDir)));
-}
-
-function projectRootCandidates(cwd: string, projectAgentsDir: string | undefined, globalPiDir: string): string[] {
-	const candidates = new Set<string>();
-	if (projectAgentsDir) addPathAndRealpath(candidates, dirname(dirname(resolve(projectAgentsDir))));
-	addNearestProjectRoots(candidates, resolve(cwd), globalPiDir);
-	const realCwd = safeRealpath(resolve(cwd));
-	const realGlobalPiDir = safeRealpath(globalPiDir);
-	if (realCwd) addNearestProjectRoots(candidates, realCwd, realGlobalPiDir ?? globalPiDir);
-	return [...candidates];
-}
-
-function addNearestProjectRoots(candidates: Set<string>, cwd: string, globalPiDir: string): void {
-	const nearestPi = findNearestProjectMarker(cwd, ".pi", globalPiDir);
-	if (nearestPi) addPathAndRealpath(candidates, dirname(nearestPi));
-	const nearestGit = findNearestProjectMarker(cwd, ".git");
-	if (nearestGit) addPathAndRealpath(candidates, dirname(nearestGit));
-}
-
-function addPathAndRealpath(paths: Set<string>, path: string): void {
-	paths.add(resolve(path));
-	const real = safeRealpath(path);
-	if (real) paths.add(resolve(real));
-}
-
 export function findNearestProjectAgentsDir(cwd: string, globalPiDir = getGlobalPiDir()): string | undefined {
 	const projectPiDir = findNearestProjectDir(cwd, ".pi", globalPiDir);
 	if (!projectPiDir) return undefined;
@@ -246,13 +215,11 @@ export function getDefaultUserAgentsDir(env: NodeJS.ProcessEnv = process.env): s
 export function normalizeLibraryOptions(input: {
 	sources?: LibrarySource[];
 	query?: string;
-	projectAgents?: ProjectAgentsPolicy;
 } | undefined): LibraryOptions {
 	const sources = input?.sources && input.sources.length > 0 ? dedupeSources(input.sources) : DEFAULT_LIBRARY_SOURCES;
 	return {
 		sources,
 		query: normalizeQuery(input?.query),
-		projectAgents: input?.projectAgents ?? DEFAULT_PROJECT_AGENTS_POLICY,
 	};
 }
 
@@ -269,26 +236,7 @@ export function discoverAgents(options: {
 	const userAgentsDir = options.userAgentsDir ?? getDefaultUserAgentsDir();
 	const projectAgentsDir = options.projectAgentsDir ?? findNearestProjectAgentsDir(options.cwd, globalPiDir);
 	const requestedSources = new Set(options.library.sources);
-	const unsafeUserAgentsDir = isProjectScopedUserAgentsDir(userAgentsDir, projectAgentsDir, options.cwd, globalPiDir);
-	const activeSources = SOURCE_PRECEDENCE.filter(
-		(source) => requestedSources.has(source) && (source !== "user" || !unsafeUserAgentsDir) && (source !== "project" || options.library.projectAgents === "allow"),
-	);
-	if (options.library.sources.includes("project") && options.library.projectAgents !== "allow") {
-		diagnostics.push({
-			code: options.library.projectAgents === "confirm" ? "project-agents-confirm-unprepared" : "project-agents-denied",
-			path: projectAgentsDir,
-			message: options.library.projectAgents === "confirm" ? 'Project library source requires prepareLibraryOptions approval before discovery.' : 'Project library source requested but library.projectAgents is "deny".',
-			severity: options.library.projectAgents === "confirm" ? "error" : "info",
-		});
-	}
-	if (unsafeUserAgentsDir && options.library.sources.includes("user")) {
-		diagnostics.push({
-			code: "user-agents-dir-project-scoped",
-			path: userAgentsDir,
-			message: "User agent directory resolves inside the current project; denied as untrusted project-controlled prompts.",
-			severity: "error",
-		});
-	}
+	const activeSources = SOURCE_PRECEDENCE.filter((source) => requestedSources.has(source));
 	const byRef = new Map<string, AgentConfig>();
 	for (const source of activeSources) {
 		const dir = source === "package" ? options.packageAgentsDir : source === "user" ? userAgentsDir : projectAgentsDir;
@@ -313,7 +261,6 @@ export function discoverAgents(options: {
 		userAgentsDir,
 		projectAgentsDir,
 		sources: activeSources,
-		projectAgents: options.library.projectAgents,
 	};
 }
 
@@ -341,7 +288,7 @@ export function catalogAgents(discovery: AgentDiscoveryResult, query: string | u
 function scoreCatalogAgent(agent: AgentConfig, query: string | undefined, tokens: string[]): number {
 	if (!query) return 1;
 	const text = catalogAgentSearchText(agent);
-	const nameAndRefTokens = searchableTokens([agent.name, agent.ref]);
+	const nameAndRefTokens = searchableTokens([agent.name, refWithoutSource(agent.ref)]);
 	const exactTags = new Set(agent.tags);
 	const tagTokens = searchableTokens(agent.tags);
 	let score = tokens.length > 1 && text.includes(query) ? 100 : 0;
@@ -363,7 +310,12 @@ function textSearchTokens(agent: AgentConfig): Set<string> {
 }
 
 function searchFields(agent: AgentConfig): string[] {
-	return [agent.name, agent.ref, agent.description, agent.source, agent.tags.join(" "), agent.tools?.join(" ") ?? "", agent.model ?? "", agent.filePath ?? ""];
+	return [agent.name, refWithoutSource(agent.ref), agent.description, agent.tags.join(" "), agent.tools?.join(" ") ?? "", agent.model ?? "", agent.thinking ?? ""];
+}
+
+function refWithoutSource(ref: string): string {
+	const separator = ref.indexOf(":");
+	return separator === -1 ? ref : ref.slice(separator + 1);
 }
 
 function searchableTokens(fields: string[]): Set<string> {

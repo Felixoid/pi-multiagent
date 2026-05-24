@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.9.3 - 2026-05-24
+
+- Removed the separate local-source trust authority from schemas, planning, catalog prep, extension-tool grants, caller-skill propagation, docs, and tests; project/user sources now load when selected or product-enabled, while explicit extension-tool grants still require `allowExtensionCode:true`.
+- Made package role capability truth fail closed: `package:validator` now requires effective `bash`, and `package:worker` now requires effective `edit` or `write` instead of silently running misleading capped roles.
+- Removed source and file-path provenance from catalog query scoring while keeping provenance rendered in catalog rows; routing now scores role names/ref names, descriptions, tags, default tools, model, and thinking.
+- Simplified first-success and headless supervision guidance, including `run_status {runId, waitSeconds}` fallback copy, cursor semantics, conditional step-result hints, and stronger cleanup-as-evidence-deletion warnings.
+- Added source-grounded product-experience, tree-reduce, and evidence-trace graph examples plus cookbook guidance for advanced read-only audit choreography.
+
 ## 0.9.2 - 2026-05-24
 
 - Removed non-enforced shell and mutation paperwork from graph schemas, planning, prompts, final artifacts, docs, examples, agents, and tests.
@@ -71,7 +79,7 @@
 - Improved detached-run diagnostics for retained-capacity failures, stalled pending steps, retained-run capacity buckets, terminal pushed notices, and compact failed-step reasons.
 - Hardened child RPC handling with byte-based JSONL limits, bounded stdin backpressure sends, stdout/stderr error guards, parent-message budget checks, and listener teardown.
 - Fixed cleanup result rendering so successful cleanup is receipt-only evidence deletion, denied or failed cleanup remains distinct, and plain notices never point operators back to deleted artifacts.
-- Tightened planning and policy copy for mandatory filesystem-read authority, project/local extension-tool trust via `allowProjectCode:true`, and cleanup failure retention.
+- Tightened planning and policy copy for mandatory filesystem-read authority, explicit extension-tool trust, and cleanup failure retention.
 - Added map-reduce and release-readiness graph examples, with validator steps carrying parent-named trusted proof commands and release lanes preserving human-owned publish and GitHub Release actions as not-executed next steps.
 - Clarified graphFile copy/adapt usage, catalog query patterns, missing-scope handling, filesystem-read boundaries, and action selection across docs, skill, cookbook, examples, and tests.
 - Tightened release-prep guardrails so `pnpm run check:release` runs only from the clean release commit before tag/push, while npm publish and GitHub Release creation remain human-owned.
@@ -101,7 +109,7 @@
 - Added `package:web-researcher` for explicit extension-tool web research and narrowed `package:scout` to local repo/dependency exploration.
 - Sharpened bundled catalog role routing copy for local scout, web researcher, planner, critic, reviewer, docs auditor, validator, worker, and synthesizer boundaries.
 - Made catalog search route on non-stopword query terms instead of exact full-phrase-only matches, and tightened package role defaults so read-only Scout/Reviewer no longer inherit `bash` unless a step asks for it explicitly.
-- Tightened trust-boundary checks so global Pi settings are not treated as project `.pi/settings.json` launch blockers, repo-local caller skills require project-code authority even from subdirectory invocations, and parent messages use escaped JSON payloads instead of delimiter-sensitive raw text.
+- Tightened trust-boundary checks so global Pi settings are not treated as project `.pi/settings.json` launch blockers, repo-local caller-skill sources were classified consistently from subdirectory invocations, and parent messages use escaped JSON payloads instead of delimiter-sensitive raw text.
 - Tightened model-facing action/result copy, catalog routing metadata, graph first-success guidance, and implementation example routing without adding new runtime knobs.
 - Reworked the interactive live `agent_team` widget, compact tool rows, and pushed notice fallback text into human operator surfaces that prioritize run health, progress, active lanes, queued work, terminal receipts, stop receipts, and attention states without model-facing control guidance.
 - Hardened project-root detection, project-agent open-time checks, blank-after-trim planning validation, run-backed error rendering, pushed notice fallbacks, and added an opt-in real Pi smoke target for release-candidate validation.

@@ -66,7 +66,7 @@ function makeOptions(root: string, spawnProcess?: RpcHarness["spawn"], overrides
 		cwd: root,
 		packageAgentsDir: join(root, "agents"),
 		materializationDiagnostics: [],
-		catalogLibrary: { sources: ["package"], query: undefined, projectAgents: "deny" },
+		catalogLibrary: { sources: ["package"], query: undefined },
 		catalogPreparationDiagnostics: [],
 		defaults: { model: undefined, thinking: undefined },
 		parentTools: { apiAvailable: true, errorMessage: undefined, tools: activeBuiltinTools() },

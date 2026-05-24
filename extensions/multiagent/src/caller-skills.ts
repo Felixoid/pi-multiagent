@@ -13,7 +13,6 @@ import type {
 	SubagentSkillMode,
 } from "./types.ts";
 import { MAX_CALLER_SKILLS, SKILL_NAME_PATTERN } from "./types.ts";
-import { findNearestWorkspaceRoot, isContainedPath } from "./project-root.ts";
 
 const SKILL_NAME_REGEX = new RegExp(SKILL_NAME_PATTERN);
 const MAX_SKILL_HASH_BYTES = 4 * 1024 * 1024;
@@ -22,8 +21,6 @@ const EMPTY_PARENT_SKILLS: ParentSkillInventory = { apiAvailable: true, readActi
 export interface CallerSkillResolutionContext {
 	parentSkills: ParentSkillInventory | undefined;
 	sourceCache: Map<string, SkillSourceReadResult>;
-	cwdRealpath: string | undefined;
-	workspaceRootRealpath: string | undefined;
 }
 
 type SkillSourceReadResult = { source: ResolvedCallerSkillSource; hidden: boolean; error?: never } | { source?: never; hidden?: never; error: string };
@@ -52,10 +49,8 @@ export function getParentSkillInventory(pi: ExtensionAPI): ParentSkillInventory 
 	}
 }
 
-export function createCallerSkillResolutionContext(parentSkills: ParentSkillInventory | undefined, cwd: string): CallerSkillResolutionContext {
-	const cwdRealpath = safeRealpath(cwd);
-	const workspaceRoot = cwdRealpath ? findWorkspaceRoot(cwdRealpath) : undefined;
-	return { parentSkills: parentSkills ?? EMPTY_PARENT_SKILLS, sourceCache: new Map(), cwdRealpath, workspaceRootRealpath: workspaceRoot ? safeRealpath(workspaceRoot) : undefined };
+export function createCallerSkillResolutionContext(parentSkills: ParentSkillInventory | undefined, _cwd: string): CallerSkillResolutionContext {
+	return { parentSkills: parentSkills ?? EMPTY_PARENT_SKILLS, sourceCache: new Map() };
 }
 
 export function resolveAgentCallerSkills(input: {
@@ -63,7 +58,6 @@ export function resolveAgentCallerSkills(input: {
 	tools: string[];
 	label: string;
 	path: string;
-	allowProjectCode: boolean;
 	diagnostics: AgentDiagnostic[];
 	context: CallerSkillResolutionContext | undefined;
 }): ResolvedCallerSkill[] | undefined {
@@ -99,13 +93,21 @@ export function verifyResolvedCallerSkillSources(skills: ResolvedCallerSkill[]):
 function resolveVisibleCallerSkills(input: {
 	label: string;
 	path: string;
-	allowProjectCode: boolean;
 	diagnostics: AgentDiagnostic[];
 	context: CallerSkillResolutionContext | undefined;
 }, parentSkills: ParentSkillInventory): ResolvedCallerSkill[] | undefined {
 	const parentByName = parentSkillMap(parentSkills, input);
-	if (!parentByName || !validateCallerSkillSourcePolicy(parentSkills.skills, input)) return undefined;
-	const resolved = parentSkills.skills.map((skill) => toResolvedCallerSkill(skill, input)).filter((skill): skill is ResolvedCallerSkill => skill !== undefined);
+	if (!parentByName) return undefined;
+	const resolved: ResolvedCallerSkill[] = [];
+	for (const skill of parentSkills.skills) {
+		const source = readCallerSkillSourceCached(skill, input.context);
+		if ("error" in source) {
+			input.diagnostics.push({ code: "caller-skill-source-unavailable", message: `Cannot load caller skill ${skill.name}: ${source.error}`, path: skill.sourceInfo.path, severity: "error" });
+			return undefined;
+		}
+		if (source.hidden) continue;
+		resolved.push({ name: skill.name, description: skill.description, source: source.source });
+	}
 	if (resolved.length > MAX_CALLER_SKILLS) {
 		input.diagnostics.push({ code: "subagent-skills-too-many", message: `${input.label} would receive ${resolved.length} caller Pi skills; maximum is ${MAX_CALLER_SKILLS}. Disable subagent skill propagation or reduce the caller-visible skill set.`, path: input.path, severity: "error" });
 		return undefined;
@@ -120,42 +122,6 @@ function parentSkillMap(parentSkills: ParentSkillInventory, input: { path: strin
 		return undefined;
 	}
 	return new Map(parentSkills.skills.map((skill) => [skill.name, skill]));
-}
-
-function validateCallerSkillSourcePolicy(skills: ParentSkillInfo[], input: { label: string; path: string; allowProjectCode: boolean; context: CallerSkillResolutionContext | undefined; diagnostics: AgentDiagnostic[] }): boolean {
-	let valid = true;
-	for (const skill of skills) {
-		const source = readCallerSkillSourceCached(skill, input.context);
-		if ("error" in source) {
-			input.diagnostics.push({ code: "caller-skill-source-unavailable", message: `${input.label} cannot load caller skill ${skill.name} all-or-nothing: ${source.error}. Fix the visible skill source or launch Pi with --agent-team-subagent-skills disabled.`, path: skill.sourceInfo.path, severity: "error" });
-			valid = false;
-			continue;
-		}
-		if (source.hidden || input.allowProjectCode || !callerSkillRequiresProjectAuthority(source.source, input.context)) continue;
-		input.diagnostics.push({ code: "caller-skills-project-code-authority-required", message: `${input.label} would receive caller skill ${skill.name} from ${source.source.scope} scope; set graph.authority.allowProjectCode:true for trusted project/local skill code or launch Pi with --agent-team-subagent-skills disabled.`, path: input.path, severity: "error" });
-		valid = false;
-	}
-	return valid;
-}
-
-function callerSkillRequiresProjectAuthority(source: ResolvedCallerSkillSource, context: CallerSkillResolutionContext | undefined): boolean {
-	return source.scope === "project" || source.scope === "temporary" || (context?.cwdRealpath !== undefined && isContainedPath(context.cwdRealpath, source.realpath)) || (context?.workspaceRootRealpath !== undefined && isContainedPath(context.workspaceRootRealpath, source.realpath));
-}
-
-function callerSkillVisible(skill: ParentSkillInfo, input: { context: CallerSkillResolutionContext | undefined; diagnostics: AgentDiagnostic[] }): boolean {
-	const source = readCallerSkillSourceCached(skill, input.context);
-	if ("error" in source) {
-		input.diagnostics.push({ code: "caller-skill-source-unavailable", message: `Cannot load caller skill ${skill.name}: ${source.error}`, path: skill.sourceInfo.path, severity: "error" });
-		return false;
-	}
-	return !source.hidden;
-}
-
-function toResolvedCallerSkill(skill: ParentSkillInfo, input: { context: CallerSkillResolutionContext | undefined; diagnostics: AgentDiagnostic[] }): ResolvedCallerSkill | undefined {
-	if (!callerSkillVisible(skill, input)) return undefined;
-	const source = readCallerSkillSourceCached(skill, input.context);
-	if ("error" in source || source.hidden) return undefined;
-	return { name: skill.name, description: skill.description, source: source.source };
 }
 
 function readCallerSkillSourceCached(skill: ParentSkillInfo, context: CallerSkillResolutionContext | undefined): SkillSourceReadResult {
@@ -205,18 +171,6 @@ function sameCallerSkillSourceState(left: ResolvedCallerSkillSource, right: Reso
 	return left.realpath === right.realpath && left.dev === right.dev && left.ino === right.ino && left.size === right.size && left.mtimeMs === right.mtimeMs && left.sha256 === right.sha256;
 }
 
-function findWorkspaceRoot(cwd: string): string {
-	return findNearestWorkspaceRoot(cwd);
-}
-
-function safeRealpath(path: string): string | undefined {
-	try {
-		return realpathSync(path);
-	} catch {
-		return undefined;
-	}
-}
-
 function parseDisableModelInvocation(content: string): boolean {
 	const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 	if (!normalized.startsWith("---")) return false;
@@ -234,7 +188,7 @@ function parseDisableModelInvocation(content: string): boolean {
 }
 
 function yamlBooleanTrue(value: string): boolean {
-	return stripYamlScalarComment(value).trim().replace(/^[\'"]|[\'"]$/g, "").toLowerCase() === "true";
+	return stripYamlScalarComment(value).trim().replace(/^[\'\"]|[\'\"]$/g, "").toLowerCase() === "true";
 }
 
 function stripYamlScalarComment(value: string): string {

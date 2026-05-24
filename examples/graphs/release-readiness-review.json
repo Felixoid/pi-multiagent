@@ -22,7 +22,7 @@
       "agent": {
         "ref": "package:validator"
       },
-      "task": "Run these trusted release proof commands from the repository root: `git status -sb`, `git diff --check`, and `npm pack --dry-run --json`. Do not edit, version-bump, commit, tag, push, publish, delete, install, deploy, run unapproved network commands, or create GitHub Releases. Return pass/fail/deferred with exact command, cwd, important output, and failure bucket."
+      "task": "Run these trusted release proof commands from the repository root: `git status -sb`, `pnpm run gate`, `npm pack --dry-run --json`, and `git diff --check`. Do not edit, version-bump, commit, tag, push, publish, delete, install, deploy, run unapproved network commands, or create GitHub Releases. Return pass/fail/deferred with exact command, cwd, important output, and failure bucket."
     },
     {
       "id": "release-audit",

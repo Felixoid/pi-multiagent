@@ -32,7 +32,6 @@ import {
 	MAX_TIMEOUT_SECONDS_PER_STEP,
 	MESSAGE_CHANNEL_VALUES,
 	NOTIFY_MODE_VALUES,
-	PROJECT_AGENTS_POLICY_VALUES,
 	PUBLIC_ID_PATTERN,
 	RUN_ID_PATTERN,
 	SOURCE_QUALIFIED_LIBRARY_REF_PATTERN,
@@ -56,15 +55,14 @@ function sourceQualifiedLibraryRef(description: string) {
 const LibrarySchema = Type.Object(
 	{
 		sources: Type.Optional(Type.Array(StringEnum(LIBRARY_SOURCE_VALUES), { description: 'Catalog-only sources. Default ["package"]. For start, use graph.library.sources; user/project catalog rows require matching start sources.', minItems: 1, maxItems: 3 })),
-		query: Type.Optional(Type.String({ description: "Catalog-only routing search. Exact phrases and non-stopword query terms are matched against refs, descriptions, tags, sources, default tools, model, and path.", minLength: 1, maxLength: MAX_SHORT_TEXT_FIELD_CHARS })),
-		projectAgents: Type.Optional(StringEnum(PROJECT_AGENTS_POLICY_VALUES, { description: 'Catalog project-agent policy. Default "deny". Use "allow" only when trusted; "confirm" requires UI.', default: "deny" })),
+		query: Type.Optional(Type.String({ description: "Catalog-only routing search. Exact phrases and non-stopword query terms are matched against role names/ref names (without source prefix), descriptions, tags, default tools, model, and thinking; source/path stay provenance only.", minLength: 1, maxLength: MAX_SHORT_TEXT_FIELD_CHARS })),
 	},
 	StrictObjectOptions,
 );
 
 const GraphLibrarySchema = Type.Object(
 	{
-		sources: Type.Optional(Type.Array(StringEnum(LIBRARY_SOURCE_VALUES), { description: 'Start-only library sources. Default ["package"]. Include "project" only with graph.authority.allowProjectCode:true.', minItems: 1, maxItems: 3 })),
+		sources: Type.Optional(Type.Array(StringEnum(LIBRARY_SOURCE_VALUES), { description: 'Start-only library sources. Default ["package"]. Include "project" to load local project agents when present.', minItems: 1, maxItems: 3 })),
 	},
 	StrictObjectOptions,
 );
@@ -75,7 +73,6 @@ const AuthoritySchema = Type.Object(
 		allowShellTools: Type.Optional(Type.Boolean({ description: "Allow the bash shell probe tool. Bash is trusted command execution and can mutate through commands. Default false.", default: false })),
 		allowMutationTools: Type.Optional(Type.Boolean({ description: "Allow structured edit and write child tools. Default false.", default: false })),
 		allowExtensionCode: Type.Optional(Type.Boolean({ description: "Allow explicit callable extensionTools grants. This does not disable or enable normal Pi extension discovery for model providers. Default false.", default: false })),
-		allowProjectCode: Type.Optional(Type.Boolean({ description: "Allow project agents, project library sources, project/local explicit extensionTools grants, and project/temporary caller skill sources. This does not disable normal Pi extension discovery. Default false.", default: false })),
 	},
 	StrictObjectOptions,
 );
@@ -101,7 +98,7 @@ const StepAgentSchema = Type.Object(
 	{
 		system: Type.Optional(nonEmptyText("Inline step-agent system prompt. Set exactly one of system or ref; runtime planning rejects missing or mixed bindings.")),
 		ref: Type.Optional(sourceQualifiedLibraryRef('Source-qualified library ref such as "package:reviewer". Set exactly one of system or ref; runtime planning rejects missing or mixed bindings.')),
-		tools: Type.Optional(Type.Array(StringEnum(BUILTIN_CHILD_TOOL_NAMES), { description: "Explicit built-in child tool profile. Every child keeps at least the read/discovery suite, so omitted or [] resolves to read, grep, find, and ls and requires graph.authority.allowFilesystemRead:true. For library agents, explicit tools replace the whole catalog defaultTools profile; mandatory read/discovery is then added. It does not append. Any read/discovery primitive expands to the full read, grep, find, ls suite.", maxItems: 24 })),
+		tools: Type.Optional(Type.Array(StringEnum(BUILTIN_CHILD_TOOL_NAMES), { description: "Explicit built-in child tool profile. Every child keeps at least the read/discovery suite, so omitted or [] resolves to read, grep, find, and ls and requires graph.authority.allowFilesystemRead:true. For library agents, explicit tools replace the whole catalog defaultTools profile; mandatory read/discovery is then added. It does not append. Any read/discovery primitive expands to the full read, grep, find, ls suite. package:validator requires effective bash; package:worker requires effective edit or write.", maxItems: 24 })),
 		extensionTools: Type.Optional(Type.Array(ExtensionToolGrantSchema, { description: "Explicit parent-active callable extension tool grants for this step.", maxItems: 24 })),
 	},
 	{ ...StrictObjectOptions, description: "Step-local inline agent or source-qualified library agent. Set exactly one of system or ref. No invocation-local agent registry is used." },

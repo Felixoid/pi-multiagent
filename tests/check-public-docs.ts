@@ -53,6 +53,7 @@ for (const file of publicFiles) {
 
 checkPinnedGithubTags();
 checkCatalogIsAuthoritative();
+checkRemovedTrustGateAndSourceScoringCopy();
 checkPublicSurfaceOwnership();
 checkActionSnippetHygiene();
 checkTimeoutContract();
@@ -122,6 +123,15 @@ function checkCatalogIsAuthoritative(): void {
 	}
 }
 
+function checkRemovedTrustGateAndSourceScoringCopy(): void {
+	const files = ["README.md", ...collectFiles("skills", ".md"), ...collectFiles("examples", ".json")];
+	const banned = ["allowLocalSource", "allowUserSource", "allowProjectSource", "trustedSources", "source trust gate", "trust-gate", "local-source trust authority", "source-scoring", "source scoring", "source score", "file-path-scoring", "file-path scoring", "file path scoring", "rank by source", "rank by file path"];
+	for (const file of files) {
+		const text = readFileSync(join(packageRoot, file), "utf8");
+		for (const fragment of banned) if (text.includes(fragment)) failures.push(`${file}: removed trust-gate/source-scoring copy is not public active copy: ${JSON.stringify(fragment)}`);
+	}
+}
+
 function checkPublicSurfaceOwnership(): void {
 	const readme = readFileSync(join(packageRoot, "README.md"), "utf8");
 	const skill = readFileSync(join(packageRoot, "skills/pi-multiagent/SKILL.md"), "utf8");
@@ -129,12 +139,14 @@ function checkPublicSurfaceOwnership(): void {
 	requireFragments("README.md", readme, ["human/operator path", "minimum read-only run", "short process-local `runId`", "Cleanup is evidence deletion", "trusted shell execution", "trusted mutation execution", "release-readiness-review.json", "pnpm run gate"]);
 	requireFragments("README.md", readme, ["pushed notices are compact human receipts", "terminal step artifact paths", "Assistant text previews require `preview:true`", "raw events require `debugEvents:true`"]);
 	requireFragments("README.md", readme, ["structured `waitSeconds` receipt", "suppressed non-error activity", "Accepted means accepted for delivery to the live child", "explicit callable `exa_search` and `exa_fetch` `extensionTools`"]);
+	requireFragments("README.md", readme, ["source and file path stay provenance, not ranking signals", "JSON/API/headless supervision", "pass the returned `Cursor` value back", "`package:validator` requires effective `bash`", "`package:worker` requires effective `edit` or `write`"]);
 	requireFragments("README.md", readme, ["Every child process keeps at least the filesystem read/discovery suite", "effective tools/model lane", "launch time", "context overflow"]);
-	requireFragments("README.md", readme, ["model/provider availability follows normal Pi extension discovery", "callable extension-tool grants", "project/local explicit `extensionTools` grants", "--agent-team-subagent-skills enabled|disabled"]);
+	requireFragments("README.md", readme, ["model/provider availability follows normal Pi extension discovery", "callable extension-tool grants", "Project and user library sources load when requested", "--agent-team-subagent-skills enabled|disabled"]);
 	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["Action controls are strict", "Pseudo-schema, by action", "short process-local `runId`", "Tool profile decision matrix", "Graph design ladder", "trusted shell execution", "trusted mutation execution", "Improving this package"]);
 	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["all terminal step artifact metadata", "bounded task previews", "run_status.stepId", "Pushed notices are compact untrusted human receipts", "Assistant text previews require `preview:true`", "raw events require `debugEvents:true`"]);
-	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["structured wait receipt", "suppressed non-error activity", "accepted-for-delivery transport", "Planning fails before launch unless explicit callable web search/fetch grants match live catalog provenance"]);
+	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["structured wait receipt", "suppressed non-error activity", "accepted-for-delivery transport", "source and file path are provenance only", "`package:validator` fails planning without effective `bash`", "`package:worker` fails planning without effective `edit` or `write`", "Planning fails before launch unless explicit callable web search/fetch grants match live catalog provenance"]);
 	requireFragments("skills/pi-multiagent/references/graph-cookbook.md", cookbook, ["Choose a graph shape first", "Graph design ladder", "Task packet templates", "Parent graph packet", "Artifact handoff packet", "Partial evidence triage", "Web research with explicit catalog-copied provenance", "validation-matrix-gate.json"]);
+	requireFragments("skills/pi-multiagent/references/graph-cookbook.md", cookbook, ["tree-reduce-source-review.json", "product-experience-source-audit.json", "evidence-trace-audit.json", "Product/evidence audit packet", "JSON/API/headless use"]);
 	requireFragments("skills/pi-multiagent/references/graph-cookbook.md", cookbook, ["Copy/adapt warning", "graphFile", "trusted shell execution", "trusted mutation execution", "Add `preview:true` only when bounded assistant text belongs", "Use `debugEvents:true` only for package debugging", "Every child keeps mandatory read/discovery", "--agent-team-subagent-skills enabled|disabled"]);
 }
 
@@ -211,7 +223,7 @@ function checkReleaseReadinessExample(file: string, graph: { [key: string]: unkn
 	if (auditAfter.join(",") !== "release-map,release-proof") failures.push(`${file}: release-audit waits after release-map and release-proof`);
 	const decisionAfter = stepStringArray(file, graph, "readiness-decision", "after");
 	if (decisionAfter.join(",") !== "release-map,release-proof,release-audit") failures.push(`${file}: readiness-decision preserves terminal evidence from every release lane`);
-	for (const fragment of ["git status -sb", "git diff --check", "npm pack --dry-run --json"]) if (!stepTask(file, graph, "release-proof").includes(fragment)) failures.push(`${file}: release-proof task includes ${fragment}`);
+	for (const fragment of ["git status -sb", "pnpm run gate", "npm pack --dry-run --json", "git diff --check"]) if (!stepTask(file, graph, "release-proof").includes(fragment)) failures.push(`${file}: release-proof task includes ${fragment}`);
 }
 
 function checkMapReduceExample(file: string, graph: { [key: string]: unknown }): void {

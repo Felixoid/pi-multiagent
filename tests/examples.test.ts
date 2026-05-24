@@ -60,15 +60,18 @@ test("packaged graph examples resolve against bundled catalog with expected sink
 		["command-validation-only.json", ["final-proof"]],
 		["completed-proof-review.json", ["final-decision"]],
 		["cwd-launched-audit-fanout.json", ["audit-decision"]],
+		["evidence-trace-audit.json", ["trace-decision"]],
 		["human-gated-plan-only.json", ["final-decision"]],
 		["inline-read-only-fanin.json", ["summary"]],
 		["map-reduce-audit-fanout.json", ["reduce-decision"]],
 		["model-facing-docs-audit.json", ["final-opportunities"]],
+		["product-experience-source-audit.json", ["experience-decision"]],
 		["read-only-audit-fanout.json", ["final-decision"]],
 		["release-readiness-review.json", ["readiness-decision"]],
 		["research-to-change-gated-loop.json", ["final-report"]],
 		["sharded-map-reduce-audit.json", ["reduce-decision"]],
 		["single-specialist-read-only.json", ["inspect"]],
+		["tree-reduce-source-review.json", ["final-decision"]],
 		["validation-matrix-gate.json", ["final-proof"]],
 	]);
 	const files = (await readdir(examplesDir)).filter((file) => file.endsWith(".json")).sort();
@@ -102,6 +105,19 @@ test("example graph roles match their positive choreography", async () => {
 	const chained = await readGraphExample("artifact-chained-decision.json");
 	assert.match(stepTask(chained, "artifact-review"), /REPLACE_WITH_PRIOR_RUN_HANDLE_AND_ARTIFACT_PATHS/);
 	assert.deepEqual(sinkStepIds(chained), ["final-decision"]);
+
+	const productExperience = await readGraphExample("product-experience-source-audit.json");
+	assert.equal(stepAgentRef(productExperience, "trust-recovery"), "package:critic");
+	assert.match(stepTask(productExperience, "operator-loop"), /API\/headless/);
+	assert.deepEqual(sinkStepIds(productExperience), ["experience-decision"]);
+
+	const treeReduce = await readGraphExample("tree-reduce-source-review.json");
+	assert.deepEqual(stepAfter(treeReduce, "reduce-source"), ["map-runtime", "map-docs"]);
+	assert.deepEqual(stepAfter(treeReduce, "final-decision"), ["reduce-source", "reduce-proof"]);
+
+	const evidenceTrace = await readGraphExample("evidence-trace-audit.json");
+	assert.match(stepTask(evidenceTrace, "trace-decision"), /source-to-artifact-to-copy/);
+	assert.deepEqual(sinkStepIds(evidenceTrace), ["trace-decision"]);
 });
 
 test("public Markdown agent_team JSON snippets are schema-valid", async () => {
