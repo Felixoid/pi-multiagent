@@ -14,18 +14,26 @@ Use `agent_team` when a bounded static DAG of specialist child Pi processes will
 
 One tool owns the surface: `agent_team`.
 
-Pseudo-schema, by action:
+Tool-call pseudo-schema:
 
 ```text
-catalog  { action, library?: { sources?, query? } }
-start    { action, graph XOR graphFile, options?: { maxRunSeconds?, terminalRetentionSeconds?, notify? } }
-step     { id, agent, task, needs?, after?, cwd? }
-run_status { action, runId, cursor?, stepId?, waitSeconds?, maxBytes?, preview?, debugEvents? }
+catalog     { action, library?: { sources?, query? } }
+start       { action, graph XOR graphFile, options?: { maxRunSeconds?, terminalRetentionSeconds?, notify? } }
+run_status  { action, runId, cursor?, stepId?, waitSeconds?, maxBytes?, preview?, debugEvents? }
 step_result { action, runId, stepId, maxBytes?, preview? }
-message  { action, runId, stepId, channel: "steer"|"follow_up", text, clientMessageId? }
-cancel   { action, runId, reason? }
-cleanup  { action, runId }
+message     { action, runId, stepId, channel: "steer"|"follow_up", text, clientMessageId? }
+cancel      { action, runId, reason? }
+cleanup     { action, runId }
 ```
+
+Graph step object, used inside `graph.steps[]` only:
+
+```text
+step { id, agent, task, needs?, after?, cwd? }
+```
+
+Do not send `{"action":"step"}`. `step` is a graph object, not an `agent_team` action.
+`library` placement differs by action: `catalog` uses top-level `library`; `start` uses `graph.library` or a `library` field inside the graph file. Do not send top-level `library` with `start`.
 
 - `catalog` discovers source-qualified refs, routing tags, default built-in tool profiles, and active parent extension-tool provenance. Runtime catalog output is authoritative for current role metadata. Query routing scores role names/ref names (the name portion of source-qualified refs), descriptions, tags, default tools, model, and thinking; source and file path are provenance only.
 - `start` validates a pure graph or trusted `graphFile`, launches a detached run, and returns a short process-local `runId` such as `r1`.
@@ -63,6 +71,43 @@ Copy this minimum read-only run first when one isolated local inspection is wort
 ```
 
 Let pushed notices report progress unless you need evidence. Use `run_status` with the returned short `runId` for a compact snapshot or bounded `waitSeconds` wait/read, and `step_result` for one step. `timeoutSecondsPerStep` defaults to 7200 seconds; raise it only after the first success when broad review, validation, implementation, or release work needs more time.
+
+## First successful graphFile run
+
+Use `graphFile` only when a trusted workspace JSON graph file already exists, or when you are authorized to create one. If you cannot create and inspect a workspace file, use the inline first-success run above instead.
+
+A graph file contains only the graph body, not an action wrapper. For example, a workspace file named `local-read-only-graph.json` can contain:
+
+```json
+{
+  "objective": "Answer one scoped local question.",
+  "authority": {
+    "allowFilesystemRead": true
+  },
+  "steps": [
+    {
+      "id": "inspect",
+      "agent": {
+        "ref": "package:scout"
+      },
+      "task": "Inspect the named files for the parent-copied question. Do not edit or run commands. Return paths, facts, risks, and unknowns."
+    }
+  ]
+}
+```
+
+Inspect the file's authority, tools, extension grants, prompts, tasks, and `cwd` values before launch. Then start it from the same workspace with:
+
+```json
+{
+  "action": "start",
+  "graphFile": "local-read-only-graph.json"
+}
+```
+
+After `start`, keep the returned short `runId`. In JSON/API/headless mode, use `run_status` with `waitSeconds` for a bounded wait/read; use `step_result` with `preview:true` only when one step's bounded text belongs in context. Preserve terminal artifact paths before cleanup.
+
+Do not point `graphFile` at installed package/example paths such as `../../../examples/graphs/...`. Packaged examples are references to copy and adapt. Do not put `action`, `runId`, nested `graphFile`, or other control fields inside the graph file.
 
 ## Fast path
 

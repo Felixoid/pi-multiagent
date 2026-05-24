@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.9.4 - 2026-05-24
+
+- Added a complete `/skill:pi-multiagent` first-success `graphFile` recipe and separated tool-call actions from `graph.steps[]` object shape so `step` is not presented as an `agent_team` action.
+
 ## 0.9.3 - 2026-05-24
 
 - Removed the separate local-source trust authority from schemas, planning, catalog prep, extension-tool grants, caller-skill propagation, docs, and tests; project/user sources now load when selected or product-enabled, while explicit extension-tool grants still require `allowExtensionCode:true`.

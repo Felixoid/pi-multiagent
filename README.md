@@ -127,18 +127,61 @@ Authority is graph-wide:
 
 A step `cwd` narrows launch working context to an existing directory inside the invocation cwd. Symlinked, missing, non-directory, and path-escaping cwd values are denied, and cwd identity is rechecked immediately before launch. Bash-enabled steps are refused when the effective `cwd` tree contains `.pi/settings.json`.
 
-## `graphFile`
+## First successful `graphFile` run
 
-`graphFile` points to a pure relative graph JSON file inside cwd, not an action wrapper:
+`graphFile` points to a pure relative graph JSON file inside cwd, not an action wrapper. Use it when a trusted workspace graph file already exists, or when you are authorized to create one. For a first success, create `local-read-only-graph.json` in the current workspace with only the graph body:
+
+```json
+{
+  "objective": "Answer one scoped local question.",
+  "authority": {
+    "allowFilesystemRead": true
+  },
+  "steps": [
+    {
+      "id": "inspect",
+      "agent": {
+        "ref": "package:scout"
+      },
+      "task": "Inspect relevant local files. Do not edit or run commands. Return paths, facts, risks, and unknowns."
+    }
+  ]
+}
+```
+
+Inspect authority, tools, extension grants, prompts, tasks, and `cwd` values before launch. Then start the copied workspace file:
 
 ```json
 {
   "action": "start",
-  "graphFile": "read-only-audit-fanout.json"
+  "graphFile": "local-read-only-graph.json"
 }
 ```
 
-Packaged examples are references to copy and adapt; they are not loaded by package path and are not a runtime template API. Copy a trusted example into the workspace, replace placeholders, inspect authority, then call `start` with the copied filename.
+Need headless supervision or artifact paths:
+
+```json
+{
+  "action": "run_status",
+  "runId": "r1",
+  "waitSeconds": 30
+}
+```
+
+Need the step text:
+
+```json
+{
+  "action": "step_result",
+  "runId": "r1",
+  "stepId": "inspect",
+  "preview": true
+}
+```
+
+Cleanup is evidence deletion. Preserve the short `runId`, status, terminal artifact paths, and any needed full text before cleanup.
+
+Packaged examples are references to copy and adapt; they are not loaded by package path and are not a runtime template API. Do not point `graphFile` at installed package/example paths. Do not put `action`, `runId`, nested `graphFile`, or other control fields inside the graph file.
 
 ## Messages and supervision
 
