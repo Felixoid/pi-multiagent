@@ -258,7 +258,6 @@ export interface GraphStepInput {
 	id: string;
 	agent: GraphStepAgentInput;
 	task: string;
-	mutationScope?: string;
 	needs?: string[];
 	after?: string[];
 	cwd?: string;
@@ -299,7 +298,6 @@ export interface TeamStepSpec {
 	id: string;
 	agent: ResolvedAgent;
 	task: string;
-	mutationScope: string | undefined;
 	needs: string[];
 	after: string[];
 	cwd: string;

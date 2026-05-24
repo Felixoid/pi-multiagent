@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import type { AgentConfig, ParentSkillInventory, ParentToolInfo, ParentToolInventory } from "../extensions/multiagent/src/types.ts";
-import { findProjectSettingsFile, resolveDetachedGraph, validatePreflightShape } from "../extensions/multiagent/src/planning.ts";
+import { resolveDetachedGraph, validatePreflightShape } from "../extensions/multiagent/src/planning.ts";
+import { findProjectSettingsFile } from "../extensions/multiagent/src/project-settings.ts";
 import { readSubagentSkillConfig } from "../extensions/multiagent/src/subagent-skills-config.ts";
 import { BUILTIN_CHILD_TOOL_NAMES, READONLY_CHILD_TOOL_NAMES } from "../extensions/multiagent/src/types.ts";
 
@@ -203,7 +204,7 @@ test("resolveDetachedGraph rejects inherited shell defaults when mandatory read 
 test("resolveDetachedGraph grants inherited shell defaults only when shell authority is set", async () => {
 	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-shell-${Date.now()}`), { recursive: true });
 	const graph = resolveDetachedGraph(
-		{ objective: "shell", authority: { allowFilesystemRead: true, allowShellTools: true }, steps: [{ id: "one", agent: { ref: "package:reviewer" }, task: "x" }] },
+		{ objective: "shell", authority: { allowFilesystemRead: true, allowShellTools: true }, steps: [{ id: "one", agent: { ref: "package:reviewer" }, task: "Run `git status -sb`." }] },
 		[packageAgent("reviewer", ["read", "bash"])],
 		[],
 		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
@@ -236,47 +237,18 @@ test("resolveDetachedGraph treats explicit tools as strict overrides", async () 
 	assert.deepEqual(denied.steps, []);
 });
 
-test("resolveDetachedGraph requires first-class mutationScope for mutation-capable steps", async () => {
-	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-worker-scope-${Date.now()}`), { recursive: true });
+test("resolveDetachedGraph grants mutation tools only with mutation authority", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-worker-tools-${Date.now()}`), { recursive: true });
 	const worker = packageAgent("worker", ["read", "bash", "edit", "write"]);
-	const baseGraph = { objective: "worker", authority: { allowFilesystemRead: true, allowShellTools: true, allowMutationTools: true } };
-	const missing = resolveDetachedGraph(
-		{ ...baseGraph, steps: [{ id: "one", agent: { ref: "package:worker" }, task: "Implement the change." }] },
+	const allowed = resolveDetachedGraph(
+		{ objective: "worker", authority: { allowFilesystemRead: true, allowShellTools: true, allowMutationTools: true }, steps: [{ id: "one", agent: { ref: "package:worker" }, task: "Implement the delegated change." }] },
 		[worker],
 		[],
 		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
 		undefined,
 	);
-	assert.equal(missing.diagnostics.some((item) => item.code === "mutation-scope-required"), true);
-	assert.deepEqual(missing.steps, []);
-	const placeholder = resolveDetachedGraph(
-		{ ...baseGraph, steps: [{ id: "one", agent: { ref: "package:worker" }, mutationScope: "REPLACE with exact files", task: "Do not edit if unresolved." }] },
-		[worker],
-		[],
-		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
-		undefined,
-	);
-	assert.equal(placeholder.diagnostics.some((item) => item.code === "mutation-scope-invalid"), true);
-	assert.deepEqual(placeholder.steps, []);
-	const underscorePlaceholder = resolveDetachedGraph(
-		{ ...baseGraph, steps: [{ id: "one", agent: { ref: "package:worker" }, mutationScope: "REPLACE_ME", task: "Do not edit if unresolved." }] },
-		[worker],
-		[],
-		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
-		undefined,
-	);
-	assert.equal(underscorePlaceholder.diagnostics.some((item) => item.code === "mutation-scope-invalid"), true);
-	assert.deepEqual(underscorePlaceholder.steps, []);
-	const concrete = resolveDetachedGraph(
-		{ ...baseGraph, steps: [{ id: "one", agent: { ref: "package:worker" }, mutationScope: "README.md and tests/planning.test.ts only", task: "Implement the approved change." }] },
-		[worker],
-		[],
-		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
-		undefined,
-	);
-	assert.equal(concrete.diagnostics.some((item) => item.severity === "error"), false);
-	assert.equal(concrete.steps[0]?.mutationScope, "README.md and tests/planning.test.ts only");
-	assert.deepEqual(concrete.steps[0]?.agent.tools, [...READONLY_CHILD_TOOL_NAMES, "bash", "edit", "write"]);
+	assert.equal(allowed.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(allowed.steps[0]?.agent.tools, [...READONLY_CHILD_TOOL_NAMES, "bash", "edit", "write"]);
 	const shellOnlyWorker = resolveDetachedGraph(
 		{ objective: "worker", authority: { allowFilesystemRead: true, allowShellTools: true }, steps: [{ id: "one", agent: { ref: "package:worker", tools: ["bash"] }, task: "Run the validation command." }] },
 		[worker],
@@ -284,8 +256,8 @@ test("resolveDetachedGraph requires first-class mutationScope for mutation-capab
 		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
 		undefined,
 	);
-	assert.equal(shellOnlyWorker.diagnostics.some((item) => item.code === "mutation-scope-required"), true);
-	assert.deepEqual(shellOnlyWorker.steps, []);
+	assert.equal(shellOnlyWorker.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(shellOnlyWorker.steps[0]?.agent.tools, [...READONLY_CHILD_TOOL_NAMES, "bash"]);
 	const inlineWrite = resolveDetachedGraph(
 		{ objective: "inline", authority: { allowFilesystemRead: true, allowMutationTools: true }, steps: [{ id: "one", agent: { system: "x", tools: ["edit"] }, task: "Edit." }] },
 		[],
@@ -293,16 +265,15 @@ test("resolveDetachedGraph requires first-class mutationScope for mutation-capab
 		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
 		undefined,
 	);
-	assert.equal(inlineWrite.diagnostics.some((item) => item.code === "mutation-scope-required"), true);
-	assert.deepEqual(inlineWrite.steps, []);
+	assert.equal(inlineWrite.diagnostics.some((item) => item.severity === "error"), false);
+	assert.deepEqual(inlineWrite.steps[0]?.agent.tools, [...READONLY_CHILD_TOOL_NAMES, "edit"]);
 	const readOnlyWorker = resolveDetachedGraph(
-		{ objective: "worker", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { ref: "package:worker", tools: ["read"] }, task: "Plan only; do not edit." }] },
+		{ objective: "worker", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { ref: "package:worker", tools: ["read"] }, task: "Plan only." }] },
 		[worker],
 		[],
 		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
 		undefined,
 	);
-	assert.equal(readOnlyWorker.diagnostics.some((item) => item.code === "mutation-scope-required"), false);
 	assert.deepEqual(readOnlyWorker.steps[0]?.agent.tools, READONLY_CHILD_TOOL_NAMES);
 });
 

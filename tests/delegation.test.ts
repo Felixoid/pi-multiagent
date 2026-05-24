@@ -372,7 +372,6 @@ test("start returns a registered runId and run_status exposes final output", asy
 	assert.match(artifact, /thinking: inherit/);
 	assert.match(artifact, /effectiveTools: read, grep, find, ls/);
 	assert.match(artifact, /extensionTools: none/);
-	assert.match(artifact, /mutationScope: none/);
 	assert.match(artifact, /cwd: .*pi-multiagent-detached-/);
 	assert.match(artifact, /needs: none/);
 	assert.match(artifact, /after: none/);
@@ -539,8 +538,8 @@ test("start rejects inherited catalog defaults capped to no tools", async () => 
 	assert.equal(harness.children.length, 0);
 });
 
-test("start rejects write-capable package worker without concrete mutation scope", async () => {
-	const root = await mkdir(join(tmpdir(), `pi-multiagent-start-worker-scope-${Date.now()}`), { recursive: true });
+test("start launches write-capable package worker when graph authority grants the tools", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-start-worker-tools-${Date.now()}`), { recursive: true });
 	const agentsDir = join(root, "agents");
 	await mkdir(agentsDir, { recursive: true });
 	await writeFile(join(agentsDir, "worker.md"), "---\nname: worker\ndescription: worker\ntools: read, bash, edit, write\n---\nWorker.");
@@ -552,15 +551,18 @@ test("start rejects write-capable package worker without concrete mutation scope
 			graph: {
 				objective: "worker",
 				authority: { allowFilesystemRead: true, allowShellTools: true, allowMutationTools: true },
-				steps: [{ id: "one", agent: { ref: "package:worker" }, mutationScope: "REPLACE with exact files", task: "Implement." }],
+				steps: [{ id: "one", agent: { ref: "package:worker" }, task: "Implement the delegated change." }],
 			},
 			options: { terminalRetentionSeconds: 30 },
 		},
 		options,
 	);
-	assert.equal(started.details.error?.code, "start-planning-failed");
-	assert.equal(started.details.diagnostics.some((item) => item.code === "mutation-scope-invalid"), true);
-	assert.equal(harness.children.length, 0);
+	assert.equal(started.details.error, undefined);
+	assert.deepEqual(started.details.steps[0]?.effectiveTools, ["read", "grep", "find", "ls", "bash", "edit", "write"]);
+	assert.equal(harness.children.length, 1);
+	const runId = started.details.run?.runId ?? "";
+	await waitTerminal(root, runId, options);
+	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
 test("empty assistant final fails the step instead of succeeding with an empty artifact", async () => {

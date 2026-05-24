@@ -14,21 +14,21 @@
       "agent": {
         "ref": "package:scout"
       },
-      "task": "Shard A scope copied by parent: REPLACE_WITH_COMPONENT_OR_ARTIFACT_A. Inspect only this named component, path set, or retained artifact path for the concrete delegated question. If this placeholder remains, no concrete delegated question, affected surface, stop condition, or expected output fields were copied in, return NEEDS-SCOPE without broad repo search. Do not run commands or edit. Return one shard packet with fields: shard, component or artifact, owner or canonical path, evidence, risk or mismatch, validation gap, and smallest next action."
+      "task": "Shard A boundary copied by parent: REPLACE_WITH_COMPONENT_OR_ARTIFACT_A. Inspect only this named component, path set, or retained artifact path for the concrete delegated question. If this placeholder remains, or the concrete delegated question, affected surface, stop condition, or expected output fields are missing, report the missing inputs without broad repo search. Do not run commands or edit. Return one shard packet with fields: shard, component or artifact, owner or canonical path, evidence, risk or mismatch, validation gap, and smallest next action."
     },
     {
       "id": "map-shard-b",
       "agent": {
         "ref": "package:scout"
       },
-      "task": "Shard B scope copied by parent: REPLACE_WITH_COMPONENT_OR_ARTIFACT_B. Inspect only this named component, path set, or retained artifact path for the concrete delegated question. If this placeholder remains, no concrete delegated question, affected surface, stop condition, or expected output fields were copied in, return NEEDS-SCOPE without broad repo search. Do not run commands or edit. Return one shard packet with fields: shard, component or artifact, owner or canonical path, evidence, risk or mismatch, validation gap, and smallest next action."
+      "task": "Shard B boundary copied by parent: REPLACE_WITH_COMPONENT_OR_ARTIFACT_B. Inspect only this named component, path set, or retained artifact path for the concrete delegated question. If this placeholder remains, or the concrete delegated question, affected surface, stop condition, or expected output fields are missing, report the missing inputs without broad repo search. Do not run commands or edit. Return one shard packet with fields: shard, component or artifact, owner or canonical path, evidence, risk or mismatch, validation gap, and smallest next action."
     },
     {
       "id": "map-shard-c",
       "agent": {
         "ref": "package:docs-auditor"
       },
-      "task": "Shard C scope copied by parent: REPLACE_WITH_COMPONENT_OR_ARTIFACT_C. Inspect only this named docs/model-copy component, path set, or retained artifact path for the concrete delegated question. If this placeholder remains, no concrete delegated question, affected surface, stop condition, or expected output fields were copied in, return NEEDS-SCOPE without broad repo search. Do not edit. Return one shard packet with fields: shard, component or artifact, owner or canonical path, evidence, risk or mismatch, validation gap, and smallest next action."
+      "task": "Shard C boundary copied by parent: REPLACE_WITH_COMPONENT_OR_ARTIFACT_C. Inspect only this named docs/model-copy component, path set, or retained artifact path for the concrete delegated question. If this placeholder remains, or the concrete delegated question, affected surface, stop condition, or expected output fields are missing, report the missing inputs without broad repo search. Do not edit. Return one shard packet with fields: shard, component or artifact, owner or canonical path, evidence, risk or mismatch, validation gap, and smallest next action."
     },
     {
       "id": "reduce-decision",
@@ -40,7 +40,7 @@
         "map-shard-b",
         "map-shard-c"
       ],
-      "task": "Reduce all shard packets into one decision with fields: decision, canonical owners, duplicate findings, cross-shard conflicts, failed or blocked shard evidence, observed validation versus claimed validation, smallest next action, and residual risk. Return GO, NEEDS-WORK, or BLOCKED. Do not invent validation or mutation authority."
+      "task": "Reduce all shard packets into one decision with fields: decision, canonical owners, duplicate findings, cross-shard conflicts, failed or blocked shard evidence, observed validation versus claimed validation, smallest next action, and residual risk. Return GO, NEEDS-WORK, or BLOCKED. Return observed evidence and unresolved decisions."
     }
   ],
   "limits": {

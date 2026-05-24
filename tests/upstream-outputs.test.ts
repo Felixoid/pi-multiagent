@@ -10,7 +10,7 @@ function agent(id: string): ResolvedAgent {
 }
 
 function spec(id: string, needs: string[] = [], after: string[] = []): TeamStepSpec {
-	return { id, agent: agent(id), task: id, mutationScope: undefined, needs, after, cwd: "/tmp", cwdIdentity: { realpath: "/tmp", dev: 0, ino: 0 } };
+	return { id, agent: agent(id), task: id, needs, after, cwd: "/tmp", cwdIdentity: { realpath: "/tmp", dev: 0, ino: 0 } };
 }
 
 function state(id: string, finalText: string, output: StepOutput): StepState {

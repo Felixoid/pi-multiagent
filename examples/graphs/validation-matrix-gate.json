@@ -1,5 +1,5 @@
 {
-  "objective": "Run a parent-copied validation matrix with independent read-only command lanes and synthesize one proof decision.",
+  "objective": "Run independent trusted command lanes and synthesize one proof decision.",
   "library": {
     "sources": [
       "package"
@@ -15,21 +15,21 @@
       "agent": {
         "ref": "package:validator"
       },
-      "task": "Validation command scope copied by parent: REPLACE_WITH_EXACT_READ_ONLY_COMMANDS_A. Run only those commands for validation lane A. If this placeholder remains, the command list is missing, broad, mutating, requires network/credentials, or scope is implied only by upstream evidence, return needs-command-scope without running commands or substitutes. Report pass/fail/deferred per command with cwd, important output, and failure bucket. Do not edit, install, publish, deploy, delete, or run network commands."
+      "task": "Run trusted validation lane A from the repository root: `git status -sb`. Report pass/fail/deferred per command with cwd, important output, and failure bucket. Do not edit, install, publish, deploy, delete, or run network commands."
     },
     {
       "id": "validation-b",
       "agent": {
         "ref": "package:validator"
       },
-      "task": "Validation command scope copied by parent: REPLACE_WITH_EXACT_READ_ONLY_COMMANDS_B. Run only those commands for validation lane B. If this placeholder remains, the command list is missing, broad, mutating, requires network/credentials, or scope is implied only by upstream evidence, return needs-command-scope without running commands or substitutes. Report pass/fail/deferred per command with cwd, important output, and failure bucket. Do not edit, install, publish, deploy, delete, or run network commands."
+      "task": "Run trusted validation lane B from the repository root: `git diff --check`. Report pass/fail/deferred per command with cwd, important output, and failure bucket. Do not edit, install, publish, deploy, delete, or run network commands."
     },
     {
       "id": "validation-c",
       "agent": {
         "ref": "package:validator"
       },
-      "task": "Validation command scope copied by parent: REPLACE_WITH_EXACT_READ_ONLY_COMMANDS_C. Run only those commands for validation lane C. If this placeholder remains, the command list is missing, broad, mutating, requires network/credentials, or scope is implied only by upstream evidence, return needs-command-scope without running commands or substitutes. Report pass/fail/deferred per command with cwd, important output, and failure bucket. Do not edit, install, publish, deploy, delete, or run network commands."
+      "task": "Run trusted validation lane C from the repository root: `node --version`. Report pass/fail/deferred per command with cwd, important output, and failure bucket. Do not edit, install, publish, deploy, delete, or run network commands."
     },
     {
       "id": "final-proof",
@@ -41,7 +41,7 @@
         "validation-b",
         "validation-c"
       ],
-      "task": "Synthesize the validation matrix after all lanes terminalize. Return pass, fail, deferred, needs-command-scope, or NOT PASSED with a row per lane, observed commands, failure buckets, contradictions, missing proof, and residual risk. Build the matrix only from observed validator outputs. If any required lane is missing, failed, blocked, timed out, returned needs-command-scope, or lacks command-backed evidence, mark the matrix NOT PASSED instead of inventing proof."
+      "task": "Synthesize the validation matrix after all lanes terminalize. Return pass, fail, or deferred with a row per lane, observed commands, failure buckets, contradictions, missing proof, and residual risk. Build the matrix only from observed validator outputs. If any required lane is missing, failed, blocked, timed out, lacks command-backed evidence, mark the matrix NOT PASSED instead of inventing proof."
     }
   ],
   "limits": {

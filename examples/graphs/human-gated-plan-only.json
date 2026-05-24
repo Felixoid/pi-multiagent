@@ -14,7 +14,7 @@
       "agent": {
         "ref": "package:scout"
       },
-      "task": "Map the affected local surface, owners, tests, docs, risks, and unknowns for the concrete parent-copied planning question. If no concrete question, affected surface, stop condition, or expected output fields were copied in, return NEEDS-SCOPE without broad repo search. Do not run commands or edit."
+      "task": "Map the affected local surface, owners, tests, docs, risks, and unknowns for the concrete parent-copied planning question. Do not run commands or edit."
     },
     {
       "id": "implementation-plan",
@@ -24,7 +24,7 @@
       "needs": [
         "scope-map"
       ],
-      "task": "Prepare the smallest coherent implementation contract, owned files, exclusions, validation plan, and exact human approval question. Do not edit."
+      "task": "Prepare the smallest coherent implementation contract, owned files, exclusions, validation plan, and human decision question. Do not edit."
     },
     {
       "id": "premortem",
@@ -46,7 +46,7 @@
         "implementation-plan",
         "premortem"
       ],
-      "task": "Return the proposed plan, blockers, exact human approval question, required mutationScope for a later run, and validation plan. Make clear that no mutation was authorized or performed."
+      "task": "Return the proposed plan, blockers, human decision question, owned files, and validation plan for a later run. Make clear that no mutation was authorized or performed."
     }
   ],
   "limits": {

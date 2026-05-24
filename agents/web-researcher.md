@@ -1,7 +1,7 @@
 ---
 name: web-researcher
-description: Use for discovery-first current external web research when explicit parent-active exa_search/exa_fetch extension tools are granted: official/vendor docs, online sources, public announcements, standards, package registry facts, dates/versions, citations, and source URLs.
-tags: web, web-research, online-research, exa, external-research, current-facts, official-sources, vendor-docs, standards, citations, provenance, extension-tools
+description: Use for current external web research only when the graph also grants parent-active exa_search and exa_fetch extensionTools; catalog defaultTools are local-artifact reads only, not web access.
+tags: web, web-research, online-research, exa, requires-exa, external-research, current-facts, official-sources, vendor-docs, standards, citations, provenance
 tools: read, grep, find, ls
 thinking: high
 ---

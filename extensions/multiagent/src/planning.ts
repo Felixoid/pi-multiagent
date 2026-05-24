@@ -2,18 +2,17 @@
 
 import { createHash } from "node:crypto";
 import { lstatSync, realpathSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { GraphSpec } from "./schemas.ts";
 import type { AgentConfig, AgentDiagnostic, CwdIdentity, GraphAuthority, LibrarySource, ParentSkillInventory, ResolvedAgent, ResolvedGraph, SubagentSkillMode, TeamStepSpec } from "./types.ts";
 import { DEFAULT_GRAPH_LIBRARY_SOURCES, LIBRARY_SOURCE_VALUES, PUBLIC_ID_PATTERN, SOURCE_QUALIFIED_LIBRARY_REF_PATTERN } from "./types.ts";
 import { createCallerSkillResolutionContext, resolveAgentCallerSkills } from "./caller-skills.ts";
 import { extensionToolPolicyFromAuthority, normalizeAuthority } from "./authority-policy.ts";
 import { normalizeLimits, normalizeStartOptions } from "./limits.ts";
-import { resolveMutationScope } from "./mutation-scope.ts";
 import { resolveAgentToolAccess } from "./tool-policy.ts";
 import { resolveBuiltinToolProfile } from "./builtin-tool-profile.ts";
 import { DEFAULT_SUBAGENT_SKILL_MODE } from "./subagent-skills-config.ts";
+import { findProjectSettingsFile } from "./project-settings.ts";
 import { validateWebResearcherExtensionTools } from "./web-researcher-policy.ts";
 
 const PUBLIC_ID_REGEX = new RegExp(PUBLIC_ID_PATTERN);
@@ -37,25 +36,24 @@ export function resolveDetachedGraph(graph: GraphSpec, libraryAgents: AgentConfi
 	const invocationCwd = resolveInvocationCwd(context.invocationCwd, diagnostics);
 	const skillContext = createCallerSkillResolutionContext(context.parentSkills, invocationCwd);
 	const subagentSkillMode = context.subagentSkillMode ?? DEFAULT_SUBAGENT_SKILL_MODE;
-	const steps = graph.steps.map((step, index) => resolveStep(step, index, graph.objective, authority, library, libraryAgents, diagnostics, { ...context, invocationCwd, subagentSkillMode }, skillContext)).filter((step): step is TeamStepSpec => step !== undefined);
+	const steps = graph.steps.map((step, index) => resolveStep(step, index, authority, library, libraryAgents, diagnostics, { ...context, invocationCwd, subagentSkillMode }, skillContext)).filter((step): step is TeamStepSpec => step !== undefined);
 	validateStepGraph(steps, diagnostics);
 	return { objective: graph.objective.trim(), library, authority, steps, limits, options, graphHash: hashGraph(graph, authority, limits, options, subagentSkillMode), diagnostics };
 }
 
 export { validatePreflightShape } from "./preflight-shape.ts";
 
-function resolveStep(step: GraphSpec["steps"][number], index: number, _objective: string, authority: GraphAuthority, library: { sources: LibrarySource[] }, libraryAgents: AgentConfig[], diagnostics: AgentDiagnostic[], context: ResolveGraphContext, skillContext: ReturnType<typeof createCallerSkillResolutionContext>): TeamStepSpec | undefined {
+function resolveStep(step: GraphSpec["steps"][number], index: number, authority: GraphAuthority, library: { sources: LibrarySource[] }, libraryAgents: AgentConfig[], diagnostics: AgentDiagnostic[], context: ResolveGraphContext, skillContext: ReturnType<typeof createCallerSkillResolutionContext>): TeamStepSpec | undefined {
 	const path = `/graph/steps/${index}`;
 	if (!validatePublicId(step.id, `step id ${step.id || "<empty>"}`, diagnostics, `${path}/id`)) return undefined;
 	if (!step.task.trim()) diagnostics.push(makeDiagnostic("step-task-required", `Step ${step.id} requires task.`, "error", `${path}/task`));
 	const cwd = resolveStepCwd(context.invocationCwd, step.cwd, diagnostics, `${path}/cwd`);
 	const agent = resolveStepAgent(step.id, step.agent, authority, library, libraryAgents, diagnostics, context, skillContext, `${path}/agent`);
-	const mutationScope = agent ? resolveMutationScope(step, agent, diagnostics, `${path}/mutationScope`) : { valid: false, value: undefined };
 	const cwdSettingsValid = cwd && agent ? validateBashCwd(step.id, agent, cwd.path, diagnostics, `${path}/cwd`) : false;
 	for (const [needIndex, need] of (step.needs ?? []).entries()) validatePublicId(need, `strict dependency ${need || "<empty>"}`, diagnostics, `${path}/needs/${needIndex}`);
 	for (const [afterIndex, after] of (step.after ?? []).entries()) validatePublicId(after, `terminal dependency ${after || "<empty>"}`, diagnostics, `${path}/after/${afterIndex}`);
-	if (!cwd || !agent || !mutationScope.valid || !cwdSettingsValid) return undefined;
-	return { id: step.id, agent, task: step.task, mutationScope: mutationScope.value, needs: dedupeRefs(step.needs ?? []), after: dedupeRefs(step.after ?? []), cwd: cwd.path, cwdIdentity: cwd.identity };
+	if (!cwd || !agent || !cwdSettingsValid) return undefined;
+	return { id: step.id, agent, task: step.task, needs: dedupeRefs(step.needs ?? []), after: dedupeRefs(step.after ?? []), cwd: cwd.path, cwdIdentity: cwd.identity };
 }
 
 function resolveStepAgent(stepId: string, spec: GraphSpec["steps"][number]["agent"], authority: GraphAuthority, library: { sources: LibrarySource[] }, libraryAgents: AgentConfig[], diagnostics: AgentDiagnostic[], context: ResolveGraphContext, skillContext: ReturnType<typeof createCallerSkillResolutionContext>, path: string): ResolvedAgent | undefined {
@@ -243,23 +241,6 @@ function findSymlinkPathDiagnostic(root: string, lexicalPath: string, path: stri
 		}
 	}
 	return undefined;
-}
-
-export function findProjectSettingsFile(cwd: string, globalPiDir = join(homedir(), ".pi")): string | undefined {
-	let current = cwd;
-	const ignoredSettings = resolve(globalPiDir, "settings.json");
-	while (true) {
-		const candidate = join(current, ".pi", "settings.json");
-		try {
-			lstatSync(candidate);
-			if (resolve(candidate) !== ignoredSettings) return candidate;
-		} catch {
-			// Missing settings at this level; keep walking ancestors.
-		}
-		const parent = dirname(current);
-		if (parent === current) return undefined;
-		current = parent;
-	}
 }
 
 function validatePublicId(value: string, label: string, diagnostics: AgentDiagnostic[], path: string): boolean {

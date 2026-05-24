@@ -1,6 +1,6 @@
 {
   "name": "pi-multiagent",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "type": "module",
   "description": "Adds the agent_team delegation tool and pi-multiagent skill to Pi.",
   "keywords": [

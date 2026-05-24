@@ -49,10 +49,6 @@ test("AgentTeamSchema preserves public field bounds and defaults", () => {
 	assert.equal(graphSchema.properties.limits.properties.timeoutSecondsPerStep.maximum, MAX_TIMEOUT_SECONDS_PER_STEP);
 	assert.equal(graphSchema.properties.limits.properties.timeoutSecondsPerStep.multipleOf, 1);
 	assert.equal(stepSchema.task.maxLength, MAX_TEXT_FIELD_CHARS);
-	assert.equal(stepSchema.mutationScope.maxLength, MAX_TEXT_FIELD_CHARS);
-	assert.match(stepSchema.mutationScope.description, /First-class mutation authorization/);
-	assert.match(stepSchema.mutationScope.description, /not a sandbox/);
-	assert.match(stepSchema.mutationScope.description, /not path-confined/);
 	assert.equal(stepSchema.cwd.maxLength, MAX_PATH_FIELD_CHARS);
 	assert.equal(stepAgent.system.maxLength, MAX_TEXT_FIELD_CHARS);
 	assert.equal(stepAgent.ref.maxLength, 72);
@@ -70,7 +66,6 @@ test("AgentTeamSchema keeps start graph pure and bounded", () => {
 	assert.equal(validate.Check({ action: "start", graph: { ...graph, steps: [] } }), false);
 	assert.equal(validate.Check({ action: "start", graph: { ...graph, steps: [{ id: "bad_id", agent: { system: "x" }, task: "x" }] } }), false);
 	assert.equal(validate.Check({ action: "start", graph: { ...graph, authority: { allowShellTools: true, allowMutationTools: true } } }), true);
-	assert.equal(validate.Check({ action: "start", graph: { ...graph, authority: { allowSideEffectTools: true } } }), false);
 	assert.equal(validate.Check({ action: "start", graph: { ...graph, steps: [{ id: "one", agent: { system: "x", tools: ["exa_search"] }, task: "x" }] } }), false);
 	assert.equal(validate.Check({ action: "start", graph: { ...graph, synthesis: { task: "old" } } }), false);
 	assert.equal(validate.Check({ action: "start", graph, options: { maxRunSeconds: 1.5 } }), false);

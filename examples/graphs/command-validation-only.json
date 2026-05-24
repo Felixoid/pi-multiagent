@@ -1,5 +1,5 @@
 {
-  "objective": "Run named read-only validation commands and preserve observed proof without mutation.",
+  "objective": "Run trusted validation commands and preserve observed proof with no structured edit/write tools.",
   "library": {
     "sources": [
       "package"
@@ -15,7 +15,7 @@
       "agent": {
         "ref": "package:validator"
       },
-      "task": "Validation command scope copied by parent: REPLACE_WITH_EXACT_READ_ONLY_COMMANDS. Run only those commands. If this placeholder remains, no commands are present, or scope is implied only by upstream evidence, return needs-command-scope without running commands. Report pass/fail/deferred per command with cwd, important output, and failure bucket. Do not edit, install, publish, deploy, delete, or run network commands."
+      "task": "Run these trusted validation commands from the repository root: `git status -sb` and `git diff --check`. Report pass/fail/deferred per command with cwd, important output, and failure bucket. Do not edit, install, publish, deploy, delete, or run network commands."
     },
     {
       "id": "final-proof",
@@ -25,7 +25,7 @@
       "after": [
         "validation-proof"
       ],
-      "task": "Summarize observed command results, deferred commands, failure buckets, and residual risk. If validation-proof failed, was empty, or returned needs-command-scope, preserve that as the decision instead of inventing proof."
+      "task": "Summarize observed command results, deferred commands, failure buckets, and residual risk. Use only observed validation-proof output when summarizing command results."
     }
   ],
   "limits": {

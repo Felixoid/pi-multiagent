@@ -33,7 +33,6 @@ export function buildStepFinalArtifact(input: StepFinalArtifactInput): string {
 		`thinking: ${input.step.agent.thinking ?? "inherit"}`,
 		`effectiveTools: ${input.step.agent.tools.length > 0 ? input.step.agent.tools.join(", ") : "none"}`,
 		`extensionTools: ${input.step.agent.extensionTools.length > 0 ? input.step.agent.extensionTools.map((tool) => tool.name).join(", ") : "none"}`,
-		`mutationScope: ${input.step.mutationScope ?? "none"}`,
 		`cwd: ${input.step.cwd ?? "default"}`,
 		`needs: ${input.step.needs.length > 0 ? input.step.needs.join(", ") : "none"}`,
 		`after: ${input.step.after.length > 0 ? input.step.after.join(", ") : "none"}`,

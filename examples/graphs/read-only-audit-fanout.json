@@ -14,7 +14,7 @@
       "agent": {
         "ref": "package:scout"
       },
-      "task": "Map the requested audit scope, relevant files, public contracts, tests, docs, examples, and unknowns. If no concrete audit question, affected surface, stop condition, or expected output fields were copied in, return NEEDS-SCOPE without broad repo search. Do not edit or run commands. Return paths, confirmed facts, unknowns, and recommended audit lanes."
+      "task": "Map the requested audit scope, relevant files, public contracts, tests, docs, examples, and unknowns. Do not edit or run commands. Return paths, confirmed facts, unknowns, and recommended audit lanes."
     },
     {
       "id": "contract-audit",

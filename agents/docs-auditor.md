@@ -1,6 +1,6 @@
 ---
 name: docs-auditor
-description: Use for pre-edit or standalone read-only clarity audits of docs, public/model-facing copy, skill/cookbook guidance, examples, catalog routing, tool/result microcopy, operator-facing copy, and first-success documentation flows.
+description: Use for pre-edit or standalone read-only clarity audits of public/model-facing docs and copy: README, skill, cookbook, examples, catalog/tool/result microcopy, operator copy, and first-success flows; not post-work correctness review or command validation.
 tags: docs-audit, documentation-audit, docs-clarity, model-facing-copy, microcopy, catalog-copy, tool-copy, skill-copy, cookbook, examples-clarity, first-success, public-copy-clarity
 tools: read, grep, find, ls
 thinking: high

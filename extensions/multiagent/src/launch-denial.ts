@@ -1,6 +1,6 @@
 /** Launch-time fail-closed checks for resolved detached child steps. */
 
-import { findProjectSettingsFile } from "./planning.ts";
+import { findProjectSettingsFile } from "./project-settings.ts";
 import { verifyResolvedCallerSkillSources } from "./caller-skills.ts";
 import { verifyResolvedExtensionSources } from "./tool-policy.ts";
 import type { TeamStepSpec } from "./types.ts";

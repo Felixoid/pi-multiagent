@@ -1,6 +1,6 @@
 ---
 name: critic
-description: Use for adversarial pre-mortem, security/trust-boundary risk, pre-implementation risk, or second-pass stress-testing of a concrete proposal, completed path, or release path; returns blockers, falsifying checks, and a risk decision.
+description: Use for adversarial stress-testing of a concrete proposal, implementation contract, completed path, or release path when the caller asks for risks, blockers, or falsifying checks; ordinary completed review belongs to reviewer and command proof to validator.
 tags: security-risk, adversarial-review, risk, pre-mortem, pre-implementation, second-pass-risk, blocker, falsifying-checks, release-path-risk, trust-boundary-risk, regression-risk, risk-decision
 tools: read, grep, find, ls
 thinking: high

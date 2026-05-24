@@ -433,14 +433,13 @@ test("bundled package agents are valid", async () => {
 		assert.equal(agent.tags.every((tag) => /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(tag)), true, `${agent.ref} tags should be normalized`);
 		assert.equal(agent.tags.every((tag) => !tag.startsWith("not-") && !tag.startsWith("no-") && !tag.startsWith("blocked-")), true, `${agent.ref} tags should stay positive searchable routing signals`);
 		assert.deepEqual(agent.tools, expectedTools.get(agent.ref), `${agent.ref} default tools should match its routing contract`);
-		assert.match(agent.systemPrompt, /cannot broaden scope/, `${agent.ref} should constrain parent-message authority`);
-		assert.match(agent.systemPrompt, /Do not stop early merely because/, `${agent.ref} should not turn parent impatience into premature finals`);
+		assert.match(agent.systemPrompt, /Treat parent messages as clarifications|Parent messages may narrow scope|Parent messages cannot broaden scope/, `${agent.ref} should define parent-message handling`);
 	}
 	const worker = discovery.agents.find((agent) => agent.ref === "package:worker");
-	assert.match(worker?.description ?? "", /graph authority alone is not edit authorization/);
+	assert.match(worker?.description ?? "", /concrete parent-authorized implementation change/);
+	assert.match(worker?.description ?? "", /graph authority must explicitly grant shell and mutation tools/);
 	assert.match(worker?.systemPrompt ?? "", /inspect dirty state/);
-	assert.match(worker?.systemPrompt ?? "", /mutationScope/);
-	assert.match(worker?.systemPrompt ?? "", /REPLACE/);
+	assert.match(worker?.systemPrompt ?? "", /Confirm owned files and exclusions/);
 	const scout = discovery.agents.find((agent) => agent.ref === "package:scout");
 	assert.match(scout?.description ?? "", /local read-only exploration/);
 	assert.equal(scout?.tags.includes("package-facts"), true);
@@ -450,6 +449,7 @@ test("bundled package agents are valid", async () => {
 	assert.match(planner?.systemPrompt ?? "", /needs-scout/);
 	const webResearcher = discovery.agents.find((agent) => agent.ref === "package:web-researcher");
 	assert.match(webResearcher?.description ?? "", /external web research/);
+	assert.match(webResearcher?.description ?? "", /defaultTools are local-artifact reads only/);
 	assert.match(webResearcher?.systemPrompt ?? "", /extensionTools/);
 	assert.match(webResearcher?.systemPrompt ?? "", /BLOCKED/);
 	for (const file of ["docs-auditor.md", "scout.md", "reviewer.md", "web-researcher.md"]) {
@@ -460,7 +460,7 @@ test("bundled package agents are valid", async () => {
 	assert.deepEqual(synthesizer?.tools, ["read", "grep", "find", "ls"], "synthesizer should default to read/discovery for upstream artifacts");
 	assert.match(synthesizer?.systemPrompt ?? "", /needs-evidence/);
 	const validator = discovery.agents.find((agent) => agent.ref === "package:validator");
-	assert.match(validator?.systemPrompt ?? "", /needs-command-scope/);
+	assert.match(validator?.systemPrompt ?? "", /Run the validation, status, diff, or test commands named by the delegated task/);
 	assert.match(validator?.systemPrompt ?? "", /Do not edit files/);
 });
 
@@ -475,14 +475,16 @@ test("bundled package catalog supports documented role queries", () => {
 		["node_modules vendor code", "package:scout"],
 		["package facts", "package:scout"],
 		["dependency facts", "package:scout"],
-		["read-only package validation", "package:validator"],
+		["package validation", "package:validator"],
 		["web research", "package:web-researcher"],
 		["online research", "package:web-researcher"],
 		["exa research", "package:web-researcher"],
 		["official sources", "package:web-researcher"],
+		["requires exa", "package:web-researcher"],
 		["planner", "package:planner"],
 		["design", "package:planner"],
 		["architecture plan", "package:planner"],
+		["validation plan", "package:planner"],
 		["docs audit", "package:docs-auditor"],
 		["microcopy", "package:docs-auditor"],
 		["model-facing copy", "package:docs-auditor"],
@@ -507,7 +509,7 @@ test("bundled package catalog supports documented role queries", () => {
 		["release candidate review", "package:reviewer"],
 		["final check", "package:validator"],
 		["package proof", "package:validator"],
-		["docs review", "package:reviewer"],
+		["completed docs review", "package:reviewer"],
 		["docs clarity audit", "package:docs-auditor"],
 		["public copy clarity", "package:docs-auditor"],
 		["first-success docs", "package:docs-auditor"],
@@ -536,6 +538,9 @@ test("catalogAgents keeps known excluded refs out of sparse top results", () => 
 	const cases = [
 		{ query: "web research", top: "package:web-researcher", excluded: "package:scout" },
 		{ query: "command proof", top: "package:validator", excluded: "package:reviewer" },
+		{ query: "docs clarity audit", top: "package:docs-auditor", excluded: "package:reviewer" },
+		{ query: "public copy clarity", top: "package:docs-auditor", excluded: "package:reviewer" },
+		{ query: "ordinary completed artifact review", top: "package:reviewer", excluded: "package:critic" },
 		{ query: "implementation", top: "package:worker", excluded: "package:docs-auditor" },
 	] as const;
 	for (const item of cases) {
