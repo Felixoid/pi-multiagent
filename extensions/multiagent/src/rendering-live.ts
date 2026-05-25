@@ -49,16 +49,6 @@ export class AgentTeamLiveRunsWidget implements Component {
 	}
 }
 
-export function formatAgentTeamLiveStatus(details: AgentTeamDetails[]): string {
-	const live = liveRunDetails(details);
-	if (live.length === 0) return "";
-	const issues = live.filter(runNeedsAttention).length;
-	if (issues > 0) return `${live.length} ${plural(live.length, "run", "runs")}, ${issues} ${plural(issues, "issue", "issues")}`;
-	const working = live.reduce((sum, item) => sum + (item.run?.counts.running ?? 0), 0);
-	if (working > 0) return `${working} ${plural(working, "lane", "lanes")}`;
-	return `${live.length} ${plural(live.length, "run", "runs")}`;
-}
-
 function formatHumanLiveRunsWidget(details: AgentTeamDetails[], theme: Theme): string[] {
 	const live = liveRunDetails(details);
 	if (live.length === 0) return [];
@@ -267,8 +257,4 @@ export function truncate(text: string, maxChars: number): string {
 	const normalized = text.replace(/\s+/g, " ").trim();
 	if (normalized.length <= maxChars) return normalized;
 	return `${normalized.slice(0, Math.max(0, maxChars - 3))}...`;
-}
-
-function plural(count: number, one: string, many: string): string {
-	return count === 1 ? one : many;
 }

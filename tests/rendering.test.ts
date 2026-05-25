@@ -1,13 +1,25 @@
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { formatAgentTeamLiveStatus, formatAgentTeamNoticeText, renderAgentTeamCall, renderAgentTeamLiveRunsWidget, renderAgentTeamNoticeMessage, renderAgentTeamResult } from "../extensions/multiagent/src/rendering.ts";
+import { formatAgentTeamNoticeText, renderAgentTeamCall, renderAgentTeamLiveRunsWidget, renderAgentTeamNoticeMessage, renderAgentTeamResult } from "../extensions/multiagent/src/rendering.ts";
 import type { AgentTeamDetails, RunSnapshot, StepSnapshot, StepStatus } from "../extensions/multiagent/src/types.ts";
 
 const theme = {
 	fg: (_color: string, text: string) => text,
 	bold: (text: string) => text,
 };
+const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+
+test("production code has no agent_team live footer status path", () => {
+	for (const file of productionFiles(join(packageRoot, "extensions", "multiagent"))) {
+		const source = readFileSync(file, "utf8");
+		assert.doesNotMatch(source, /\bctx\.ui\.setStatus\b/, `${file}: use agent_team:live widget and notices, not Pi's shared footer status row`);
+		assert.doesNotMatch(source, /\bformatAgentTeamLiveStatus\b/, `${file}: live footer status formatter should stay removed`);
+	}
+});
 
 test("renderAgentTeamCall summarizes detached actions", () => {
 	assert.match(renderAgentTeamCall({ action: "start", graph: { objective: "x", steps: [{ id: "one", agent: { system: "x" }, task: "x" }] } }, theme, undefined).render(120).join("\n"), /launch 1 step/);
@@ -115,7 +127,6 @@ test("renderAgentTeamLiveRunsWidget distinguishes multiple live runs", () => {
 	assert.match(rendered, /! Release proof 1\/2 complete  1 failed  1 working validator failed: gate failed/);
 	assert.match(rendered, /> TUI rewrite 2\/3 complete  1 working reviewer writing/);
 	assert.match(rendered, /> Docs audit 0\/1 complete  1 working docs-auditor writing/);
-	assert.equal(formatAgentTeamLiveStatus([first, second, third]), "3 runs, 1 issue");
 });
 
 test("renderAgentTeamLiveRunsWidget fits narrow widths", () => {
@@ -321,6 +332,17 @@ test("renderAgentTeamResult keeps cleanup failure distinct from evidence deletio
 	assert.match(plain, /cleanup cleanup-artifacts-failed/);
 	assert.doesNotMatch(plain, /evidence deleted/);
 });
+
+function productionFiles(root: string): string[] {
+	const entries = readdirSync(root, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name));
+	const files: string[] = [];
+	for (const entry of entries) {
+		const path = join(root, entry.name);
+		if (entry.isDirectory()) files.push(...productionFiles(path));
+		else if (entry.isFile() && path.endsWith(".ts") && statSync(path).isFile()) files.push(path);
+	}
+	return files;
+}
 
 function details(action: AgentTeamDetails["action"], fields: Partial<AgentTeamDetails>): AgentTeamDetails {
 	return { kind: "agent_team", action, ok: true, diagnostics: [], error: undefined, library: undefined, catalog: [], extensionTools: [], run: undefined, cursor: undefined, events: [], steps: [], outputs: [], wait: undefined, message: undefined, cleanup: undefined, notice: undefined, ...fields };

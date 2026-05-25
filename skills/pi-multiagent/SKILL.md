@@ -255,6 +255,7 @@ The file must be a regular relative `.json` file inside cwd, max 256 KiB. Symlin
 
 - `start` returns a short process-local `runId` such as `r1`.
 - Pushed notices are compact untrusted human receipts and omit the full child transcript.
+- Interactive Pi live progress belongs to the `agent_team:live` widget and pushed notices; `agent_team` does not write run/lane counts to Pi's shared footer status row.
 - `run_status` gives compact state, sink artifacts, all terminal step artifact metadata, bounded task previews, cwd/upstream artifact references, diagnostics, effective tools/model lane, and optional structured wait receipt. In JSON/API/headless use, `run_status {runId, waitSeconds}` is the fallback when pushed notices are unavailable.
 - `step_result` is the one-step microscope.
 - Assistant text previews require `preview:true`; raw events require `debugEvents:true`.

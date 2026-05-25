@@ -21,7 +21,7 @@ import {
 } from "./rendering-live.ts";
 import type { AgentTeamDetails, CleanupReceipt, RunSnapshot } from "./types.ts";
 
-export { AgentTeamLiveRunsWidget, formatAgentTeamLiveStatus, renderAgentTeamLiveRunsWidget } from "./rendering-live.ts";
+export { AgentTeamLiveRunsWidget, renderAgentTeamLiveRunsWidget } from "./rendering-live.ts";
 
 const OBJECTIVE_CHARS = 76;
 const VALUE_CHARS = 88;

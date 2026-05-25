@@ -55,9 +55,9 @@ class FakeChild extends EventEmitter {
 const tools: RegisteredTool[] = [];
 const flagValues = new Map<string, boolean | string>();
 const customMessages: { message: unknown; options: unknown }[] = [];
-const statusValues: (string | undefined)[] = [];
+const footerStatusWrites: { sessionId: string; id: string; value: string | undefined }[] = [];
 const widgetValues: unknown[] = [];
-const uiEvents: { sessionId: string; kind: "status" | "widget"; value: unknown }[] = [];
+const uiEvents: { sessionId: string; kind: "widget"; value: unknown }[] = [];
 const delayedNoticeChildren: FakeChild[] = [];
 const tasks: string[] = [];
 const shutdownHandlers: ShutdownHandler[] = [];
@@ -145,8 +145,7 @@ assert.equal(step_result.details.outputs[0]?.text, "smoke-ok");
 assert.equal(tasks[0]?.includes("smoke task"), true);
 assert.equal(customMessages.length, 1);
 assertNotice(customMessages[0]);
-assert.equal(statusValues.includes("1 lane"), true);
-assert.equal(statusValues.at(-1), undefined);
+assert.equal(footerStatusWrites.length, 0);
 assert.equal(widgetValues.some((value) => value !== undefined), true);
 
 const cleanup = await tool.execute("smoke-cleanup", { action: "cleanup", runId }, undefined, undefined, makeCtx(true));
@@ -192,8 +191,7 @@ const otherHoldStarted = await tool.execute(
 const otherHoldRunId = otherHoldStarted.details.run?.runId ?? "";
 assert.match(otherHoldRunId, /^r[1-9][0-9]{0,6}$/);
 assert.notEqual(otherHoldRunId, holdRunId);
-assert.equal(await waitForSessionStatusAfter("other-session", otherUiEventStart), "1 lane");
-const otherWidgetText = latestSessionWidgetText("other-session");
+const otherWidgetText = await waitForSessionWidgetTextAfter("other-session", otherUiEventStart, /other session smoke/);
 assert.match(otherWidgetText, /other session smoke/);
 assert.doesNotMatch(otherWidgetText, /shutdown smoke|2 runs/);
 await shutdownHandlers[0]({ reason: "other session" }, makeCtx(true, async () => false, packageRoot, "other-session"));
@@ -243,8 +241,8 @@ for (let attempt = 0; !delayedNoticeTerminal.details.run?.terminal && attempt < 
 }
 assert.equal(delayedNoticeTerminal.details.run?.status, "succeeded");
 assert.equal(delayedNoticeTerminal.details.outputs[0]?.text, "notice-ok");
-assert.equal(uiEvents.slice(inactiveTerminalClearStart).some((event) => event.sessionId === "notice-session-a" && event.kind === "widget" && event.value === undefined), true);
-assert.equal(uiEvents.slice(inactiveTerminalClearStart).some((event) => event.sessionId === "notice-session-a" && event.kind === "status" && event.value === undefined), true);
+assert.equal(uiEvents.slice(inactiveTerminalClearStart).some((event) => event.sessionId === "notice-session-a" && event.value === undefined), true);
+assert.equal(footerStatusWrites.length, 0);
 const delayedNoticeCleanup = await tool.execute("smoke-cleanup-delayed-notice", { action: "cleanup", runId: delayedNoticeRunId }, undefined, undefined, noticeCtx());
 assert.equal(delayedNoticeCleanup.details.cleanup?.runId, delayedNoticeRunId);
 const freshUiEventStart = uiEvents.length;
@@ -257,7 +255,9 @@ const freshStarted = await tool.execute(
 );
 const freshRunId = freshStarted.details.run?.runId ?? "";
 assert.match(freshRunId, /^r[1-9][0-9]{0,6}$/);
-assert.equal(await waitForSessionStatusAfter("notice-session-a", freshUiEventStart), "1 lane");
+const freshWidgetText = await waitForSessionWidgetTextAfter("notice-session-a", freshUiEventStart, /fresh notice session smoke/);
+assert.match(freshWidgetText, /fresh notice session smoke/);
+assert.equal(footerStatusWrites.length, 0);
 await tool.execute("smoke-cancel-fresh-after-inactive-terminal", { action: "cancel", runId: freshRunId, reason: "fresh cleanup" }, undefined, undefined, noticeCtx());
 let freshCanceled = await tool.execute("smoke-run_status-fresh-0", { action: "run_status", runId: freshRunId }, undefined, undefined, noticeCtx());
 for (let attempt = 0; !freshCanceled.details.run?.terminal && attempt < 20; attempt += 1) {
@@ -267,6 +267,7 @@ for (let attempt = 0; !freshCanceled.details.run?.terminal && attempt < 20; atte
 assert.equal(freshCanceled.details.run?.status, "canceled");
 const freshCleanup = await tool.execute("smoke-cleanup-fresh-after-inactive-terminal", { action: "cleanup", runId: freshRunId }, undefined, undefined, noticeCtx());
 assert.equal(freshCleanup.details.cleanup?.runId, freshRunId);
+assert.equal(footerStatusWrites.length, 0);
 
 function spawnProcess(_command: string, args: string[], spawnOptions: SpawnOptions): ChildProcessWithoutNullStreams {
 	assert.equal(args.includes("smoke task"), false);
@@ -315,9 +316,8 @@ function makeCtx(hasUI: boolean, confirm: () => Promise<boolean> = async () => f
 				widgetValues.push(value);
 				uiEvents.push({ sessionId: getSessionId(), kind: "widget", value });
 			},
-			setStatus(_id, value) {
-				statusValues.push(value);
-				uiEvents.push({ sessionId: getSessionId(), kind: "status", value });
+			setStatus(id, value) {
+				footerStatusWrites.push({ sessionId: getSessionId(), id, value });
 			},
 		},
 	};
@@ -331,19 +331,21 @@ function finishDelayedNoticeChild(text: string): void {
 	child.close(0);
 }
 
-async function waitForSessionStatusAfter(sessionId: string, afterIndex: number): Promise<string | undefined> {
+async function waitForSessionWidgetTextAfter(sessionId: string, afterIndex: number, expected: RegExp): Promise<string> {
 	for (let attempt = 0; attempt < 20; attempt += 1) {
-		const event = uiEvents.slice(afterIndex).find((item) => item.sessionId === sessionId && item.kind === "status" && typeof item.value === "string");
-		if (event && typeof event.value === "string") return event.value;
+		for (const event of uiEvents.slice(afterIndex).reverse()) {
+			if (event.sessionId !== sessionId) continue;
+			const text = renderWidgetValue(event.value);
+			if (expected.test(text)) return text;
+		}
 		await new Promise((resolve) => setTimeout(resolve, 5));
 	}
-	return undefined;
+	return "";
 }
 
-function latestSessionWidgetText(sessionId: string): string {
-	const event = [...uiEvents].reverse().find((item) => item.sessionId === sessionId && item.kind === "widget" && typeof item.value === "function");
-	if (!event || typeof event.value !== "function") return "";
-	const component = event.value({ requestRender() {} }, { fg: (_color: string, text: string) => text, bold: (text: string) => text });
+function renderWidgetValue(value: unknown): string {
+	if (typeof value !== "function") return "";
+	const component = value({ requestRender() {} }, { fg: (_color: string, text: string) => text, bold: (text: string) => text });
 	return component.render(120).join("\n");
 }
 

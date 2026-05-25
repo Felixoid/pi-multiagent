@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.9.5 - 2026-05-25
+
+- Removed `agent_team` live run/lane counts from Pi's shared footer status row; live progress remains in the `agent_team:live` widget and pushed notices.
+
 ## 0.9.4 - 2026-05-24
 
 - Added a complete `/skill:pi-multiagent` first-success `graphFile` recipe and separated tool-call actions from `graph.steps[]` object shape so `step` is not presented as an `agent_team` action.
