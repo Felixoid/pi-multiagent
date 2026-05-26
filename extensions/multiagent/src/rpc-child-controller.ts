@@ -55,6 +55,7 @@ export class RpcChildController {
 		const args = buildPiArgs(this.options.agent, this.options.defaults, this.options.promptPath);
 		const invocation = getPiInvocation(args, this.options.cwd);
 		this.child = this.spawnProcess(invocation.command, invocation.args, { cwd: this.options.cwd, shell: false, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
+		this.child.unref?.();
 		this.options.onEvent({ type: "rpc", label: "spawn", preview: "child spawned", status: "running" });
 		this.listeners.attach(this.child, { onRecord: (record) => this.handleRecord(record), onStdoutError: (message) => this.handleStdoutError(message), onStderrData: (text) => this.appendStderr(text), onStderrError: (error) => this.handleStderrError(error), onStdinError: (error) => this.handleStdinError(error), onChildError: (error) => this.fail("failed", `Subagent process error: ${error.message}`), onExit: () => this.handleExit(), onClose: () => this.handleClose() });
 		this.timeoutTimer = setTimeout(() => this.fail("timed_out", this.recoveringOverflow ? `context-overflow-unrecovered: timeoutSecondsPerStep=${this.options.limits.timeoutSecondsPerStep} exceeded before a valid post-recovery assistant final.` : `timeoutSecondsPerStep=${this.options.limits.timeoutSecondsPerStep} exceeded.`, this.recoveringOverflow ? "context-overflow-unrecovered" : "timed_out"), this.options.limits.timeoutSecondsPerStep * 1000);
