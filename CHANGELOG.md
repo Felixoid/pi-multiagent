@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Added public contributor guidance, GitHub PR/issue templates, and README contribution workflow notes for design-gated architecture changes, scoped PRs, release ownership, and validation expectations.
+- Trimmed the start graph-body repair set, renamed to `START_GRAPH_BODY_REPAIR_FIELDS`, to `objective`, `steps`, `limits`, `authority` so the "move under graph" repair hint no longer suggests relocating fields that `GraphSchema` rejects under `additionalProperties:false` (`agents`, `synthesis`, `outputContract`, `callerSkills`).
 
 ## 0.9.5 - 2026-05-25
 
