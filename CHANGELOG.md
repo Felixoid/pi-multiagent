@@ -3,7 +3,8 @@
 ## Unreleased
 
 - Added public contributor guidance, GitHub PR/issue templates, and README contribution workflow notes for design-gated architecture changes, scoped PRs, release ownership, and validation expectations.
-- Fixed `pi -p` hanging after terminal output by unrefing the spawned `RpcChildController` child process handle, matching the existing unrefed timeout timers.
+- Unref spawned child process handles so print-mode parent processes are not kept alive after terminal output.
+- Contracted `start` preflight repair copy to suggest moving only current graph body fields (`objective`, `steps`, `limits`, `authority`) under `graph`; unsupported extra properties now fall through to strict schema validation.
 
 ## 0.9.5 - 2026-05-25
 
