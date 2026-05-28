@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added public contributor guidance, GitHub PR/issue templates, and README contribution workflow notes for design-gated architecture changes, scoped PRs, release ownership, and validation expectations.
+
 ## 0.9.5 - 2026-05-25
 
 - Removed `agent_team` live run/lane counts from Pi's shared footer status row; live progress remains in the `agent_team:live` widget and pushed notices.

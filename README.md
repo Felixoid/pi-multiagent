@@ -274,6 +274,14 @@ PI_MULTIAGENT_REAL_SMOKE=1 PI_MULTIAGENT_REAL_SMOKE_TIMEOUT_MS=180000 pnpm run s
 
 For major rewrites or live integration changes, static gates and toy smokes are not enough. Run a meaningful articulated graph, supervise it with pushed notices, compact `run_status`, bounded `run_status.waitSeconds`, targeted `step_result`, and `debugEvents:true` only for package debugging. Inspect or preserve terminal artifacts before cleanup. A stalled, canceled, or final-less serious graph is NEEDS-WORK, not GO.
 
+## Contributing
+
+Small focused bug fixes can be proposed as normal pull requests. Large changes that affect public `agent_team` schema, lifecycle, trust, persistence, scheduling/background execution, mutation behavior, provider/model integration, package-agent semantics, or release flow need a GitHub proposal issue before implementation.
+
+Contributor PRs should start from current `origin/main`, stay scoped, preserve the current public contract unless an accepted proposal changes it, avoid package version bumps, keep unreleased notes under `CHANGELOG.md` `## Unreleased`, and include fresh gate output. Release versioning, npm publish, git tags, pushes, and GitHub Releases are maintainer-owned.
+
+See the public contributor guide: <https://github.com/Tiziano-AI/pi-multiagent/blob/main/CONTRIBUTING.md>.
+
 ## Reference
 
 - [`skills/pi-multiagent/SKILL.md`](skills/pi-multiagent/SKILL.md): complete canonical agent-facing invocation and maintenance guide.

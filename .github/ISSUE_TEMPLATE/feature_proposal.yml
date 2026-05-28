@@ -1,0 +1,72 @@
+name: Feature proposal
+description: Propose a design before implementing a large pi-multiagent change
+title: "Proposal: "
+labels: [proposal]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this before implementation for changes that affect public API, lifecycle, trust, persistence, scheduling, mutation behavior, provider/model integration, package-agent semantics, or release flow.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: non-goals
+    attributes:
+      label: Non-goals
+      description: What is explicitly out of scope?
+    validations:
+      required: true
+  - type: textarea
+    id: public-api
+    attributes:
+      label: Proposed public API or operator workflow
+      description: Show example JSON, CLI/docs copy, or operator flow.
+    validations:
+      required: true
+  - type: textarea
+    id: lifecycle
+    attributes:
+      label: Lifecycle and failure behavior
+      description: What happens on cancel, reload, crash, timeout, overlap, denial, and terminal failure?
+    validations:
+      required: true
+  - type: textarea
+    id: state
+    attributes:
+      label: State, ownership, and cleanup
+      description: What is stored, where, for how long, and who owns cleanup?
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Authority, trust, cost, and privacy
+      description: Cover tool authority, extension/provider behavior, credentials/secrets, filesystem boundaries, and provider/API cost.
+    validations:
+      required: true
+  - type: textarea
+    id: visibility
+    attributes:
+      label: Visibility and recovery
+      description: How does an operator inspect, stop, recover, audit, or hand off this behavior?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Why not use existing `agent_team` flows, external schedulers, shell scripts, or smaller docs-only guidance?
+    validations:
+      required: true
+  - type: textarea
+    id: minimal-pr
+    attributes:
+      label: Minimal first PR
+      description: What is the smallest safe first slice after this proposal is accepted?
+    validations:
+      required: true
