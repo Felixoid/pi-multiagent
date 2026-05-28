@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.6 - 2026-05-29
+
 - Added public contributor guidance, GitHub PR/issue templates, and README contribution workflow notes for design-gated architecture changes, scoped PRs, release ownership, and validation expectations.
 - Unref spawned child process handles so print-mode parent processes are not kept alive after terminal output.
 - Contracted `start` preflight repair copy to suggest moving only current graph body fields (`objective`, `steps`, `limits`, `authority`) under `graph`; unsupported extra properties now fall through to strict schema validation.
