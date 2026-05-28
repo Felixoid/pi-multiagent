@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Added public contributor guidance, GitHub PR/issue templates, and README contribution workflow notes for design-gated architecture changes, scoped PRs, release ownership, and validation expectations.
+- Fixed `pi -p` hanging after terminal output by unrefing the spawned `RpcChildController` child process handle, matching the existing unrefed timeout timers.
 
 ## 0.9.5 - 2026-05-25
 
