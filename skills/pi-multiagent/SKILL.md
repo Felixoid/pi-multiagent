@@ -116,9 +116,10 @@ Do not point `graphFile` at installed package/example paths such as `../../../ex
 3. Put reusable library sources under `graph.library` for `start`; top-level `library` is for `catalog` only.
 4. Omit `agent.tools` for catalog defaults. Explicit `agent.tools` replaces the catalog profile, then mandatory read/discovery is added. `agent.tools:[]` drops non-read catalog defaults while keeping read/discovery.
 5. Put authority decisions under `graph.authority`; defaults deny filesystem read/discovery, shell, mutation, and explicit extension tools. Project/user/package agents and caller-visible skills are sourced when selected or product-enabled.
-6. Use `needs` for success-gated fan-in and `after` for terminal-evidence fan-in when failed or blocked lanes should still be preserved.
-7. Write each task as a small packet: objective, owned scope, allowed sources/tools, exact commands or files when shell/mutation is granted, output shape, and stop condition.
-8. Use pushed notices as the manager inbox. Use `preview:true` only when bounded assistant text belongs in context, and `debugEvents:true` only for package debugging.
+6. Use optional `steps[].agent.model` or `steps[].agent.thinking` to pin one step's launch lane. Step overrides beat library frontmatter, which beats parent defaults captured at `start`.
+7. Use `needs` for success-gated fan-in and `after` for terminal-evidence fan-in when failed or blocked lanes should still be preserved.
+8. Write each task as a small packet: objective, owned scope, allowed sources/tools, exact commands or files when shell/mutation is granted, output shape, and stop condition.
+9. Use pushed notices as the manager inbox. Use `preview:true` only when bounded assistant text belongs in context, and `debugEvents:true` only for package debugging.
 
 ## Tool profile decision matrix
 
@@ -219,7 +220,7 @@ Catalog default tool profiles are capped by graph authority. If authority strips
 
 Child Pi launches use normal Pi extension discovery for model/provider availability. Ambient trusted extensions may run startup code, provider hooks, tool hooks, and `resources_discover` as normal Pi behavior. Built-in child tools are launched with `--tools`, a callable tool-name allowlist. Extension tools can shadow tool names under normal Pi semantics. Child RPC is unattended: fire-and-forget UI updates are recorded as suppressed non-error activity, while blocking or unknown UI requests fail closed. Child tool errors are preserved in debug events and `lastActivity`, but they do not automatically fail a recovered step.
 
-A child receives the graph objective, its own step prompt/task, explicit upstream dependency evidence, selected tools, explicit `extensionTools`, and product-configured caller skills. It does not receive the parent transcript, parent session, context files, prompt templates, themes, project `SYSTEM.md`, or ambient skill discovery. The effective child model/thinking lane is captured at `start` from agent metadata or the then-active parent defaults and is reported in run snapshots.
+A child receives the graph objective, its own step prompt/task, explicit upstream dependency evidence, selected tools, explicit `extensionTools`, and product-configured caller skills. It does not receive the parent transcript, parent session, context files, prompt templates, themes, project `SYSTEM.md`, or ambient skill discovery. The effective child model/thinking lane is captured at `start` from `steps[].agent.model` or `steps[].agent.thinking`, then agent metadata, then the then-active parent defaults, and is reported in run snapshots.
 
 ## Extension tools
 

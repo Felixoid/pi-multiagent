@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Compile } from "typebox/compile";
 import { AgentTeamSchema } from "../extensions/multiagent/src/schemas.ts";
-import { DEFAULT_MAX_RUN_SECONDS, DEFAULT_NOTIFY_MAX_NOTICES, DEFAULT_NOTIFY_MIN_INTERVAL_SECONDS, DEFAULT_RESULT_PREVIEW_MAX_BYTES, DEFAULT_TERMINAL_RETENTION_SECONDS, DEFAULT_TIMEOUT_SECONDS_PER_STEP, MAX_CLIENT_MESSAGE_ID_CHARS, MAX_MAX_RUN_SECONDS, MAX_PARENT_MESSAGE_CHARS, MAX_PATH_FIELD_CHARS, MAX_RESULT_PREVIEW_BYTES, MAX_RUN_STATUS_WAIT_SECONDS, MAX_STEPS, MAX_TERMINAL_RETENTION_SECONDS, MAX_TEXT_FIELD_CHARS, MAX_TIMEOUT_SECONDS_PER_STEP } from "../extensions/multiagent/src/types.ts";
+import { DEFAULT_MAX_RUN_SECONDS, DEFAULT_NOTIFY_MAX_NOTICES, DEFAULT_NOTIFY_MIN_INTERVAL_SECONDS, DEFAULT_RESULT_PREVIEW_MAX_BYTES, DEFAULT_TERMINAL_RETENTION_SECONDS, DEFAULT_TIMEOUT_SECONDS_PER_STEP, MAX_CLIENT_MESSAGE_ID_CHARS, MAX_MAX_RUN_SECONDS, MAX_PARENT_MESSAGE_CHARS, MAX_PATH_FIELD_CHARS, MAX_RESULT_PREVIEW_BYTES, MAX_RUN_STATUS_WAIT_SECONDS, MAX_SHORT_TEXT_FIELD_CHARS, MAX_STEPS, MAX_TERMINAL_RETENTION_SECONDS, MAX_TEXT_FIELD_CHARS, MAX_TIMEOUT_SECONDS_PER_STEP } from "../extensions/multiagent/src/types.ts";
 
 const validate = Compile(AgentTeamSchema);
 
@@ -52,6 +52,9 @@ test("AgentTeamSchema preserves public field bounds and defaults", () => {
 	assert.equal(stepSchema.cwd.maxLength, MAX_PATH_FIELD_CHARS);
 	assert.equal(stepAgent.system.maxLength, MAX_TEXT_FIELD_CHARS);
 	assert.equal(stepAgent.ref.maxLength, 72);
+	assert.equal(stepAgent.model.maxLength, MAX_SHORT_TEXT_FIELD_CHARS);
+	assert.match(stepAgent.model.description, /Overrides library agent frontmatter model/);
+	assert.match(stepAgent.thinking.description, /Overrides library agent frontmatter thinking/);
 	assert.match(root.action.description, /Action decision/);
 	assert.match(root.library.properties.sources.description, /Catalog-only sources/);
 	assert.match(graphSchema.properties.library.properties.sources.description, /Start-only library sources/);
@@ -67,6 +70,9 @@ test("AgentTeamSchema keeps start graph pure and bounded", () => {
 	assert.equal(validate.Check({ action: "start", graph: { ...graph, steps: [{ id: "bad_id", agent: { system: "x" }, task: "x" }] } }), false);
 	assert.equal(validate.Check({ action: "start", graph: { ...graph, authority: { allowShellTools: true, allowMutationTools: true } } }), true);
 	assert.equal(validate.Check({ action: "start", graph: { ...graph, steps: [{ id: "one", agent: { system: "x", tools: ["exa_search"] }, task: "x" }] } }), false);
+	assert.equal(validate.Check({ action: "start", graph: { ...graph, steps: [{ id: "one", agent: { system: "x", model: "provider/model", thinking: "high" }, task: "x" }] } }), true);
+	assert.equal(validate.Check({ action: "start", graph: { ...graph, steps: [{ id: "one", agent: { system: "x", thinking: "inherit" }, task: "x" }] } }), false);
+	assert.equal(validate.Check({ action: "start", graph: { ...graph, steps: [{ id: "one", agent: { system: "x", thinking: "sideways" }, task: "x" }] } }), false);
 	assert.equal(validate.Check({ action: "start", graph: { ...graph, synthesis: { task: "old" } } }), false);
 	assert.equal(validate.Check({ action: "start", graph, options: { maxRunSeconds: 1.5 } }), false);
 	assert.equal(validate.Check({ action: "start", graph, options: { terminalRetentionSeconds: 1.5 } }), false);

@@ -94,14 +94,18 @@ const ExtensionToolGrantSchema = Type.Object(
 	StrictObjectOptions,
 );
 
+const STEP_THINKING_LEVEL_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+
 const StepAgentSchema = Type.Object(
 	{
 		system: Type.Optional(nonEmptyText("Inline step-agent system prompt. Set exactly one of system or ref; runtime planning rejects missing or mixed bindings.")),
 		ref: Type.Optional(sourceQualifiedLibraryRef('Source-qualified library ref such as "package:reviewer". Set exactly one of system or ref; runtime planning rejects missing or mixed bindings.')),
 		tools: Type.Optional(Type.Array(StringEnum(BUILTIN_CHILD_TOOL_NAMES), { description: "Explicit built-in child tool profile. Every child keeps at least the read/discovery suite, so omitted or [] resolves to read, grep, find, and ls and requires graph.authority.allowFilesystemRead:true. For library agents, explicit tools replace the whole catalog defaultTools profile; mandatory read/discovery is then added. It does not append. Any read/discovery primitive expands to the full read, grep, find, ls suite. package:validator requires effective bash; package:worker requires effective edit or write.", maxItems: 24 })),
 		extensionTools: Type.Optional(Type.Array(ExtensionToolGrantSchema, { description: "Explicit parent-active callable extension tool grants for this step.", maxItems: 24 })),
+		model: Type.Optional(nonEmptyText("Launch this step with a concrete Pi model id. Overrides library agent frontmatter model and parent session default for this step only.", MAX_SHORT_TEXT_FIELD_CHARS)),
+		thinking: Type.Optional(StringEnum(STEP_THINKING_LEVEL_VALUES, { description: "Launch this step with a concrete thinking level. Overrides library agent frontmatter thinking and parent session default for this step only." })),
 	},
-	{ ...StrictObjectOptions, description: "Step-local inline agent or source-qualified library agent. Set exactly one of system or ref. No invocation-local agent registry is used." },
+	{ ...StrictObjectOptions, description: "Step-local inline agent or source-qualified library agent. Set exactly one of system or ref. Optional model/thinking override library frontmatter and parent defaults." },
 );
 
 const StepSchema = Type.Object(

@@ -86,6 +86,40 @@ test("resolveDetachedGraph rejects missing or mixed step agent binding", async (
 	assert.deepEqual(mixed.steps, []);
 });
 
+test("resolveDetachedGraph applies step model and thinking overrides before library metadata and parent defaults", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-model-override-${Date.now()}`), { recursive: true });
+	const reviewer = { ...packageAgent("reviewer", ["read"]), model: "frontmatter/model", thinking: "medium" as const };
+	const graph = resolveDetachedGraph(
+		{
+			objective: "plan",
+			authority: { allowFilesystemRead: true },
+			steps: [
+				{ id: "library", agent: { ref: "package:reviewer", model: "step/model", thinking: "high" }, task: "Inspect." },
+				{ id: "inline", agent: { system: "Summarize.", model: "inline/model", thinking: "off" }, task: "Summarize." },
+			],
+		},
+		[reviewer],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(graph.diagnostics.some((item) => item.severity === "error"), false);
+	assert.equal(graph.steps[0]?.agent.model, "step/model");
+	assert.equal(graph.steps[0]?.agent.thinking, "high");
+	assert.equal(graph.steps[1]?.agent.model, "inline/model");
+	assert.equal(graph.steps[1]?.agent.thinking, "off");
+
+	const inherited = resolveDetachedGraph(
+		{ objective: "inherit", authority: { allowFilesystemRead: true }, steps: [{ id: "library", agent: { ref: "package:reviewer" }, task: "Inspect." }] },
+		[reviewer],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(inherited.steps[0]?.agent.model, "frontmatter/model");
+	assert.equal(inherited.steps[0]?.agent.thinking, "medium");
+});
+
 test("resolveDetachedGraph inherits library defaults and caps them by authority", async () => {
 	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-${Date.now()}`), { recursive: true });
 	const graph = resolveDetachedGraph(

@@ -494,6 +494,26 @@ test("run snapshots expose the launch-time child model lane", async () => {
 	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
+test("step model and thinking override parent defaults at child launch", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-step-model-lane-${Date.now()}`), { recursive: true });
+	let spawnedArgs: string[] = [];
+	const harness = rpcHarness("auto", (args) => { spawnedArgs = args; });
+	const options = makeOptions(root, harness.spawn, { defaults: { model: "parent/model", thinking: "medium" } });
+	const started = await runAgentTeam(graph([{ id: "one", agent: { system: "Return ok.", model: "step/model", thinking: "high" }, task: "Return ok." }]), options);
+	const runId = started.details.run?.runId ?? "";
+	assert.equal(started.details.steps[0]?.model, "step/model");
+	assert.equal(started.details.steps[0]?.thinking, "high");
+	assert.match(started.content[0].text, /model=step\/model/);
+	assert.match(started.content[0].text, /thinking=high/);
+	assert.equal(spawnedArgs[spawnedArgs.indexOf("--model") + 1], "step/model");
+	assert.equal(spawnedArgs[spawnedArgs.indexOf("--thinking") + 1], "high");
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "succeeded");
+	assert.equal(terminal.details.steps[0]?.model, "step/model");
+	assert.equal(terminal.details.steps[0]?.thinking, "high");
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
 test("product-configured subagent skills affect launch args and child prompt", async () => {
 	const parent = await mkdir(join(tmpdir(), `pi-multiagent-skill-launch-${Date.now()}`), { recursive: true });
 	const root = await mkdir(join(parent, "workspace"), { recursive: true });

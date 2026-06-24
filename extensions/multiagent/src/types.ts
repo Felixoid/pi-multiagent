@@ -234,6 +234,8 @@ export interface ResolvedExtensionToolGrant {
 interface GraphStepAgentSharedInput {
 	tools?: string[];
 	extensionTools?: ExtensionToolGrantSpec[];
+	model?: string;
+	thinking?: Exclude<ThinkingLevel, "inherit">;
 }
 
 export interface GraphStepAgentInput extends GraphStepAgentSharedInput {
