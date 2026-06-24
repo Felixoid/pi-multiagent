@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added per-step `model` and `thinking` graph overrides, letting `steps[].agent` pin a child launch lane before library frontmatter and parent start-time defaults.
+
 ## 0.9.6 - 2026-05-29
 
 - Added public contributor guidance, GitHub PR/issue templates, and README contribution workflow notes for design-gated architecture changes, scoped PRs, release ownership, and validation expectations.
