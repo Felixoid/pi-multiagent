@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.8 - 2026-07-04
+
 - Made child Pi sessions mandatory and observable: child launches now use normal persistent Pi sessions with deterministic names/session-dir propagation, `run_status`/`step_result`/artifacts report child session metadata, progress watchdog diagnostics preserve stalled-child evidence, failed steps retain safe partial evidence, read-only idempotent transport failures retry once only when no child/output/message evidence exists, and parent-message queue observations distinguish accepted, queued, consumed, and no-next-turn states.
 - Orthogonalized public documentation so README is a simple human/operator front door, while detailed invocation contracts live in `/skill:pi-multiagent` and graph choreography lives in the cookbook/examples.
 - Reworked public-doc validation to enforce documentation ownership boundaries instead of fossilized README runtime fragments.
