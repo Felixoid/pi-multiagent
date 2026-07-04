@@ -5,32 +5,38 @@ import type { StepState } from "./detached-state.ts";
 import type { StepActivityTracker } from "./step-activity.ts";
 import { childToolNames } from "./tool-policy.ts";
 import type { AgentInvocationDefaults, RunSnapshot, RunStatus, StepArtifactReference, StepSnapshot, StepStatus, TeamStepSpec } from "./types.ts";
+import { effectiveAgentInvocation } from "./agent-invocation.ts";
+import { nonDefaultStepOutputLimit } from "./step-output-limit.ts";
 
 export function buildStepSnapshots(states: Iterable<StepState>, activity: StepActivityTracker, defaults: AgentInvocationDefaults = { model: undefined, thinking: undefined }): StepSnapshot[] {
 	const stateList = [...states];
 	const byId = new Map(stateList.map((state) => [state.spec.id, state]));
-	return stateList.map((state) => ({
-		id: state.spec.id,
-		status: state.status,
-		agentRef: state.spec.agent.ref,
-		model: state.spec.agent.model ?? defaults.model,
-		thinking: state.spec.agent.thinking ?? defaults.thinking,
-		effectiveTools: childToolNames(state.spec.agent),
-		extensionTools: state.spec.agent.extensionTools.map((tool) => tool.name),
-		callerSkills: state.spec.agent.callerSkills.map((skill) => skill.name),
-		needs: state.spec.needs,
-		after: state.spec.after,
-		startedAt: state.startedAt,
-		endedAt: state.endedAt,
-		lastActivity: activity.summary(state.spec.id),
-		errorMessage: state.errorMessage,
-		outputFilePath: state.output?.filePath,
-		outputChars: state.output?.chars,
-		taskPreview: taskPreview(state.spec.task),
-		cwd: state.spec.cwd,
-		stopReason: state.errorMessage ?? (isTerminalStepStatus(state.status) ? state.status : undefined),
-		upstreamArtifacts: upstreamArtifactReferences(state.spec, byId),
-	}));
+	return stateList.map((state) => {
+		const invocation = effectiveAgentInvocation(state.spec.agent, defaults);
+		return {
+			id: state.spec.id,
+			status: state.status,
+			agentRef: state.spec.agent.ref,
+			model: invocation.model,
+			thinking: invocation.thinking,
+			effectiveTools: childToolNames(state.spec.agent),
+			extensionTools: state.spec.agent.extensionTools.map((tool) => tool.name),
+			callerSkills: state.spec.agent.callerSkills.map((skill) => skill.name),
+			outputLimit: nonDefaultStepOutputLimit(state.spec.outputLimit),
+			needs: state.spec.needs,
+			after: state.spec.after,
+			startedAt: state.startedAt,
+			endedAt: state.endedAt,
+			lastActivity: activity.summary(state.spec.id),
+			errorMessage: state.errorMessage,
+			outputFilePath: state.output?.filePath,
+			outputChars: state.output?.chars,
+			taskPreview: taskPreview(state.spec.task),
+			cwd: state.spec.cwd,
+			stopReason: state.errorMessage ?? (isTerminalStepStatus(state.status) ? state.status : undefined),
+			upstreamArtifacts: upstreamArtifactReferences(state.spec, byId),
+		};
+	});
 }
 
 const TASK_PREVIEW_CHARS = 180;

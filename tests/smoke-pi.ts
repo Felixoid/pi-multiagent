@@ -28,18 +28,30 @@ assert.equal(terminal.details.ok, true, `agent_team run_status failed:\n${termin
 assert.equal(terminal.details.run?.terminal, true, `agent_team run did not reach terminal state:\n${terminal.content[0]?.text ?? ""}`);
 assert.equal(terminal.details.run?.status, "succeeded", `agent_team child run did not succeed:\n${terminal.content[0]?.text ?? ""}`);
 assert.equal(terminal.details.outputs.some((output) => output.text?.trim() === expectedFinal), true, `child final was not exactly ${expectedFinal}:\n${terminal.content[0]?.text ?? ""}`);
+const finalOutput = terminal.details.outputs.find((output) => output.text?.trim() === expectedFinal);
+console.log(JSON.stringify({ runId, status: terminal.details.run.status, terminal: terminal.details.run.terminal, stepId: finalOutput?.stepId, artifact: finalOutput?.filePath, chars: finalOutput?.chars, final: finalOutput?.text?.trim() }, null, 2));
 
 const cleanup = await runAgentTeam({ action: "cleanup", runId }, options);
 assert.equal(cleanup.details.ok, true, `cleanup failed after real smoke:\n${cleanup.content[0]?.text ?? ""}`);
+console.log(JSON.stringify({ runId, cleanupDeletedPaths: cleanup.details.cleanup?.deletedPaths.length ?? 0 }, null, 2));
 
 async function waitForTerminal(runId: string): Promise<{ details: AgentTeamDetails; content: { type: "text"; text: string }[] }> {
 	const deadline = Date.now() + timeoutMs;
 	let latest: Awaited<ReturnType<typeof runAgentTeam>> | undefined;
 	while (Date.now() < deadline) {
-		latest = await runAgentTeam({ action: "run_status", runId, waitSeconds: pollSeconds, preview: true, maxBytes: 4000 }, options);
+		latest = await keepSmokeProcessAlive(runAgentTeam({ action: "run_status", runId, waitSeconds: pollSeconds, preview: true, maxBytes: 4000 }, options));
 		if (latest.details.run?.terminal) return latest;
 	}
 	throw new Error(`Timed out after ${timeoutMs}ms waiting for real child Pi smoke. Latest status:\n${latest?.content[0]?.text ?? "none"}`);
+}
+
+async function keepSmokeProcessAlive<T>(promise: Promise<T>): Promise<T> {
+	const timer = setInterval(() => undefined, 1000);
+	try {
+		return await promise;
+	} finally {
+		clearInterval(timer);
+	}
 }
 
 function startInput(): AgentTeamInput {

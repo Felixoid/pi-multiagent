@@ -29,7 +29,9 @@ cleanup     { action, runId }
 Graph step object, used inside `graph.steps[]` only:
 
 ```text
-step { id, agent, task, needs?, after?, cwd? }
+step { id, agent, task, needs?, after?, cwd?, outputLimit? }
+agent { system XOR ref, tools?, extensionTools?, model?, thinking? }
+outputLimit { maxBytes?, maxAssistantFinals? }
 ```
 
 Do not send `{"action":"step"}`. `step` is a graph object, not an `agent_team` action.
@@ -219,7 +221,9 @@ Catalog default tool profiles are capped by graph authority. If authority strips
 
 Child Pi launches use normal Pi extension discovery for model/provider availability. Ambient trusted extensions may run startup code, provider hooks, tool hooks, and `resources_discover` as normal Pi behavior. Built-in child tools are launched with `--tools`, a callable tool-name allowlist. Extension tools can shadow tool names under normal Pi semantics. Child RPC is unattended: fire-and-forget UI updates are recorded as suppressed non-error activity, while blocking or unknown UI requests fail closed. Child tool errors are preserved in debug events and `lastActivity`, but they do not automatically fail a recovered step.
 
-A child receives the graph objective, its own step prompt/task, explicit upstream dependency evidence, selected tools, explicit `extensionTools`, and product-configured caller skills. It does not receive the parent transcript, parent session, context files, prompt templates, themes, project `SYSTEM.md`, or ambient skill discovery. The effective child model/thinking lane is captured at `start` from agent metadata or the then-active parent defaults and is reported in run snapshots.
+A child receives the graph objective, its own step prompt/task, explicit upstream dependency evidence, selected tools, explicit `extensionTools`, and product-configured caller skills. It does not receive the parent transcript, parent session, context files, prompt templates, themes, project `SYSTEM.md`, or ambient skill discovery. The effective child model/thinking lane is captured at `start` from step `agent.model` / `agent.thinking`, then agent metadata, then the then-active parent defaults, and is reported in run snapshots. Step `agent.model` is trimmed and must contain non-whitespace text. Step `agent.thinking` accepts `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`; omit it to inherit metadata/defaults.
+
+Use `outputLimit` only for retained assistant-output hard caps. `outputLimit.maxBytes` and `outputLimit.maxAssistantFinals` bound what `agent_team` accepts and retains from a child step. They are not model token limits, cost controls, or `run_status`/`step_result` preview `maxBytes`. Non-default output limits are shown in step rows and final artifacts so operators can prove which retained-output cap ran.
 
 ## Extension tools
 

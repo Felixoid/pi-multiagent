@@ -1,11 +1,12 @@
 /** Shared RPC child controller types. */
 
-import type { AgentInvocationDefaults, ResolvedAgent, StepStatus, TeamLimits } from "./types.ts";
+import type { AgentInvocationDefaults, ResolvedAgent, StepOutputLimit, StepStatus, TeamLimits } from "./types.ts";
 
 export interface RpcChildControllerOptions {
 	agent: ResolvedAgent;
 	defaults: AgentInvocationDefaults;
 	limits: TeamLimits;
+	outputLimit: StepOutputLimit;
 	cwd: string;
 	promptPath: string;
 	spawnProcess?: import("./child-launch.ts").SpawnProcess;

@@ -5,6 +5,7 @@ import { existsSync, statSync } from "node:fs";
 import { basename, delimiter, isAbsolute, join, resolve } from "node:path";
 import type { AgentInvocationDefaults, ResolvedAgent } from "./types.ts";
 import { READONLY_CHILD_TOOL_NAMES } from "./types.ts";
+import { effectiveAgentInvocation } from "./agent-invocation.ts";
 import { childToolNames } from "./tool-policy.ts";
 import { findNearestWorkspaceRoot, isContainedPath, safeRealpath } from "./project-root.ts";
 
@@ -33,8 +34,7 @@ export function buildPiArgs(agent: ResolvedAgent, defaults: AgentInvocationDefau
 		"--append-system-prompt",
 		promptPath,
 	];
-	const model = agent.model ?? defaults.model;
-	const thinking = agent.thinking ?? defaults.thinking;
+	const { model, thinking } = effectiveAgentInvocation(agent, defaults);
 	if (model) args.push("--model", model);
 	if (thinking) args.push("--thinking", thinking);
 	if (!hasMandatoryReadSuite(agent.tools)) throw new Error(`Resolved agent ${agent.ref} is missing mandatory read/discovery tools.`);

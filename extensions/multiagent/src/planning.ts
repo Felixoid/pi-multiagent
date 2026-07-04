@@ -14,6 +14,8 @@ import { resolveBuiltinToolProfile } from "./builtin-tool-profile.ts";
 import { DEFAULT_SUBAGENT_SKILL_MODE } from "./subagent-skills-config.ts";
 import { findProjectSettingsFile } from "./project-settings.ts";
 import { validateWebResearcherExtensionTools } from "./web-researcher-policy.ts";
+import { normalizeStepAgentOverrides } from "./step-agent-overrides.ts";
+import { normalizeStepOutputLimit } from "./step-output-limit.ts";
 
 const PUBLIC_ID_REGEX = new RegExp(PUBLIC_ID_PATTERN);
 const SOURCE_REF_REGEX = new RegExp(SOURCE_QUALIFIED_LIBRARY_REF_PATTERN);
@@ -43,17 +45,19 @@ export function resolveDetachedGraph(graph: GraphSpec, libraryAgents: AgentConfi
 
 export { validatePreflightShape } from "./preflight-shape.ts";
 
-function resolveStep(step: GraphSpec["steps"][number], index: number, authority: GraphAuthority, library: { sources: LibrarySource[] }, libraryAgents: AgentConfig[], diagnostics: AgentDiagnostic[], context: ResolveGraphContext, skillContext: ReturnType<typeof createCallerSkillResolutionContext>): TeamStepSpec | undefined {
+function resolveStep(step: GraphSpec["steps"][number], index: number, authority: GraphAuthority, library: { sources: LibrarySource[] }, libraryAgents: AgentConfig[], diagnostics: AgentDiagnostic[], ctx: ResolveGraphContext, skillContext: ReturnType<typeof createCallerSkillResolutionContext>): TeamStepSpec | undefined {
 	const path = `/graph/steps/${index}`;
 	if (!validatePublicId(step.id, `step id ${step.id || "<empty>"}`, diagnostics, `${path}/id`)) return undefined;
 	if (!step.task.trim()) diagnostics.push(makeDiagnostic("step-task-required", `Step ${step.id} requires task.`, "error", `${path}/task`));
-	const cwd = resolveStepCwd(context.invocationCwd, step.cwd, diagnostics, `${path}/cwd`);
-	const agent = resolveStepAgent(step.id, step.agent, authority, library, libraryAgents, diagnostics, context, skillContext, `${path}/agent`);
+	const cwd = resolveStepCwd(ctx.invocationCwd, step.cwd, diagnostics, `${path}/cwd`);
+	const agent = resolveStepAgent(step.id, step.agent, authority, library, libraryAgents, diagnostics, ctx, skillContext, `${path}/agent`);
+	const overrides = normalizeStepAgentOverrides(step.agent, diagnostics, `${path}/agent`);
+	const outputLimit = normalizeStepOutputLimit(step.outputLimit, diagnostics, `${path}/outputLimit`);
 	const cwdSettingsValid = cwd && agent ? validateBashCwd(step.id, agent, cwd.path, diagnostics, `${path}/cwd`) : false;
 	for (const [needIndex, need] of (step.needs ?? []).entries()) validatePublicId(need, `strict dependency ${need || "<empty>"}`, diagnostics, `${path}/needs/${needIndex}`);
 	for (const [afterIndex, after] of (step.after ?? []).entries()) validatePublicId(after, `terminal dependency ${after || "<empty>"}`, diagnostics, `${path}/after/${afterIndex}`);
-	if (!cwd || !agent || !cwdSettingsValid) return undefined;
-	return { id: step.id, agent, task: step.task, needs: dedupeRefs(step.needs ?? []), after: dedupeRefs(step.after ?? []), cwd: cwd.path, cwdIdentity: cwd.identity };
+	if (!cwd || !agent || !overrides || !outputLimit || !cwdSettingsValid) return undefined;
+	return { id: step.id, agent: { ...agent, model: overrides.model ?? agent.model, thinking: overrides.thinking ?? agent.thinking }, task: step.task, needs: dedupeRefs(step.needs ?? []), after: dedupeRefs(step.after ?? []), cwd: cwd.path, cwdIdentity: cwd.identity, outputLimit };
 }
 
 function resolveStepAgent(stepId: string, spec: GraphSpec["steps"][number]["agent"], authority: GraphAuthority, library: { sources: LibrarySource[] }, libraryAgents: AgentConfig[], diagnostics: AgentDiagnostic[], context: ResolveGraphContext, skillContext: ReturnType<typeof createCallerSkillResolutionContext>, path: string): ResolvedAgent | undefined {

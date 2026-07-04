@@ -6,6 +6,7 @@ export type AgentSource = "package" | "user" | "project" | "inline";
 export type LibrarySource = "package" | "user" | "project";
 export type InvocationAgentKind = "inline" | "library";
 export type ThinkingLevel = "inherit" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type InvocationThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export type RunStatus = "running" | "succeeded" | "mixed" | "failed" | "canceling" | "canceled" | "expired";
 export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "blocked" | "timed_out" | "canceled";
 export type MessageChannel = "steer" | "follow_up";
@@ -19,6 +20,7 @@ export const LIBRARY_SOURCE_VALUES = ["package", "user", "project"] as const;
 export const AGENT_TEAM_ACTION_VALUES = ["catalog", "start", "run_status", "step_result", "message", "cancel", "cleanup"] as const;
 export const INVOCATION_AGENT_KIND_VALUES = ["inline", "library"] as const;
 export const THINKING_LEVEL_VALUES = ["inherit", "off", "minimal", "low", "medium", "high", "xhigh"] as const;
+export const INVOCATION_THINKING_LEVEL_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 export const RUN_STATUS_VALUES = ["running", "succeeded", "mixed", "failed", "canceling", "canceled", "expired"] as const;
 export const STEP_STATUS_VALUES = ["pending", "running", "succeeded", "failed", "blocked", "timed_out", "canceled"] as const;
 export const MESSAGE_CHANNEL_VALUES = ["steer", "follow_up"] as const;
@@ -41,7 +43,8 @@ export type ExtensionSourceScope = (typeof EXTENSION_SOURCE_SCOPE_VALUES)[number
 export type ExtensionSourceOrigin = (typeof EXTENSION_SOURCE_ORIGIN_VALUES)[number];
 export const MAX_STEPS = 16;
 export const MAX_DEPENDENCIES_PER_STEP = 12;
-export const MAX_CONCURRENCY = 6;
+export const DEFAULT_CONCURRENCY = 6;
+export const MAX_CONCURRENCY = 10;
 export const DEFAULT_TIMEOUT_SECONDS_PER_STEP = 7200;
 export const MAX_TIMEOUT_SECONDS_PER_STEP = 36000;
 export const INLINE_HANDOFF_CHARS = 12000;
@@ -108,6 +111,11 @@ export interface TeamLimits {
 	timeoutSecondsPerStep: number;
 }
 
+export interface StepOutputLimit {
+	maxBytes: number;
+	maxAssistantFinals: number;
+}
+
 export interface NotifyOptions {
 	mode: NotifyMode;
 	maxNotices: number;
@@ -127,7 +135,7 @@ export interface AgentConfig {
 	tags: string[];
 	tools: string[] | undefined;
 	model: string | undefined;
-	thinking: Exclude<ThinkingLevel, "inherit"> | undefined;
+	thinking: InvocationThinkingLevel | undefined;
 	systemPrompt: string;
 	source: Exclude<AgentSource, "inline">;
 	filePath: string;
@@ -234,6 +242,8 @@ export interface ResolvedExtensionToolGrant {
 interface GraphStepAgentSharedInput {
 	tools?: string[];
 	extensionTools?: ExtensionToolGrantSpec[];
+	model?: string;
+	thinking?: InvocationThinkingLevel;
 }
 
 export interface GraphStepAgentInput extends GraphStepAgentSharedInput {
@@ -248,6 +258,7 @@ export interface GraphStepInput {
 	needs?: string[];
 	after?: string[];
 	cwd?: string;
+	outputLimit?: Partial<StepOutputLimit>;
 }
 
 export interface GraphSpecInput {
@@ -269,7 +280,7 @@ export interface ResolvedAgent {
 	callerSkills: ResolvedCallerSkill[];
 	systemPrompt: string;
 	model: string | undefined;
-	thinking: Exclude<ThinkingLevel, "inherit"> | undefined;
+	thinking: InvocationThinkingLevel | undefined;
 	source: AgentSource;
 	filePath: string | undefined;
 	sha256: string | undefined;
@@ -289,6 +300,7 @@ export interface TeamStepSpec {
 	after: string[];
 	cwd: string;
 	cwdIdentity: CwdIdentity;
+	outputLimit: StepOutputLimit;
 }
 
 export interface ResolvedGraph {
@@ -345,6 +357,7 @@ export interface StepSnapshot {
 	effectiveTools: string[];
 	extensionTools: string[];
 	callerSkills: string[];
+	outputLimit?: StepOutputLimit;
 	needs: string[];
 	after: string[];
 	startedAt: string | undefined;
@@ -447,6 +460,11 @@ export interface AgentTeamDetails {
 }
 
 export interface AgentInvocationDefaults {
+	model: string | undefined;
+	thinking: string | undefined;
+}
+
+export interface AgentInvocationMetadata {
 	model: string | undefined;
 	thinking: string | undefined;
 }

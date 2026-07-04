@@ -103,6 +103,7 @@ type HarnessMode =
 	"context-overflow-recover" |
 	"context-overflow-stale-final-recover" |
 	"tool-use-then-final" |
+	"two-finals" |
 	"ui-fire-and-forget" |
 	"ui-request";
 
@@ -190,6 +191,10 @@ function handleCommand(child: FakeChild, line: string, mode: HarnessMode, childI
 		else if (mode === "tool-use-then-final") setImmediate(() => {
 			sendAssistantMessageEnd(child, "tool preface", "toolUse");
 			sendAssistantFinal(child, "final ok");
+		});
+		else if (mode === "two-finals") setImmediate(() => {
+			sendAssistantMessageEnd(child, "first");
+			sendAssistantFinal(child, "second");
 		});
 		else {
 			const stopReasonMode = mode === "agent-end-length" || mode === "agent-end-tool-use" || mode === "agent-end-aborted" || mode === "agent-end-error";
@@ -368,8 +373,8 @@ test("start returns a registered runId and run_status exposes final output", asy
 	assert.match(artifact, /status: succeeded/);
 	assert.match(artifact, /stopReason: succeeded/);
 	assert.match(artifact, /agentRef: inline:one/);
-	assert.match(artifact, /model: inherit/);
-	assert.match(artifact, /thinking: inherit/);
+	assert.match(artifact, /model: default/);
+	assert.match(artifact, /thinking: default/);
 	assert.match(artifact, /effectiveTools: read, grep, find, ls/);
 	assert.match(artifact, /extensionTools: none/);
 	assert.match(artifact, /cwd: .*pi-multiagent-detached-/);
@@ -1183,6 +1188,66 @@ test("assistant final output is bounded across repeated finals", async () => {
 	assert.match(terminal.details.steps[0]?.errorMessage ?? "", /step-output-budget-exceeded/);
 	assert.equal((terminal.details.outputs[0]?.chars ?? 0) > 0, true);
 	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("per-step outputLimit enforces retained assistant byte and final-count hard caps", async () => {
+	const byteRoot = await mkdir(join(tmpdir(), `pi-multiagent-step-output-bytes-${Date.now()}`), { recursive: true });
+	const byteHarness = rpcHarness("auto");
+	const byteOptions = makeOptions(byteRoot, byteHarness.spawn);
+	const byteStarted = await runAgentTeam(graph([{ id: "one", agent: { system: "Return ok." }, task: "Return ok.", outputLimit: { maxBytes: 1 } }]), byteOptions);
+	const byteRunId = byteStarted.details.run?.runId ?? "";
+	const byteTerminal = await waitTerminal(byteRoot, byteRunId, byteOptions, 40, false);
+	assert.equal(byteTerminal.details.run?.status, "failed");
+	assert.match(byteTerminal.details.steps[0]?.errorMessage ?? "", /per-step assistant output limit=1 bytes/);
+	assert.match(byteTerminal.content[0].text, /outputLimit=maxBytes=1, maxAssistantFinals=64/);
+	await runAgentTeam({ action: "cleanup", runId: byteRunId }, byteOptions);
+
+	const finalsRoot = await mkdir(join(tmpdir(), `pi-multiagent-step-output-finals-${Date.now()}`), { recursive: true });
+	const finalsHarness = rpcHarness("two-finals");
+	const finalsOptions = makeOptions(finalsRoot, finalsHarness.spawn);
+	const finalsStarted = await runAgentTeam(graph([{ id: "one", agent: { system: "Return two finals." }, task: "Return two finals.", outputLimit: { maxAssistantFinals: 1 } }]), finalsOptions);
+	const finalsRunId = finalsStarted.details.run?.runId ?? "";
+	const finalsTerminal = await waitTerminal(finalsRoot, finalsRunId, finalsOptions, 40, false);
+	assert.equal(finalsTerminal.details.run?.status, "failed");
+	assert.match(finalsTerminal.details.steps[0]?.errorMessage ?? "", /too many non-empty assistant finals; limit=1/);
+	assert.match(finalsTerminal.content[0].text, /outputLimit=maxBytes=4194304, maxAssistantFinals=1/);
+	await runAgentTeam({ action: "cleanup", runId: finalsRunId }, finalsOptions);
+
+	const formattedRoot = await mkdir(join(tmpdir(), `pi-multiagent-step-output-formatted-finals-${Date.now()}`), { recursive: true });
+	const formattedHarness = rpcHarness("two-finals");
+	const formattedOptions = makeOptions(formattedRoot, formattedHarness.spawn);
+	const formattedStarted = await runAgentTeam(graph([{ id: "one", agent: { system: "Return two finals." }, task: "Return two finals.", outputLimit: { maxBytes: 20, maxAssistantFinals: 2 } }]), formattedOptions);
+	const formattedRunId = formattedStarted.details.run?.runId ?? "";
+	const formattedTerminal = await waitTerminal(formattedRoot, formattedRunId, formattedOptions, 40, false);
+	assert.equal(formattedTerminal.details.run?.status, "failed");
+	assert.match(formattedTerminal.details.steps[0]?.errorMessage ?? "", /assistant finals would retain \d+ bytes; per-step assistant output limit=20 bytes/);
+	assert.match(formattedTerminal.content[0].text, /outputLimit=maxBytes=20, maxAssistantFinals=2/);
+	await runAgentTeam({ action: "cleanup", runId: formattedRunId }, formattedOptions);
+});
+
+test("default concurrency remains six while explicit limit can fan out to ten", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-concurrency-default-${Date.now()}`), { recursive: true });
+	const defaultHarness = rpcHarness("hold");
+	const defaultOptions = makeOptions(root, defaultHarness.spawn);
+	const steps = Array.from({ length: 10 }, (_value, index) => ({ id: `s${index + 1}`, agent: { system: "x" }, task: "hold" }));
+	const defaultStarted = await runAgentTeam({ action: "start", graph: { objective: "default six", authority: { allowFilesystemRead: true }, steps, limits: { timeoutSecondsPerStep: 30 } }, options: { terminalRetentionSeconds: 30 } }, defaultOptions);
+	const defaultRunId = defaultStarted.details.run?.runId ?? "";
+	await waitForChildren(defaultHarness, 6);
+	assert.equal(defaultHarness.children.length, 6);
+	await runAgentTeam({ action: "cancel", runId: defaultRunId, reason: "test cleanup" }, defaultOptions);
+	await waitTerminal(root, defaultRunId, defaultOptions, 40, false);
+	await runAgentTeam({ action: "cleanup", runId: defaultRunId }, defaultOptions);
+
+	const fanoutRoot = await mkdir(join(tmpdir(), `pi-multiagent-concurrency-ten-${Date.now()}`), { recursive: true });
+	const fanoutHarness = rpcHarness("hold");
+	const fanoutOptions = makeOptions(fanoutRoot, fanoutHarness.spawn);
+	const fanoutStarted = await runAgentTeam({ action: "start", graph: { objective: "explicit ten", authority: { allowFilesystemRead: true }, steps, limits: { concurrency: 10, timeoutSecondsPerStep: 30 } }, options: { terminalRetentionSeconds: 30 } }, fanoutOptions);
+	const fanoutRunId = fanoutStarted.details.run?.runId ?? "";
+	await waitForChildren(fanoutHarness, 10);
+	assert.equal(fanoutHarness.children.length, 10);
+	await runAgentTeam({ action: "cancel", runId: fanoutRunId, reason: "test cleanup" }, fanoutOptions);
+	await waitTerminal(fanoutRoot, fanoutRunId, fanoutOptions, 40, false);
+	await runAgentTeam({ action: "cleanup", runId: fanoutRunId }, fanoutOptions);
 });
 
 test("rpc stdin stream errors fail the step instead of crashing the parent", async () => {

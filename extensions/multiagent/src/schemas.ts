@@ -5,6 +5,7 @@ import { type Static, Type } from "typebox";
 import {
 	AGENT_TEAM_ACTION_VALUES,
 	BUILTIN_CHILD_TOOL_NAMES,
+	DEFAULT_CONCURRENCY,
 	DEFAULT_MAX_RUN_SECONDS,
 	DEFAULT_NOTIFY_MAX_NOTICES,
 	DEFAULT_NOTIFY_MIN_INTERVAL_SECONDS,
@@ -14,7 +15,9 @@ import {
 	DEFAULT_TIMEOUT_SECONDS_PER_STEP,
 	EXTENSION_SOURCE_ORIGIN_VALUES,
 	EXTENSION_SOURCE_SCOPE_VALUES,
+	INVOCATION_THINKING_LEVEL_VALUES,
 	LIBRARY_SOURCE_VALUES,
+	MAX_ASSISTANT_FINAL_MESSAGES_PER_STEP,
 	MAX_CLIENT_MESSAGE_ID_CHARS,
 	MAX_CONCURRENCY,
 	MAX_DEPENDENCIES_PER_STEP,
@@ -27,6 +30,7 @@ import {
 	MAX_RUN_STATUS_WAIT_SECONDS,
 	MAX_SHORT_TEXT_FIELD_CHARS,
 	MAX_STEPS,
+	MAX_STEP_OUTPUT_BYTES,
 	MAX_TERMINAL_RETENTION_SECONDS,
 	MAX_TEXT_FIELD_CHARS,
 	MAX_TIMEOUT_SECONDS_PER_STEP,
@@ -100,8 +104,18 @@ const StepAgentSchema = Type.Object(
 		ref: Type.Optional(sourceQualifiedLibraryRef('Source-qualified library ref such as "package:reviewer". Set exactly one of system or ref; runtime planning rejects missing or mixed bindings.')),
 		tools: Type.Optional(Type.Array(StringEnum(BUILTIN_CHILD_TOOL_NAMES), { description: "Explicit built-in child tool profile. Every child keeps at least the read/discovery suite, so omitted or [] resolves to read, grep, find, and ls and requires graph.authority.allowFilesystemRead:true. For library agents, explicit tools replace the whole catalog defaultTools profile; mandatory read/discovery is then added. It does not append. Any read/discovery primitive expands to the full read, grep, find, ls suite. package:validator requires effective bash; package:worker requires effective edit or write.", maxItems: 24 })),
 		extensionTools: Type.Optional(Type.Array(ExtensionToolGrantSchema, { description: "Explicit parent-active callable extension tool grants for this step.", maxItems: 24 })),
+		model: Type.Optional(Type.String({ description: "Optional child Pi model override for this step. Trimmed non-empty text; provider availability is discovered by the child Pi runtime, not by graph planning.", minLength: 1, maxLength: MAX_SHORT_TEXT_FIELD_CHARS, pattern: "\\S" })),
+		thinking: Type.Optional(StringEnum(INVOCATION_THINKING_LEVEL_VALUES, { description: 'Optional child Pi thinking override for this step. Valid values exclude "inherit"; omitted uses library agent metadata, then parent launch defaults.' })),
 	},
 	{ ...StrictObjectOptions, description: "Step-local inline agent or source-qualified library agent. Set exactly one of system or ref. No invocation-local agent registry is used." },
+);
+
+const StepOutputLimitSchema = Type.Object(
+	{
+		maxBytes: Type.Optional(Type.Number({ description: `Per-step retained assistant-output byte hard cap. Default ${MAX_STEP_OUTPUT_BYTES}. This is not a provider token/cost cap and not run_status/step_result preview maxBytes.`, minimum: 1, maximum: MAX_STEP_OUTPUT_BYTES, multipleOf: 1 })),
+		maxAssistantFinals: Type.Optional(Type.Number({ description: `Per-step non-empty assistant final message hard cap. Default ${MAX_ASSISTANT_FINAL_MESSAGES_PER_STEP}.`, minimum: 1, maximum: MAX_ASSISTANT_FINAL_MESSAGES_PER_STEP, multipleOf: 1 })),
+	},
+	StrictObjectOptions,
 );
 
 const StepSchema = Type.Object(
@@ -112,13 +126,14 @@ const StepSchema = Type.Object(
 		needs: Type.Optional(Type.Array(publicId("Strict dependency step id; every listed step must succeed before this step starts."), { description: "Step ids that must succeed before this step starts.", maxItems: MAX_DEPENDENCIES_PER_STEP })),
 		after: Type.Optional(Type.Array(publicId("Terminal dependency step id; listed steps may succeed or fail before this step starts."), { description: "Step ids that must terminalize before this step starts, regardless of success or failure.", maxItems: MAX_DEPENDENCIES_PER_STEP })),
 		cwd: Type.Optional(nonEmptyText("Existing working directory for this step, resolved inside the invocation cwd.", MAX_PATH_FIELD_CHARS)),
+		outputLimit: Type.Optional(StepOutputLimitSchema),
 	},
 	StrictObjectOptions,
 );
 
 const LimitsSchema = Type.Object(
 	{
-		concurrency: Type.Optional(Type.Number({ description: `Maximum concurrent runnable steps. Default ${MAX_CONCURRENCY}.`, minimum: 1, maximum: MAX_CONCURRENCY, multipleOf: 1 })),
+		concurrency: Type.Optional(Type.Number({ description: `Maximum concurrent runnable steps. Default ${DEFAULT_CONCURRENCY}; maximum ${MAX_CONCURRENCY}.`, minimum: 1, maximum: MAX_CONCURRENCY, multipleOf: 1, default: DEFAULT_CONCURRENCY })),
 		timeoutSecondsPerStep: Type.Optional(Type.Number({ description: `Per-step subprocess timeout seconds. Default ${DEFAULT_TIMEOUT_SECONDS_PER_STEP}.`, minimum: 1, maximum: MAX_TIMEOUT_SECONDS_PER_STEP, multipleOf: 1, default: DEFAULT_TIMEOUT_SECONDS_PER_STEP })),
 	},
 	StrictObjectOptions,

@@ -1,6 +1,6 @@
 {
   "name": "pi-multiagent",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "type": "module",
   "description": "Adds the agent_team delegation tool and pi-multiagent skill to Pi.",
   "keywords": [
@@ -37,7 +37,7 @@
     "extensions/**/*.ts"
   ],
   "scripts": {
-    "test": "node --no-warnings --experimental-strip-types --loader ./tests/pi-peer-loader.mjs --test tests/*.test.ts",
+    "test": "node --import ./tests/node-test-ref-timers.mjs --no-warnings --experimental-strip-types --loader ./tests/pi-peer-loader.mjs --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "smoke:fake-pi": "node --no-warnings --experimental-strip-types --loader ./tests/pi-peer-loader.mjs tests/smoke-fake-pi.ts",
     "smoke:pi": "node --no-warnings --experimental-strip-types tests/smoke-pi.ts",

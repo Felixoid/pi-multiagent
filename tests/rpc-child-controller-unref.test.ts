@@ -84,6 +84,7 @@ function createOptions(child: FakeRpcChild, overrides: Partial<RpcChildControlle
 		},
 		defaults: { model: undefined, thinking: undefined },
 		limits: { timeoutSecondsPerStep: 30 },
+		outputLimit: { maxBytes: 4 * 1024 * 1024, maxAssistantFinals: 64 },
 		cwd: process.cwd(),
 		promptPath: "/tmp/prompt.md",
 		spawnProcess: (_command: string, _args: string[], _options: SpawnOptions) => child as unknown as ChildProcessWithoutNullStreams,

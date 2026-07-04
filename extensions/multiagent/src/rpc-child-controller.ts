@@ -34,7 +34,7 @@ export class RpcChildController {
 	private recoveringOverflow = false;
 	private output = "";
 	private assistantFinals: string[] = [];
-	private readonly outputBudget = new AssistantOutputBudget();
+	private readonly outputBudget: AssistantOutputBudget;
 	private liveText = "";
 	private stderr = "";
 	private readonly parentMessageBudget = new ParentMessageBudget();
@@ -47,6 +47,7 @@ export class RpcChildController {
 	constructor(options: RpcChildControllerOptions) {
 		this.options = options;
 		this.spawnProcess = options.spawnProcess ?? spawn;
+		this.outputBudget = new AssistantOutputBudget(options.outputLimit);
 		const ackTimeoutMs = Number.isFinite(options.ackTimeoutMs) && options.ackTimeoutMs !== undefined && options.ackTimeoutMs > 0 ? Math.trunc(options.ackTimeoutMs) : ACK_TIMEOUT_MS;
 		this.commands = new RpcCommandQueue(ackTimeoutMs);
 	}
@@ -183,7 +184,7 @@ export class RpcChildController {
 			return;
 		}
 		const nonEmpty = text.trim().length > 0;
-		const finalFailure = nonEmpty ? this.outputBudget.canAcceptAssistantFinal(check.bytes) : undefined;
+		const finalFailure = nonEmpty ? this.outputBudget.canAcceptAssistantFinal(text) : undefined;
 		if (finalFailure) {
 			this.failOutputBudget(finalFailure);
 			return;
@@ -201,7 +202,7 @@ export class RpcChildController {
 			this.options.onEvent({ type: "rpc", label: "assistant_nonfinal", preview: message, status: stopReason === "tooluse" ? "done" : "error" });
 			return;
 		}
-		this.outputBudget.recordAssistantFinal(check.bytes);
+		this.outputBudget.recordAssistantFinal(text);
 		this.assistantFinals.push(text);
 		this.options.onEvent({ type: "assistant_final", label: "assistant", preview: text, status: "done" });
 	}
