@@ -2,6 +2,8 @@ import { formatTruncatedModelContent } from "./result-truncation.ts";
 import { formatTerminalStepArtifacts } from "./terminal-step-artifact-format.ts";
 import { formatWaitReceiptForModel } from "./wait-receipt-format.ts";
 import { TRUST_NOTICE } from "./trust-notice.ts";
+import { formatStepOutputLimit } from "./step-output-limit.ts";
+import { messageChannelSemantics } from "./message-channel-copy.ts";
 import type { AgentTeamDetails, BackgroundEvent, RunSnapshot, StepOutput, StepSnapshot } from "./types.ts";
 
 export { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, describeOutputLimit, truncateHead } from "./result-truncation.ts";
@@ -73,7 +75,7 @@ function extensionToolAuthorityCopy(_tool: AgentTeamDetails["extensionTools"][nu
 }
 
 function formatStart(details: AgentTeamDetails): string {
-	return ["# agent_team start", "", TRUST_NOTICE, errorLine(details), details.run ? formatRunSnapshot(details.run) : "No run snapshot.", formatEffectiveStepTools(details.steps), "", "Next: keep the short runId. Healthy run: wait for pushed notices. JSON/API/headless or no notices: run_status {runId, waitSeconds} for bounded wait/read. Compact inspect: run_status without preview. Step text: step_result {runId, stepId, preview:true}. Preserve artifacts before cleanup; cleanup deletes retained evidence.", diag(details)].filter(Boolean).join("\n");
+	return ["# agent_team start", "", TRUST_NOTICE, errorLine(details), details.run ? formatRunSnapshot(details.run) : "No run snapshot.", formatEffectiveStepTools(details.steps), "", "Next: keep the short runId. Healthy run: wait for pushed notices. JSON/API/headless or no notices: run_status {runId, waitSeconds}. Compact inspect: run_status without preview. Step text: step_result {runId, stepId, preview:true}. Preserve artifacts; cleanup deletes retained evidence.", diag(details)].filter(Boolean).join("\n");
 }
 
 function formatRunStatus(details: AgentTeamDetails): string {
@@ -107,7 +109,7 @@ function formatAvailableStepIds(details: AgentTeamDetails): string {
 
 function formatMessage(details: AgentTeamDetails): string {
 	const receipt = details.message;
-	return ["# agent_team message", "", TRUST_NOTICE, details.error ? `Error: ${modelText(details.error.code)} - ${modelText(details.error.message)}` : "", formatAvailableStepIds(details), receipt ? formatMessageReceiptLine(receipt) : "No message receipt.", receipt?.reused ? `Reused clientMessageId${receipt.clientMessageId ? ` ${modelText(receipt.clientMessageId)}` : ""} receipt; no additional child message was accepted or sent.` : "", receipt?.accepted ? "Acceptance confirms Pi accepted the message for delivery to the live child; it does not prove child read/compliance, output, completion, terminal inclusion, or that the child should stop early." : "", receipt?.accepted ? messageChannelSemantics(receipt.channel) : "", receipt?.undeliveredReason ? `Reason: ${modelText(receipt.undeliveredReason)}` : "", details.run ? formatRunSnapshot(details.run) : "", diag(details)].filter(Boolean).join("\n");
+	return ["# agent_team message", "", TRUST_NOTICE, details.error ? `Error: ${modelText(details.error.code)} - ${modelText(details.error.message)}` : "", formatAvailableStepIds(details), receipt ? formatMessageReceiptLine(receipt) : "No message receipt.", receipt?.reused ? `Reused clientMessageId${receipt.clientMessageId ? ` ${modelText(receipt.clientMessageId)}` : ""} receipt; no additional child message was accepted or sent.` : "", receipt?.accepted ? "Accepted means live-child transport only; it does not prove child read/compliance, output, completion, terminal inclusion, or that the child should stop early." : "", receipt?.accepted ? messageChannelSemantics(receipt.channel) : "", receipt?.undeliveredReason ? `Reason: ${modelText(receipt.undeliveredReason)}` : "", details.run ? formatRunSnapshot(details.run) : "", diag(details)].filter(Boolean).join("\n");
 }
 
 function formatCleanup(details: AgentTeamDetails): string {
@@ -127,7 +129,7 @@ function formatRunSnapshot(run: RunSnapshot): string {
 
 function formatEffectiveStepTools(steps: StepSnapshot[]): string {
 	if (steps.length === 0) return "";
-	return ["", "## Effective step tools", ...steps.map((step) => `- ${modelText(step.id)} agent=${modelText(step.agentRef)}${optionalScalar(" model", step.model)}${optionalScalar(" thinking", step.thinking)} effectiveTools=${formatList(step.effectiveTools)}${optionalList(" extensionTools", step.extensionTools)}${optionalList(" skills", step.callerSkills)}`)].join("\n");
+	return ["", "## Effective step tools", ...steps.map((step) => `- ${modelText(step.id)} agent=${modelText(step.agentRef)}${optionalScalar(" model", step.model)}${optionalScalar(" thinking", step.thinking)}${optionalOutputLimit(step)} effectiveTools=${formatList(step.effectiveTools)}${optionalList(" extensionTools", step.extensionTools)}${optionalList(" skills", step.callerSkills)}`)].join("\n");
 }
 
 function formatMessageReceiptLine(receipt: NonNullable<AgentTeamDetails["message"]>): string {
@@ -149,6 +151,10 @@ function optionalScalar(label: string, value: string | undefined): string {
 	return value ? `${label}=${modelText(value)}` : "";
 }
 
+function optionalOutputLimit(step: StepSnapshot): string {
+	return step.outputLimit ? ` outputLimit=${modelText(formatStepOutputLimit(step.outputLimit))}` : "";
+}
+
 function formatCursor(cursor: string | undefined): string {
 	return cursor ? `Cursor: ${modelText(cursor)} (pass as run_status.cursor for later wait/debug reads)` : "Cursor: none returned";
 }
@@ -162,7 +168,7 @@ function formatStep(step: StepSnapshot): string {
 	const activity = step.lastActivity ? ` lastActivity=${JSON.stringify(modelText(step.lastActivity))}` : "";
 	const needs = step.needs.length > 0 ? step.needs.map(modelText).join(",") : "none";
 	const after = step.after.length > 0 ? ` after=${step.after.map(modelText).join(",")}` : "";
-	return `- ${modelText(step.id)}: ${modelText(step.status)} agent=${modelText(step.agentRef)}${optionalScalar(" model", step.model)}${optionalScalar(" thinking", step.thinking)} effectiveTools=${formatList(step.effectiveTools)}${optionalList(" extensionTools", step.extensionTools)}${optionalList(" skills", step.callerSkills)} needs=${needs}${after}${activity}${error}`;
+	return `- ${modelText(step.id)}: ${modelText(step.status)} agent=${modelText(step.agentRef)}${optionalScalar(" model", step.model)}${optionalScalar(" thinking", step.thinking)}${optionalOutputLimit(step)} effectiveTools=${formatList(step.effectiveTools)}${optionalList(" extensionTools", step.extensionTools)}${optionalList(" skills", step.callerSkills)} needs=${needs}${after}${activity}${error}`;
 }
 
 function formatEvent(event: BackgroundEvent): string {
@@ -202,12 +208,6 @@ function diagRow(item: AgentTeamDetails["diagnostics"][number]): string {
 
 function firstErrorDiagnostic(details: AgentTeamDetails): AgentTeamDetails["diagnostics"][number] | undefined {
 	return details.diagnostics.find((item) => item.severity === "error");
-}
-
-function messageChannelSemantics(channel: string): string {
-	if (channel === "steer") return "Channel steer queues the message for the active child after the current assistant turn finishes tool calls, before the next LLM call; use it for clarification or scope correction, not impatience.";
-	if (channel === "follow_up") return "Channel follow_up defers a live follow-up until the child is quiescent before terminalization, if still messageable. Use it only for a short in-scope addendum, such as asking the child to copy a needed artifact path into its final. It is not post-terminal chat or a request for a premature final.";
-	return "Channel semantics are defined by child Pi RPC delivery.";
 }
 
 export function formatDetailsForModelContent(details: AgentTeamDetails): string {

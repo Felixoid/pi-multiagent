@@ -7,7 +7,7 @@ import type { AgentConfig, ParentSkillInventory, ParentToolInfo, ParentToolInven
 import { resolveDetachedGraph, validatePreflightShape } from "../extensions/multiagent/src/planning.ts";
 import { findProjectSettingsFile } from "../extensions/multiagent/src/project-settings.ts";
 import { readSubagentSkillConfig } from "../extensions/multiagent/src/subagent-skills-config.ts";
-import { BUILTIN_CHILD_TOOL_NAMES, READONLY_CHILD_TOOL_NAMES } from "../extensions/multiagent/src/types.ts";
+import { BUILTIN_CHILD_TOOL_NAMES, DEFAULT_CONCURRENCY, MAX_ASSISTANT_FINAL_MESSAGES_PER_STEP, MAX_CONCURRENCY, MAX_STEP_OUTPUT_BYTES, READONLY_CHILD_TOOL_NAMES } from "../extensions/multiagent/src/types.ts";
 
 const parentTools: ParentToolInventory = { apiAvailable: true, errorMessage: undefined, tools: activeBuiltinTools() };
 const parentSkills: ParentSkillInventory = { apiAvailable: true, readActive: true, errorMessage: undefined, skills: [] };
@@ -86,7 +86,7 @@ test("resolveDetachedGraph rejects missing or mixed step agent binding", async (
 	assert.deepEqual(mixed.steps, []);
 });
 
-test("resolveDetachedGraph inherits library defaults and caps them by authority", async () => {
+test("resolveDetachedGraph inherits library defaults, applies selected limits, and caps tools by authority", async () => {
 	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-${Date.now()}`), { recursive: true });
 	const graph = resolveDetachedGraph(
 		{
@@ -111,6 +111,52 @@ test("resolveDetachedGraph inherits library defaults and caps them by authority"
 	assert.equal(graph.diagnostics.some((item) => item.code === "catalog-default-tools-capped" && item.severity === "warning" && item.message.includes("denied=bash")), true);
 	assert.deepEqual(graph.steps[1].agent.tools, READONLY_CHILD_TOOL_NAMES);
 	assert.equal(graph.limits.concurrency, 1);
+	assert.deepEqual(graph.steps[0].outputLimit, { maxBytes: MAX_STEP_OUTPUT_BYTES, maxAssistantFinals: MAX_ASSISTANT_FINAL_MESSAGES_PER_STEP });
+	const defaultLimits = resolveDetachedGraph({ objective: "defaults", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { system: "x" }, task: "x" }] }, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills }, undefined);
+	assert.equal(defaultLimits.limits.concurrency, DEFAULT_CONCURRENCY);
+	const highFanout = resolveDetachedGraph({ objective: "fanout", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { system: "x" }, task: "x" }], limits: { concurrency: MAX_CONCURRENCY } }, [], [], { cwd, invocationCwd: cwd, parentTools, parentSkills }, undefined);
+	assert.equal(highFanout.limits.concurrency, MAX_CONCURRENCY);
+});
+
+test("resolveDetachedGraph applies per-step model, thinking, and retained output limits", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-step-overrides-${Date.now()}`), { recursive: true });
+	const graph = resolveDetachedGraph(
+		{
+			objective: "step overrides",
+			authority: { allowFilesystemRead: true },
+			steps: [
+				{ id: "overridden", agent: { ref: "package:reviewer", model: "  provider/cheap  ", thinking: "low" }, task: "x", outputLimit: { maxBytes: 123, maxAssistantFinals: 2 } },
+				{ id: "metadata", agent: { ref: "package:critic" }, task: "y" },
+			],
+		},
+		[
+			{ ...packageAgent("reviewer", ["read"]), model: "provider/frontmatter", thinking: "high" },
+			{ ...packageAgent("critic", ["read"]), model: "provider/critic", thinking: "medium" },
+		],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(graph.diagnostics.some((item) => item.severity === "error"), false);
+	assert.equal(graph.steps[0]?.agent.model, "provider/cheap");
+	assert.equal(graph.steps[0]?.agent.thinking, "low");
+	assert.deepEqual(graph.steps[0]?.outputLimit, { maxBytes: 123, maxAssistantFinals: 2 });
+	assert.equal(graph.steps[1]?.agent.model, "provider/critic");
+	assert.equal(graph.steps[1]?.agent.thinking, "medium");
+});
+
+test("resolveDetachedGraph rejects blank step model and invalid retained output limits", async () => {
+	const cwd = await mkdir(join(tmpdir(), `pi-multiagent-plan-step-invalid-${Date.now()}`), { recursive: true });
+	const graph = resolveDetachedGraph(
+		{ objective: "bad", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { system: "x", model: "   " }, task: "x", outputLimit: { maxBytes: 0, maxAssistantFinals: 1 } }] },
+		[],
+		[],
+		{ cwd, invocationCwd: cwd, parentTools, parentSkills },
+		undefined,
+	);
+	assert.equal(graph.diagnostics.some((item) => item.code === "step-agent-model-required"), true);
+	assert.equal(graph.diagnostics.some((item) => item.code === "step-output-limit-invalid"), true);
+	assert.deepEqual(graph.steps, []);
 });
 
 test("resolveDetachedGraph rejects inherited catalog defaults capped to no tools", async () => {

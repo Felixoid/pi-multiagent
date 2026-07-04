@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+	DEFAULT_CONCURRENCY,
 	DEFAULT_MAX_RUN_SECONDS,
 	DEFAULT_NOTIFY_MAX_NOTICES,
 	DEFAULT_NOTIFY_MIN_INTERVAL_SECONDS,
@@ -140,10 +141,10 @@ function checkPublicSurfaceOwnership(): void {
 	requireFragments("README.md", readme, ["pushed notices are compact human receipts", "terminal step artifact paths", "`agent_team:live` widget", "shared footer status row", "Assistant text previews require `preview:true`", "raw events require `debugEvents:true`"]);
 	requireFragments("README.md", readme, ["structured `waitSeconds` receipt", "suppressed non-error activity", "Accepted means accepted for delivery to the live child", "explicit callable `exa_search` and `exa_fetch` `extensionTools`"]);
 	requireFragments("README.md", readme, ["source and file path stay provenance, not ranking signals", "JSON/API/headless supervision", "pass the returned `Cursor` value back", "`package:validator` requires effective `bash`", "`package:worker` requires effective `edit` or `write`"]);
-	requireFragments("README.md", readme, ["Every child process keeps at least the filesystem read/discovery suite", "effective tools/model lane", "launch time", "context overflow"]);
+		requireFragments("README.md", readme, ["Every child process keeps at least the filesystem read/discovery suite", "effective tools/model lane", "launch time", "context overflow", "steps[].agent.model", "steps[].agent.thinking", "steps[].outputLimit"]);
 	requireFragments("README.md", readme, ["model/provider availability follows normal Pi extension discovery", "callable extension-tool grants", "Project and user library sources load when requested", "--agent-team-subagent-skills enabled|disabled"]);
 	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["Action controls are strict", "Tool-call pseudo-schema", "Graph step object, used inside `graph.steps[]` only", "Do not send `{\"action\":\"step\"}`", "First successful graphFile run", "short process-local `runId`", "Tool profile decision matrix", "Graph design ladder", "trusted shell execution", "trusted mutation execution", "Improving this package"]);
-	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["all terminal step artifact metadata", "bounded task previews", "run_status.stepId", "Pushed notices are compact untrusted human receipts", "`agent_team:live` widget", "shared footer status row", "Assistant text previews require `preview:true`", "raw events require `debugEvents:true`"]);
+		requireFragments("skills/pi-multiagent/SKILL.md", skill, ["all terminal step artifact metadata", "bounded task previews", "run_status.stepId", "Pushed notices are compact untrusted human receipts", "`agent_team:live` widget", "shared footer status row", "Assistant text previews require `preview:true`", "raw events require `debugEvents:true`", "agent.model", "agent.thinking", "outputLimit"]);
 	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["structured wait receipt", "suppressed non-error activity", "accepted-for-delivery transport", "source and file path are provenance only", "`package:validator` fails planning without effective `bash`", "`package:worker` fails planning without effective `edit` or `write`", "Planning fails before launch unless explicit callable web search/fetch grants match live catalog provenance"]);
 	requireFragments("skills/pi-multiagent/references/graph-cookbook.md", cookbook, ["Choose a graph shape first", "Graph design ladder", "Task packet templates", "Parent graph packet", "Artifact handoff packet", "Partial evidence triage", "Web research with explicit catalog-copied provenance", "validation-matrix-gate.json"]);
 	requireFragments("skills/pi-multiagent/references/graph-cookbook.md", cookbook, ["tree-reduce-source-review.json", "product-experience-source-audit.json", "evidence-trace-audit.json", "Product/evidence audit packet", "JSON/API/headless use"]);
@@ -181,7 +182,7 @@ function checkLimitsContract(): void {
 	const fragments = [
 		`| Steps | ${MAX_STEPS} |`,
 		`| Dependencies per step | ${MAX_DEPENDENCIES_PER_STEP} |`,
-		`| Concurrency | 1 to ${MAX_CONCURRENCY}; default ${MAX_CONCURRENCY} |`,
+			`| Concurrency | 1 to ${MAX_CONCURRENCY}; default ${DEFAULT_CONCURRENCY} |`,
 		`1 to ${MAX_TIMEOUT_SECONDS_PER_STEP} seconds; \`timeoutSecondsPerStep\` defaults to ${DEFAULT_TIMEOUT_SECONDS_PER_STEP} seconds`,
 		`1 to ${MAX_MAX_RUN_SECONDS} seconds; default ${DEFAULT_MAX_RUN_SECONDS} seconds`,
 		`1 to ${MAX_TERMINAL_RETENTION_SECONDS} seconds; default ${DEFAULT_TERMINAL_RETENTION_SECONDS} seconds`,

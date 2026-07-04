@@ -24,6 +24,8 @@ import { buildRunSnapshot, buildStepSnapshots, countStepStatuses, findSinkStepId
 import { createStepOutputArtifact } from "./step-output-artifact.ts";
 import { stalledStepBlockerMessage } from "./stalled-step-diagnostics.ts";
 import { collectUpstreamOutputs } from "./upstream-outputs.ts";
+import { effectiveAgentInvocation } from "./agent-invocation.ts";
+import { nonDefaultStepOutputLimit } from "./step-output-limit.ts";
 import type { AgentDiagnostic, AgentTeamDetails, LibraryOptions, MessageChannel, ResolvedGraph, RunStatus, RunStatusWaitReceipt, StepArtifactReference, StepStatus, TeamStepSpec } from "./types.ts";
 import { DEFAULT_RESULT_PREVIEW_MAX_BYTES as PREVIEW_BYTES } from "./types.ts";
 
@@ -208,6 +210,7 @@ export class DetachedRun {
 				agent: state.spec.agent,
 				defaults: this.options.defaults,
 				limits: this.graph.limits,
+				outputLimit: state.spec.outputLimit,
 				cwd: state.spec.cwd,
 				promptPath,
 				spawnProcess: this.options.spawnProcess ?? spawn,
@@ -232,7 +235,7 @@ export class DetachedRun {
 	}
 
 	private createStepOutput(state: StepState, status: StepStatus, text: string, assistantFinals: string[] = [], stopReason?: string, nonFinalText?: string) {
-		return createStepOutputArtifact({ runId: this.id, objective: this.graph.objective, artifactStore: this.artifactStore, diagnostics: this.diagnostics, events: this.events, state, status, text, assistantFinals, stopReason, upstreamArtifacts: this.upstreamArtifactReferences(state.spec), nonFinalText });
+		return createStepOutputArtifact({ runId: this.id, objective: this.graph.objective, artifactStore: this.artifactStore, diagnostics: this.diagnostics, events: this.events, state, status, text, assistantFinals, stopReason, upstreamArtifacts: this.upstreamArtifactReferences(state.spec), nonFinalText, invocation: effectiveAgentInvocation(state.spec.agent, this.options.defaults), outputLimit: nonDefaultStepOutputLimit(state.spec.outputLimit) });
 	}
 
 	private updateLiveText(state: StepState, text: string) {

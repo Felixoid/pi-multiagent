@@ -202,6 +202,37 @@ Trusted command validation:
 }
 ```
 
+Step-local invocation and retained-output controls:
+
+```json
+{
+  "objective": "Use a cheap mapper and retain only a bounded result.",
+  "authority": {
+    "allowFilesystemRead": true
+  },
+  "steps": [
+    {
+      "id": "cheap-map",
+      "agent": {
+        "ref": "package:scout",
+        "model": "REPLACE_WITH_AVAILABLE_CHEAP_MODEL",
+        "thinking": "low"
+      },
+      "task": "Inspect the named files and return only the five facts needed by the reducer.",
+      "outputLimit": {
+        "maxBytes": 12000,
+        "maxAssistantFinals": 1
+      }
+    }
+  ],
+  "limits": {
+    "concurrency": 1
+  }
+}
+```
+
+`agent.model` and `agent.thinking` are child launch overrides for one step. Omit them to use agent metadata and parent launch defaults; whitespace-only `agent.model` is invalid. `outputLimit` is a retained assistant-output hard cap, not token/cost control and not the `run_status`/`step_result` preview `maxBytes`.
+
 Web research with explicit catalog-copied provenance:
 
 ```json

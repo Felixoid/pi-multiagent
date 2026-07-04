@@ -1,6 +1,7 @@
 /** Final-output helpers for detached runs. */
 
-import type { RunStatus, StepArtifactReference, StepOutput, StepStatus, TeamStepSpec } from "./types.ts";
+import type { AgentInvocationMetadata, RunStatus, StepArtifactReference, StepOutput, StepOutputLimit, StepStatus, TeamStepSpec } from "./types.ts";
+import { formatStepOutputLimit } from "./step-output-limit.ts";
 
 export const FINAL_INLINE_PREVIEW_CHARS = 6000;
 
@@ -15,6 +16,8 @@ interface StepFinalArtifactInput {
 	assistantFinals: string[];
 	nonFinalText: string | undefined;
 	stopReason: string | undefined;
+	invocation: AgentInvocationMetadata;
+	outputLimit: StepOutputLimit | undefined;
 	upstreamArtifacts: StepArtifactReference[];
 }
 
@@ -29,10 +32,11 @@ export function buildStepFinalArtifact(input: StepFinalArtifactInput): string {
 		`stopReason: ${input.stopReason ?? input.status}`,
 		`agentRef: ${input.step.agent.ref}`,
 		`agentSource: ${input.step.agent.source}`,
-		`model: ${input.step.agent.model ?? "inherit"}`,
-		`thinking: ${input.step.agent.thinking ?? "inherit"}`,
+		`model: ${input.invocation.model ?? "default"}`,
+		`thinking: ${input.invocation.thinking ?? "default"}`,
 		`effectiveTools: ${input.step.agent.tools.length > 0 ? input.step.agent.tools.join(", ") : "none"}`,
 		`extensionTools: ${input.step.agent.extensionTools.length > 0 ? input.step.agent.extensionTools.map((tool) => tool.name).join(", ") : "none"}`,
+		input.outputLimit ? `outputLimit: ${formatStepOutputLimit(input.outputLimit)}` : "",
 		`cwd: ${input.step.cwd ?? "default"}`,
 		`needs: ${input.step.needs.length > 0 ? input.step.needs.join(", ") : "none"}`,
 		`after: ${input.step.after.length > 0 ? input.step.after.join(", ") : "none"}`,

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Prepared `0.9.7` with maintainer-owned integration of accepted contributor signal: self-contained local test harness loading, per-step child `agent.model` / `agent.thinking` overrides, retained assistant-output `outputLimit` caps, and explicit high-fanout concurrency up to 10 while keeping default concurrency at 6.
+- Added graph planning/runtime/status coverage for step-local model/thinking precedence, whitespace-only model denial, non-default output-limit readback, retained-output hard failures, and default-6/explicit-10 concurrency behavior.
+- Updated README, `/skill:pi-multiagent`, cookbook guidance, package/public-doc guards, and package metadata for the new step controls while keeping scheduling, persistent runs, worktree isolation, and `instructions:` file ingress deferred to separate design work.
+
 ## 0.9.6 - 2026-05-29
 
 - Added public contributor guidance, GitHub PR/issue templates, and README contribution workflow notes for design-gated architecture changes, scoped PRs, release ownership, and validation expectations.

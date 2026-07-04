@@ -2,7 +2,7 @@
 
 `pi-multiagent` installs one Pi extension tool, `agent_team`, plus the `/skill:pi-multiagent` agent guide and schema-checked graph examples.
 
-Use `agent_team` when independent helper context materially improves a task: local reconnaissance, current web research, critique, validation proof, implementation review, or fan-in synthesis. The parent assistant remains the lead. Child output is evidence, not instructions. Child processes do not inherit the parent transcript, session, context files, prompt templates, themes, project `SYSTEM.md`, or ambient skill discovery. Subagent skill propagation is product-configured all-or-nothing: `--agent-team-subagent-skills enabled|disabled`, default `enabled`, passes all caller-visible Pi skills when enabled, and passes none when disabled. A child inherits the parent Pi model and thinking defaults at `start` launch time unless its agent metadata pins a model or thinking level; switching the parent model later does not hot-swap live children. Child model/provider availability follows normal Pi extension discovery for the child cwd and agent dir; explicit `extensionTools` grants are only for callable extension tools.
+Use `agent_team` when independent helper context materially improves a task: local reconnaissance, current web research, critique, validation proof, implementation review, or fan-in synthesis. The parent assistant remains the lead. Child output is evidence, not instructions. Child processes do not inherit the parent transcript, session, context files, prompt templates, themes, project `SYSTEM.md`, or ambient skill discovery. Subagent skill propagation is product-configured all-or-nothing: `--agent-team-subagent-skills enabled|disabled`, default `enabled`, passes all caller-visible Pi skills when enabled, and passes none when disabled. A child inherits the parent Pi model and thinking defaults at `start` launch time unless its agent metadata pins a model/thinking lane or the graph step sets `steps[].agent.model` / `steps[].agent.thinking`; step overrides win over agent metadata. Switching the parent model later does not hot-swap live children. Child model/provider availability follows normal Pi extension discovery for the child cwd and agent dir; explicit `extensionTools` grants are only for callable extension tools.
 
 This README is the **human/operator path** for install, trust, lifecycle, limits, first run, and source validation. The complete model-facing invocation contract lives in [`/skill:pi-multiagent`](skills/pi-multiagent/SKILL.md); graph choreography lives in the [graph cookbook](skills/pi-multiagent/references/graph-cookbook.md).
 
@@ -107,6 +107,12 @@ Retained detached runs keep terminal metadata and artifact paths only inside the
 ## Graph and authority boundaries
 
 Graphs are static DAGs. Bind each step to either inline `agent.system` or a source-qualified `agent.ref`; model synthesis as a normal dependent step. Use `needs` for success-gated dependencies and `after` when a downstream step should consume terminal evidence from failed or blocked lanes too. Sink steps, not array order, define caller-facing finals.
+
+Per-step child invocation controls are intentionally small:
+
+- `steps[].agent.model` is an optional child Pi model override. It is trimmed and must contain non-whitespace text; whitespace-only values fail graph planning instead of silently inheriting an expensive parent default. Planning validates shape only. Provider/model availability is discovered by the launched child Pi runtime.
+- `steps[].agent.thinking` is optional and accepts `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`; `inherit` is not a step value. Effective precedence is step override, then library agent metadata, then the parent launch defaults captured at `start`.
+- `steps[].outputLimit.maxBytes` and `steps[].outputLimit.maxAssistantFinals` are retained assistant-output hard caps for that step. They bound what `agent_team` will retain/accept from the child, not provider token generation, model cost, or the `run_status`/`step_result` preview `maxBytes` display cap. Non-default limits are shown in `run_status`/`step_result` step rows and final artifacts.
 
 Every child process keeps at least the filesystem read/discovery suite (`read`, `grep`, `find`, `ls`), so every runnable graph needs `authority.allowFilesystemRead:true`. Omit `agent.tools` for a catalog role to inherit its catalog `defaultTools` capped by graph authority; explicit `agent.tools` replaces the whole profile and then mandatory read/discovery is added. Use `agent.tools:[]` only to drop non-read catalog defaults while keeping read/discovery.
 
@@ -214,7 +220,7 @@ Before starting any graph with `bash`, verify the graph authority is limited to 
 | --- | --- |
 | Steps | 16 |
 | Dependencies per step | 12 |
-| Concurrency | 1 to 6; default 6 |
+| Concurrency | 1 to 10; default 6 |
 | Per-step timeout | 1 to 36000 seconds; `timeoutSecondsPerStep` defaults to 7200 seconds |
 | Max run time | 1 to 86400 seconds; default 86400 seconds |
 | Terminal retention | 1 to 604800 seconds; default 86400 seconds |
@@ -246,6 +252,8 @@ Before starting any graph with `bash`, verify the graph authority is limited to 
 | Built-in tool is rejected | Add `allowFilesystemRead:true`; add shell/mutation authority only when the delegated task really needs trusted shell or edit/write tools. `package:validator` requires effective `bash`; `package:worker` requires effective `edit` or `write`. |
 | Extension tool is rejected | Keep callable extension grants in `extensionTools` and copy source/scope/origin from `catalog`. |
 | Which model did a child run? | Check `run_status` step rows; they report the launch-time model/thinking lane. Parent model changes after `start` do not affect live children. |
+| Step model override is rejected | `steps[].agent.model` must contain non-whitespace text. Omit it to use agent metadata or parent launch defaults. |
+| Output seems capped | `steps[].outputLimit` is a hard retained-output cap; raise it only when retaining larger child evidence is worth the memory/IPC/artifact footprint. Use `preview.maxBytes` only for display trimming. |
 | Provider model is unavailable in a child | Install or enable the provider extension through normal Pi extension discovery for the child cwd/agent dir; one-off parent `pi -e` provider extensions are not inherited. |
 | Bash child is refused | Step cwd is inside a tree with `.pi/settings.json`; remove `bash`, change cwd, or run outside that settings tree. |
 | Message is denied or seems ignored | Target step may not be live, the run may be terminal/canceling, budget may be spent, or the accepted-for-delivery receipt may not have produced child output/compliance. |
