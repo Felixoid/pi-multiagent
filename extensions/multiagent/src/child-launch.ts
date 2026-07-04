@@ -18,11 +18,16 @@ export interface SpawnOptions {
 
 export type SpawnProcess = (command: string, args: string[], options: SpawnOptions) => ChildProcessWithoutNullStreams;
 
-export function buildPiArgs(agent: ResolvedAgent, defaults: AgentInvocationDefaults, promptPath: string): string[] {
+export interface ChildLaunchOptions {
+	sessionDir?: string;
+	sessionName?: string;
+}
+
+export function buildPiArgs(agent: ResolvedAgent, defaults: AgentInvocationDefaults, promptPath: string, launch: ChildLaunchOptions = {}): string[] {
 	const args = [
 		"--mode",
 		"rpc",
-		"--no-session",
+		...sessionArgs(launch),
 		...extensionArgs(agent),
 		"--no-context-files",
 		"--no-skills",
@@ -45,6 +50,13 @@ export function buildPiArgs(agent: ResolvedAgent, defaults: AgentInvocationDefau
 
 function hasMandatoryReadSuite(tools: string[]): boolean {
 	return READONLY_CHILD_TOOL_NAMES.every((tool) => tools.includes(tool));
+}
+
+function sessionArgs(launch: ChildLaunchOptions): string[] {
+	const args: string[] = [];
+	if (launch.sessionName) args.push("--name", launch.sessionName);
+	if (launch.sessionDir) args.push("--session-dir", launch.sessionDir);
+	return args;
 }
 
 function extensionArgs(agent: ResolvedAgent): string[] {

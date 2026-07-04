@@ -59,6 +59,7 @@ function summarizeRpc(event: BackgroundEvent): string {
 	if (event.label === "message_start" || event.label === "turn_start") return "model turn active (no output yet)";
 	if (event.label === "message_end") return "assistant message ended";
 	if (event.label === "agent_end") return "child terminal event";
+	if (event.label === "heartbeat") return "child heartbeat";
 	if (event.label === "terminalizing") return `terminalizing${event.preview ? ` [${event.preview}]` : ""}`;
 	if (event.label === "prompt") return event.status === "done" ? "prompt accepted; waiting for child output" : "child prompt sent";
 	if (event.label === "thinking") return event.status === "done" ? "reasoning ended" : "reasoning";
@@ -70,6 +71,9 @@ function summarizeRpc(event: BackgroundEvent): string {
 
 function summarizeParentMessage(event: BackgroundEvent): string {
 	const kind = event.label ?? "message";
+	if (event.status === "running") return `parent ${kind} sending`;
+	if (kind.endsWith("_queued")) return `parent ${kind.replace("_", " ")} queued`;
+	if (kind.endsWith("_consumed")) return `parent ${kind.replace("_", " ")} consumed by Pi queue`;
 	if (event.status === "done") return `parent ${kind} accepted for delivery`;
 	if (event.status === "error") return `parent ${kind} denied`;
 	return withStatus(`parent ${kind}`, event.status);

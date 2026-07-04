@@ -1,7 +1,5 @@
-import { spawn } from "node:child_process";
 import { createRunArtifactStore, cleanupRunArtifacts, type RunArtifactStore } from "./background-artifacts.ts";
 import { BackgroundEventStore } from "./background-events.ts";
-import { buildDelegatedTask, writePromptFile } from "./delegated-prompt.ts";
 import { isTerminalRunStatus, isTerminalStepStatus } from "./detached-output.ts";
 import { sendDetachedMessage } from "./detached-message.ts";
 import { selectOutputsForAction } from "./detached-output-selection.ts";
@@ -9,10 +7,8 @@ import { forgetDetachedRun } from "./detached-registry.ts";
 import { createPendingStepState, type StepState } from "./detached-state.ts";
 import { summarizeBackgroundEvent } from "./event-summary.ts";
 import { createStepActivityTracker } from "./step-activity.ts";
-import { validateLaunchCwd } from "./launch-cwd.ts";
 import { findStepLaunchDenial } from "./launch-denial.ts";
 import { createMessageReceiptCache } from "./message-idempotency.ts";
-import { RpcChildController } from "./rpc-child-controller.ts";
 import type { RpcStepResult } from "./rpc-child-types.ts";
 import { RunNotifier, stepNoticeReasons, terminalStepNoticeReasons } from "./run-notifier.ts";
 import type { DetachedRunDetailsOptions, DetachedRunEventInput } from "./detached-run-options.ts";
@@ -23,9 +19,9 @@ import { makeDetails, type AgentTeamRuntimeOptions, unrefTimer } from "./runtime
 import { buildRunSnapshot, buildStepSnapshots, countStepStatuses, findSinkStepIds } from "./run-snapshot.ts";
 import { createStepOutputArtifact } from "./step-output-artifact.ts";
 import { stalledStepBlockerMessage } from "./stalled-step-diagnostics.ts";
-import { collectUpstreamOutputs } from "./upstream-outputs.ts";
 import { effectiveAgentInvocation } from "./agent-invocation.ts";
 import { nonDefaultStepOutputLimit } from "./step-output-limit.ts";
+import { runDetachedStepRpc } from "./detached-step-runner.ts";
 import type { AgentDiagnostic, AgentTeamDetails, LibraryOptions, MessageChannel, ResolvedGraph, RunStatus, RunStatusWaitReceipt, StepArtifactReference, StepStatus, TeamStepSpec } from "./types.ts";
 import { DEFAULT_RESULT_PREVIEW_MAX_BYTES as PREVIEW_BYTES } from "./types.ts";
 
@@ -192,34 +188,7 @@ export class DetachedRun {
 
 	private async runStep(state: StepState) {
 		try {
-			if (state.status !== "running" || this.status !== "running") return;
-			const promptPath = writePromptFile(state.spec.agent, this.artifactStore, state.spec.id);
-			if (state.status !== "running" || this.status !== "running") return;
-			const launchDenial = findStepLaunchDenial(state.spec);
-			if (launchDenial) {
-				this.finishState(state, "failed", launchDenial);
-				return;
-			}
-			const cwdDenial = validateLaunchCwd(state.spec);
-			if (cwdDenial) {
-				this.finishState(state, "failed", cwdDenial);
-				return;
-			}
-			const task = buildDelegatedTask(this.graph.objective, state.spec, collectUpstreamOutputs(state.spec, this.states));
-			const controller = new RpcChildController({
-				agent: state.spec.agent,
-				defaults: this.options.defaults,
-				limits: this.graph.limits,
-				outputLimit: state.spec.outputLimit,
-				cwd: state.spec.cwd,
-				promptPath,
-				spawnProcess: this.options.spawnProcess ?? spawn,
-				ackTimeoutMs: this.options.rpcCommandAckTimeoutMs,
-				onText: (text) => this.updateLiveText(state, text),
-				onEvent: (event) => this.appendEvent({ ...event, stepId: state.spec.id }),
-			});
-			state.controller = controller;
-			this.finishFromRpcResult(state, await controller.run(task));
+			await runDetachedStepRpc({ runId: this.id, objective: this.graph.objective, limits: this.graph.limits, state, states: this.states, artifactStore: this.artifactStore, options: this.options, isRunRunning: () => this.status === "running", finishState: (target, status, message) => this.finishState(target, status, message), finishFromRpcResult: (target, result) => this.finishFromRpcResult(target, result), updateLiveText: (target, text) => this.updateLiveText(target, text), appendEvent: (event) => this.appendEvent(event), touch: () => this.touch() });
 		} catch (error) {
 			this.finishState(state, "failed", error instanceof Error ? error.message : String(error));
 		}
@@ -228,7 +197,9 @@ export class DetachedRun {
 	private finishFromRpcResult(state: StepState, result: RpcStepResult) {
 		const status = result.status === "timed_out" || result.status === "canceled" || result.status === "failed" ? result.status : "succeeded";
 		state.finalText = result.text;
+		state.nonFinalText = result.nonFinalText;
 		state.assistantFinals = result.assistantFinals;
+		state.childSession = result.childSession;
 		state.output = this.createStepOutput(state, status, result.text, result.assistantFinals, result.errorMessage, result.nonFinalText);
 		if (result.stderr.length > 0) this.appendEvent({ stepId: state.spec.id, type: "diagnostic", label: "stderr", preview: result.stderr, status: "done" });
 		this.finishState(state, status, result.errorMessage);
@@ -254,6 +225,7 @@ export class DetachedRun {
 		if (!state.output) {
 			const text = errorMessage ?? "";
 			state.finalText = text;
+			state.nonFinalText = undefined;
 			state.output = this.createStepOutput(state, status, text, [], errorMessage ?? status);
 		}
 		state.status = status;

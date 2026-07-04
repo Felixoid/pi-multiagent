@@ -20,6 +20,13 @@ test("buildPiArgs uses parent defaults when agent has no model metadata", () => 
 	assert.equal(args[args.indexOf("--thinking") + 1], "medium");
 });
 
+test("buildPiArgs launches persistent child sessions with deterministic session metadata", () => {
+	const args = buildPiArgs(resolvedAgent(), { model: undefined, thinking: undefined }, "/tmp/prompt.md", { sessionName: "agent_team r1/one inline:one", sessionDir: "/tmp/pi-sessions" });
+	assert.equal(args.includes("--no-session"), false);
+	assert.equal(args[args.indexOf("--name") + 1], "agent_team r1/one inline:one");
+	assert.equal(args[args.indexOf("--session-dir") + 1], "/tmp/pi-sessions");
+});
+
 test("buildPiArgs rejects resolved agents missing mandatory read/discovery", () => {
 	const agent = { ...resolvedAgent(), tools: [] };
 	assert.throws(() => buildPiArgs(agent, { model: undefined, thinking: undefined }, "/tmp/prompt.md"), /mandatory read\/discovery/);

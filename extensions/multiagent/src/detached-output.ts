@@ -1,6 +1,6 @@
 /** Final-output helpers for detached runs. */
 
-import type { AgentInvocationMetadata, RunStatus, StepArtifactReference, StepOutput, StepOutputLimit, StepStatus, TeamStepSpec } from "./types.ts";
+import type { AgentInvocationMetadata, ChildSessionMetadata, RunStatus, StepArtifactReference, StepOutput, StepOutputLimit, StepRetryRecord, StepStatus, TeamStepSpec } from "./types.ts";
 import { formatStepOutputLimit } from "./step-output-limit.ts";
 
 export const FINAL_INLINE_PREVIEW_CHARS = 6000;
@@ -19,6 +19,8 @@ interface StepFinalArtifactInput {
 	invocation: AgentInvocationMetadata;
 	outputLimit: StepOutputLimit | undefined;
 	upstreamArtifacts: StepArtifactReference[];
+	childSession: ChildSessionMetadata | undefined;
+	retryHistory: StepRetryRecord[];
 }
 
 export function buildStepFinalArtifact(input: StepFinalArtifactInput): string {
@@ -43,6 +45,12 @@ export function buildStepFinalArtifact(input: StepFinalArtifactInput): string {
 		`startedAt: ${input.startedAt ?? ""}`,
 		`endedAt: ${input.endedAt}`,
 		"",
+		"## Child session",
+		formatChildSession(input.childSession),
+		"",
+		"## Retry history",
+		formatRetryHistory(input.retryHistory),
+		"",
 		"## Upstream artifacts",
 		formatUpstreamArtifacts(input.upstreamArtifacts),
 		"",
@@ -64,9 +72,11 @@ function formatUpstreamArtifacts(upstreamArtifacts: StepArtifactReference[]): st
 }
 
 function formatStepFinalBody(text: string, assistantFinals: string[], nonFinalText: string | undefined): string {
-	if (assistantFinals.length === 1) return assistantFinals[0] ?? "";
-	if (assistantFinals.length > 1) return formatAssistantFinalMessages(assistantFinals);
-	if (nonFinalText !== undefined && nonFinalText.trim().length > 0) return formatNonFinalText(nonFinalText);
+	const sections: string[] = [];
+	if (assistantFinals.length === 1) sections.push(assistantFinals[0] ?? "");
+	else if (assistantFinals.length > 1) sections.push(formatAssistantFinalMessages(assistantFinals));
+	if (nonFinalText !== undefined && nonFinalText.trim().length > 0) sections.push(formatNonFinalText(nonFinalText));
+	if (sections.length > 0) return sections.join("\n\n");
 	return fallbackFinalText(text);
 }
 
@@ -75,11 +85,36 @@ export function formatAssistantFinalMessages(texts: string[]): string {
 }
 
 export function formatNonFinalText(text: string): string {
-	return ["## Non-final assistant evidence", "", "This text was captured before a successful assistant final. It is retained as bounded failure/cancel/timeout evidence, not as a completed child answer.", "", text].join("\n");
+	return ["## Non-final assistant evidence", "", "This text was captured outside a successful assistant final. It is retained as bounded failure/cancel/timeout or later-partial evidence, not as a completed child answer.", "", text].join("\n");
+}
+
+function formatChildSession(session: ChildSessionMetadata | undefined): string {
+	if (!session) return "unavailable";
+	return [
+		`sessionId: ${session.sessionId ?? "unknown"}`,
+		`sessionName: ${session.sessionName ?? "unknown"}`,
+		`sessionFile: ${session.sessionFile ?? "unknown"}`,
+		`sessionDir: ${session.sessionDir ?? "unknown"}`,
+		`launchSessionDir: ${session.launchSessionDir ?? "default"}`,
+		`source: ${session.stateSource}`,
+	].join("\n");
+}
+
+function formatRetryHistory(history: StepRetryRecord[]): string {
+	if (history.length === 0) return "none";
+	return history.map((entry) => `- attempt ${entry.attempt}: ${entry.reason}${entry.childSession?.sessionFile ? ` childSessionFile=${JSON.stringify(entry.childSession.sessionFile)}` : ""}`).join("\n");
 }
 
 function fallbackFinalText(text: string): string {
 	return ["## Final text", "", text].join("\n");
+}
+
+export function formatStepOutputText(text: string, assistantFinals: string[], nonFinalText: string | undefined): string {
+	const sections: string[] = [];
+	if (assistantFinals.length > 0) sections.push(assistantFinals.length === 1 ? assistantFinals[0] ?? "" : formatAssistantFinalMessages(assistantFinals));
+	if (nonFinalText && nonFinalText.trim().length > 0) sections.push(formatNonFinalText(nonFinalText));
+	if (sections.length > 0) return sections.join("\n\n");
+	return text;
 }
 
 export function boundedFinalPreview(text: string): string {

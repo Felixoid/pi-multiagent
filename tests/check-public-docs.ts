@@ -30,6 +30,7 @@ import {
 	MAX_TIMEOUT_SECONDS_PER_STEP,
 	RPC_RECORD_MAX_CHARS,
 } from "../extensions/multiagent/src/types.ts";
+import { RELEASE_PACKAGE_MANAGER } from "./package-policy.ts";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const packageMetadata = readPackageMetadata();
@@ -39,6 +40,7 @@ const publicFiles = [
 	"package.json",
 	"README.md",
 	"CHANGELOG.md",
+	"CONTRIBUTING.md",
 	...collectFiles("agents", ".md"),
 	...collectFiles("examples", ".json"),
 	...collectFiles("skills", ".md"),
@@ -54,7 +56,7 @@ for (const file of publicFiles) {
 
 checkPinnedGithubTags();
 checkCatalogIsAuthoritative();
-checkRemovedTrustGateAndSourceScoringCopy();
+checkCatalogProvenanceAndAuthorityOwnership();
 checkPublicSurfaceOwnership();
 checkActionSnippetHygiene();
 checkTimeoutContract();
@@ -124,31 +126,32 @@ function checkCatalogIsAuthoritative(): void {
 	}
 }
 
-function checkRemovedTrustGateAndSourceScoringCopy(): void {
-	const files = ["README.md", ...collectFiles("skills", ".md"), ...collectFiles("examples", ".json")];
-	const banned = ["allowLocalSource", "allowUserSource", "allowProjectSource", "trustedSources", "source trust gate", "trust-gate", "local-source trust authority", "source-scoring", "source scoring", "source score", "file-path-scoring", "file-path scoring", "file path scoring", "rank by source", "rank by file path"];
-	for (const file of files) {
-		const text = readFileSync(join(packageRoot, file), "utf8");
-		for (const fragment of banned) if (text.includes(fragment)) failures.push(`${file}: removed trust-gate/source-scoring copy is not public active copy: ${JSON.stringify(fragment)}`);
-	}
+function checkCatalogProvenanceAndAuthorityOwnership(): void {
+	const readme = readFileSync(join(packageRoot, "README.md"), "utf8");
+	const skill = readFileSync(join(packageRoot, "skills/pi-multiagent/SKILL.md"), "utf8");
+	const cookbook = readFileSync(join(packageRoot, "skills/pi-multiagent/references/graph-cookbook.md"), "utf8");
+	requireFragments("README.md", readme, ["catalog` output is authoritative", "Catalog query routing scores role names/ref names", "source and file path are provenance only", "active extension-tool provenance"]);
+	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["Runtime catalog output is authoritative", "Query routing scores role names/ref names", "source and file path are provenance only", "Put authority decisions under `graph.authority`", "explicit callable `extensionTools` grants"]);
+	requireFragments("skills/pi-multiagent/references/graph-cookbook.md", cookbook, ["Copy extension-tool provenance from live `catalog` output", "Web research with explicit catalog-copied provenance", "trusted shell execution", "trusted mutation execution"]);
 }
 
 function checkPublicSurfaceOwnership(): void {
 	const readme = readFileSync(join(packageRoot, "README.md"), "utf8");
 	const skill = readFileSync(join(packageRoot, "skills/pi-multiagent/SKILL.md"), "utf8");
 	const cookbook = readFileSync(join(packageRoot, "skills/pi-multiagent/references/graph-cookbook.md"), "utf8");
-	requireFragments("README.md", readme, ["human/operator path", "minimum read-only run", "First successful `graphFile` run", "local-read-only-graph.json", "Do not put `action`, `runId`, nested `graphFile`", "short process-local `runId`", "Cleanup is evidence deletion", "trusted shell execution", "trusted mutation execution", "release-readiness-review.json", "pnpm run gate"]);
-	requireFragments("README.md", readme, ["pushed notices are compact human receipts", "terminal step artifact paths", "`agent_team:live` widget", "shared footer status row", "Assistant text previews require `preview:true`", "raw events require `debugEvents:true`"]);
-	requireFragments("README.md", readme, ["structured `waitSeconds` receipt", "suppressed non-error activity", "Accepted means accepted for delivery to the live child", "explicit callable `exa_search` and `exa_fetch` `extensionTools`"]);
-	requireFragments("README.md", readme, ["source and file path stay provenance, not ranking signals", "JSON/API/headless supervision", "pass the returned `Cursor` value back", "`package:validator` requires effective `bash`", "`package:worker` requires effective `edit` or `write`"]);
-		requireFragments("README.md", readme, ["Every child process keeps at least the filesystem read/discovery suite", "effective tools/model lane", "launch time", "context overflow", "steps[].agent.model", "steps[].agent.thinking", "steps[].outputLimit"]);
-	requireFragments("README.md", readme, ["model/provider availability follows normal Pi extension discovery", "callable extension-tool grants", "Project and user library sources load when requested", "--agent-team-subagent-skills enabled|disabled"]);
-	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["Action controls are strict", "Tool-call pseudo-schema", "Graph step object, used inside `graph.steps[]` only", "Do not send `{\"action\":\"step\"}`", "First successful graphFile run", "short process-local `runId`", "Tool profile decision matrix", "Graph design ladder", "trusted shell execution", "trusted mutation execution", "Improving this package"]);
-		requireFragments("skills/pi-multiagent/SKILL.md", skill, ["all terminal step artifact metadata", "bounded task previews", "run_status.stepId", "Pushed notices are compact untrusted human receipts", "`agent_team:live` widget", "shared footer status row", "Assistant text previews require `preview:true`", "raw events require `debugEvents:true`", "agent.model", "agent.thinking", "outputLimit"]);
+	const contributing = readFileSync(join(packageRoot, "CONTRIBUTING.md"), "utf8");
+	requireFragments("README.md", readme, ["human/operator path", "What gets installed", "`/skill:pi-multiagent`", "Action rule of thumb", "minimum read-only run", "First successful `graphFile` run", "local-read-only-graph.json", "Do not put `action`, `runId`, nested `graphFile`", "short `runId` such as `r1`", "Cleanup is evidence deletion", "catalog` output is authoritative", "routing tags", "default built-in tool profiles"]);
+	requireFragments("README.md", readme, ["Which document owns what", "full `agent_team` action/schema", "graph design ladder", "CONTRIBUTING.md", "normal persistent Pi sessions", "stored by Pi"]);
+	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["Action controls are strict", "Tool-call pseudo-schema", "Graph step object, used inside `graph.steps[]` only", "Do not send `{\"action\":\"step\"}`", "short process-local `runId`", "Tool profile decision matrix", "Authority policy and child runtime", "Extension tools", "Supervision and evidence", "Runtime limits", "Troubleshooting contract"]);
+	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["all terminal step artifact metadata", "bounded task previews", "run_status.stepId", "Pushed notices are compact untrusted human receipts", "`agent_team:live` widget", "shared footer status row", "Assistant text previews require `preview:true`", "raw events require `debugEvents:true`", "agent.model", "agent.thinking", "outputLimit"]);
 	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["structured wait receipt", "suppressed non-error activity", "accepted-for-delivery transport", "source and file path are provenance only", "`package:validator` fails planning without effective `bash`", "`package:worker` fails planning without effective `edit` or `write`", "Planning fails before launch unless explicit callable web search/fetch grants match live catalog provenance"]);
-	requireFragments("skills/pi-multiagent/references/graph-cookbook.md", cookbook, ["Choose a graph shape first", "Graph design ladder", "Task packet templates", "Parent graph packet", "Artifact handoff packet", "Partial evidence triage", "Web research with explicit catalog-copied provenance", "validation-matrix-gate.json"]);
-	requireFragments("skills/pi-multiagent/references/graph-cookbook.md", cookbook, ["tree-reduce-source-review.json", "product-experience-source-audit.json", "evidence-trace-audit.json", "Product/evidence audit packet", "JSON/API/headless use"]);
-	requireFragments("skills/pi-multiagent/references/graph-cookbook.md", cookbook, ["Copy/adapt warning", "graphFile", "trusted shell execution", "trusted mutation execution", "Add `preview:true` only when bounded assistant text belongs", "Use `debugEvents:true` only for package debugging", "Every child keeps mandatory read/discovery", "--agent-team-subagent-skills enabled|disabled"]);
+	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["--agent-team-subagent-skills enabled|disabled", "Parent abort before registration cancels setup", "Escape cancels or aborts the parent surface", "Non-final assistant evidence", "Recoverable child context overflow", "normal persistent Pi sessions", "does not pass `--no-session`", "child session metadata", "progress-watchdog", "read-only idempotent step may be retried once", "Queue observations may report queued, consumed, no-next-turn, or consumption-unproven"]);
+	requireFragments("skills/pi-multiagent/SKILL.md", skill, ["Read controls belong only on `run_status` or `step_result`", "`# agent_team error`", "package `ok:false` is surfaced as a Pi tool-result error", "`steer` queues after the current child turn/tool calls", "`follow_up` waits until the child is quiescent", "duplicate `clientMessageId` values reuse the original receipt", "Graph `needs` / `after` gates are model dependencies, not human approval checkpoints"]);
+	requireFragments("skills/pi-multiagent/references/graph-cookbook.md", cookbook, ["Choose a graph shape first", "Graph design ladder", "Contract quick links", "canonical action, graph schema, authority, tool, model/thinking, `outputLimit`, limits", "Task packet templates", "Parent graph packet", "Artifact handoff packet", "Partial evidence triage", "Web research with explicit catalog-copied provenance", "validation-matrix-gate.json"]);
+	requireFragments("skills/pi-multiagent/references/graph-cookbook.md", cookbook, ["tree-reduce-source-review.json", "product-experience-source-audit.json", "evidence-trace-audit.json", "Product/evidence audit packet", "JSON/API/headless use", "Starting a copied graph file", "Common graph snippets"]);
+	requireFragments("skills/pi-multiagent/references/graph-cookbook.md", cookbook, ["Copy/adapt warning", "graphFile", "trusted shell execution", "trusted mutation execution", "Add `preview:true` only when bounded assistant text belongs", "Use `debugEvents:true` only for package debugging", "Graph `needs` / `after` gates are model dependencies, not human approval checkpoints", "Fallback synthesis after mixed lanes", "Use `after` for fallback synthesis", "not a hidden runtime fallback"]);
+	requireFragments("CONTRIBUTING.md", contributing, ["Major runtime or live-integration changes", "meaningful articulated graph through terminal state", "do not count final-less, stalled, or canceled runs as GO evidence"]);
+	requireFragments("CONTRIBUTING.md", contributing, ["tests/package-policy.ts", "check:release:offline", "check:release:npm", "dirty-tree PR validation"]);
 }
 
 function requireFragments(file: string, text: string, fragments: string[]): void {
@@ -169,7 +172,7 @@ function checkTimeoutContract(): void {
 	const explicitTimeoutPattern = /"timeoutSecondsPerStep"\s*:\s*([0-9]+)/g;
 	for (const file of checkedFiles) {
 		const text = readFileSync(join(packageRoot, file), "utf8");
-		if (["README.md", "skills/pi-multiagent/SKILL.md", "skills/pi-multiagent/references/graph-cookbook.md"].includes(file) && !text.includes(requiredDefaultCopy)) failures.push(`${file}: missing timeoutSecondsPerStep ${requiredDefaultCopy}`);
+		if (["skills/pi-multiagent/SKILL.md", "skills/pi-multiagent/references/graph-cookbook.md"].includes(file) && !text.includes(requiredDefaultCopy)) failures.push(`${file}: missing timeoutSecondsPerStep ${requiredDefaultCopy}`);
 		for (const match of text.matchAll(explicitTimeoutPattern)) {
 			const seconds = Number(match[1]);
 			if (seconds < DEFAULT_TIMEOUT_SECONDS_PER_STEP) failures.push(`${file}:${lineNumberAt(text, match.index)} timeoutSecondsPerStep ${seconds} is below the ${DEFAULT_TIMEOUT_SECONDS_PER_STEP}-second default`);
@@ -178,11 +181,11 @@ function checkTimeoutContract(): void {
 }
 
 function checkLimitsContract(): void {
-	const readme = readFileSync(join(packageRoot, "README.md"), "utf8");
+	const skill = readFileSync(join(packageRoot, "skills/pi-multiagent/SKILL.md"), "utf8");
 	const fragments = [
 		`| Steps | ${MAX_STEPS} |`,
 		`| Dependencies per step | ${MAX_DEPENDENCIES_PER_STEP} |`,
-			`| Concurrency | 1 to ${MAX_CONCURRENCY}; default ${DEFAULT_CONCURRENCY} |`,
+		`| Concurrency | 1 to ${MAX_CONCURRENCY}; default ${DEFAULT_CONCURRENCY} |`,
 		`1 to ${MAX_TIMEOUT_SECONDS_PER_STEP} seconds; \`timeoutSecondsPerStep\` defaults to ${DEFAULT_TIMEOUT_SECONDS_PER_STEP} seconds`,
 		`1 to ${MAX_MAX_RUN_SECONDS} seconds; default ${DEFAULT_MAX_RUN_SECONDS} seconds`,
 		`1 to ${MAX_TERMINAL_RETENTION_SECONDS} seconds; default ${DEFAULT_TERMINAL_RETENTION_SECONDS} seconds`,
@@ -197,7 +200,7 @@ function checkLimitsContract(): void {
 		`| Retained assistant output per step | ${MAX_STEP_OUTPUT_BYTES} bytes across non-empty assistant finals; max ${MAX_ASSISTANT_FINAL_MESSAGES_PER_STEP} non-empty assistant finals |`,
 		`| RPC JSONL record parse cap | ${RPC_RECORD_MAX_CHARS / 1024 / 1024} MiB |`,
 	];
-	for (const fragment of fragments) if (!readme.includes(fragment)) failures.push(`README.md: missing runtime limit copy ${JSON.stringify(fragment)}`);
+	for (const fragment of fragments) if (!skill.includes(fragment)) failures.push(`skills/pi-multiagent/SKILL.md: missing runtime limit copy ${JSON.stringify(fragment)}`);
 }
 
 function checkGraphExamples(): void {
@@ -287,18 +290,21 @@ function globSegmentPattern(pattern: string): RegExp {
 }
 
 function checkReleaseHandoffContract(): void {
-	const readme = readFileSync(join(packageRoot, "README.md"), "utf8");
+	const contributing = readFileSync(join(packageRoot, "CONTRIBUTING.md"), "utf8");
 	const releaseReadiness = readFileSync(join(packageRoot, "examples/graphs/release-readiness-review.json"), "utf8");
 	const parsed: unknown = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 	if (!isObject(parsed)) {
 		failures.push("package.json: release guardrail contract requires object metadata");
 		return;
 	}
-	const smokeCommandIndex = readme.indexOf("PI_MULTIAGENT_REAL_SMOKE=1 PI_MULTIAGENT_REAL_SMOKE_TIMEOUT_MS=180000 pnpm run smoke:pi");
-	const smokeApprovalIndex = readme.indexOf("Run it only with explicit operator approval");
-	if (smokeCommandIndex === -1 || smokeApprovalIndex === -1 || Math.abs(smokeCommandIndex - smokeApprovalIndex) > 300) failures.push("README.md: real-runtime smoke command keeps explicit operator approval caveat adjacent");
+	const smokeCommandIndex = contributing.indexOf("PI_MULTIAGENT_REAL_SMOKE=1 PI_MULTIAGENT_REAL_SMOKE_TIMEOUT_MS=180000 pnpm run smoke:pi");
+	const smokeApprovalIndex = contributing.indexOf("Run it only with explicit operator approval");
+	if (smokeCommandIndex === -1 || smokeApprovalIndex === -1 || Math.abs(smokeCommandIndex - smokeApprovalIndex) > 300) failures.push("CONTRIBUTING.md: real-runtime smoke command keeps explicit operator approval caveat adjacent");
 	for (const fragment of ["not-executed human-owned next actions", "npm publish", "GitHub Release creation", "gh release view verification"]) if (!releaseReadiness.includes(fragment)) failures.push(`examples/graphs/release-readiness-review.json: readiness decision includes ${fragment}`);
-	if (parsed.packageManager !== "pnpm@11.1.2") failures.push("package.json: packageManager pins the release package manager used by this repository");
+	if (parsed.packageManager !== RELEASE_PACKAGE_MANAGER) failures.push("package.json: packageManager pins the release package manager used by this repository");
+	const scripts = parsed.scripts;
+	if (!isObject(scripts) || scripts["check:release:offline"] !== "node --experimental-strip-types tests/check-release-ready.ts --offline") failures.push("package.json: release readiness exposes the offline clean-commit lineage guard");
+	if (!isObject(scripts) || scripts["check:release:npm"] !== "node --experimental-strip-types tests/check-release-ready.ts --npm") failures.push("package.json: release readiness exposes the npm availability guard");
 	if (!isObject(parsed.engines) || typeof parsed.engines.node !== "string") failures.push("package.json: engines.node documents supported runtime floor");
 	if (!isObject(parsed.publishConfig) || parsed.publishConfig.access !== "public") failures.push("package.json: publishConfig.access remains public for npm package metadata");
 }

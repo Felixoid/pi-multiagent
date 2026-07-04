@@ -4,8 +4,11 @@ import { formatWaitReceiptForModel } from "./wait-receipt-format.ts";
 import { TRUST_NOTICE } from "./trust-notice.ts";
 import { formatStepOutputLimit } from "./step-output-limit.ts";
 import { messageChannelSemantics } from "./message-channel-copy.ts";
+import { boundedModelText, escapeOutputBlockMarkers, modelText } from "./result-model-text.ts";
+import { compactOutputChildSession, formatOutputChildSession, optionalChildSession, optionalRetryHistory } from "./result-session-format.ts";
 import type { AgentTeamDetails, BackgroundEvent, RunSnapshot, StepOutput, StepSnapshot } from "./types.ts";
 
+export { boundedModelText, escapeOutputBlockMarkers, modelText } from "./result-model-text.ts";
 export { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, describeOutputLimit, truncateHead } from "./result-truncation.ts";
 
 const OBJECTIVE_PREVIEW_CHARS = 1000;
@@ -168,7 +171,7 @@ function formatStep(step: StepSnapshot): string {
 	const activity = step.lastActivity ? ` lastActivity=${JSON.stringify(modelText(step.lastActivity))}` : "";
 	const needs = step.needs.length > 0 ? step.needs.map(modelText).join(",") : "none";
 	const after = step.after.length > 0 ? ` after=${step.after.map(modelText).join(",")}` : "";
-	return `- ${modelText(step.id)}: ${modelText(step.status)} agent=${modelText(step.agentRef)}${optionalScalar(" model", step.model)}${optionalScalar(" thinking", step.thinking)}${optionalOutputLimit(step)} effectiveTools=${formatList(step.effectiveTools)}${optionalList(" extensionTools", step.extensionTools)}${optionalList(" skills", step.callerSkills)} needs=${needs}${after}${activity}${error}`;
+	return `- ${modelText(step.id)}: ${modelText(step.status)} agent=${modelText(step.agentRef)}${optionalScalar(" model", step.model)}${optionalScalar(" thinking", step.thinking)}${optionalOutputLimit(step)} effectiveTools=${formatList(step.effectiveTools)}${optionalList(" extensionTools", step.extensionTools)}${optionalList(" skills", step.callerSkills)} needs=${needs}${after}${optionalChildSession(step)}${optionalRetryHistory(step)}${activity}${error}`;
 }
 
 function formatEvent(event: BackgroundEvent): string {
@@ -180,8 +183,10 @@ function formatEvent(event: BackgroundEvent): string {
 function formatOutput(output: StepOutput): string {
 	const header = `### ${modelText(output.stepId)} [${modelText(output.status)}]`;
 	const artifact = output.filePath ? `Artifact: ${JSON.stringify(output.filePath)} (${output.chars} chars full text)` : "Artifact: none yet";
+	const session = formatOutputChildSession(output);
+	const retry = output.retryHistory && output.retryHistory.length > 0 ? `Retry history: ${output.retryHistory.length} transport retry attempt(s)` : "";
 	const preview = output.text && output.text.length > 0 ? `[agent_team output begin: ${modelText(output.stepId)}]\n${escapeOutputBlockMarkers(output.text)}\n[agent_team output end: ${modelText(output.stepId)}]` : emptyOutputPreview(output);
-	return `${header}\n${artifact}\n${preview}`;
+	return [header, artifact, session, retry, preview].filter(Boolean).join("\n");
 }
 
 function emptyOutputPreview(output: StepOutput): string {
@@ -220,19 +225,5 @@ function formatArtifactIndex(outputs: StepOutput[], empty: string): string {
 
 function formatOutputArtifact(output: StepOutput): string {
 	const artifact = output.filePath ? JSON.stringify(output.filePath) : "none";
-	return `- ${modelText(output.stepId)} [${modelText(output.status)}]: artifact=${artifact} chars=${output.chars}`;
-}
-
-export function modelText(text: string): string {
-	return escapeOutputBlockMarkers(text).replace(/\s+/g, " ").trim();
-}
-
-function boundedModelText(text: string, maxChars: number): string {
-	const normalized = modelText(text);
-	if (normalized.length <= maxChars) return normalized;
-	return `${normalized.slice(0, maxChars)}... [truncated ${normalized.length - maxChars} chars]`;
-}
-
-function escapeOutputBlockMarkers(output: string): string {
-	return output.replace(/(^|\r\n|\n|\r|\u2028|\u2029)(\[agent_team output (?:begin|end):)/g, "$1\\$2");
+	return `- ${modelText(output.stepId)} [${modelText(output.status)}]: artifact=${artifact} chars=${output.chars}${compactOutputChildSession(output)}${output.retryHistory && output.retryHistory.length > 0 ? ` retries=${output.retryHistory.length}` : ""}`;
 }
