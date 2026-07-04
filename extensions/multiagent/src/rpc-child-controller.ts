@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { AssistantOutputBudget, type OutputBudgetFailure } from "./rpc-output-budget.ts";
 import { RpcCommandQueue, type RpcCommandAck } from "./rpc-command-queue.ts";
-import { combinedAssistantFinals, envelopeParentMessage, extractAgentEndErrorMessage, extractAgentEndStopReason, extractAssistantErrorMessage, extractAssistantStopReason, extractAssistantText, extractEventText, hasAgentEndErrorMetadata, isAgentEndContextOverflow, isContextOverflowStop, stringField } from "./rpc-record-utils.ts";
+import { combinedAssistantFinals, envelopeParentMessage, extractAgentEndErrorMessage, extractAgentEndStopReason, extractEventText, hasAgentEndErrorMetadata, isAgentEndContextOverflow } from "./rpc-record-utils.ts";
 import { STDERR_PREVIEW_CHARS, type StepStatus } from "./types.ts";
 import { buildPiArgs, getPiInvocation, killProcessTree, type SpawnProcess } from "./child-launch.ts";
 import { type RpcJsonRecord } from "./rpc-jsonl.ts";
@@ -10,12 +10,14 @@ import { handleUnattendedUiRequest } from "./rpc-ui-request.ts";
 import { ParentMessageBudget } from "./rpc-parent-message-budget.ts";
 import { handleAssistantMessageUpdate } from "./rpc-message-update.ts";
 import { terminateRpcChild } from "./rpc-child-termination.ts";
-import { firstNonBlank, toolErrorPreview } from "./rpc-tool-events.ts";
+import { scheduleRpcExitCloseout } from "./rpc-child-exit-closeout.ts";
+import { RpcChildObservability } from "./rpc-child-observability.ts";
+import { processAssistantMessageEnd } from "./rpc-message-end-handler.ts";
+import { emptyAssistantFinalFailure, failureRpcStepResult, successRpcStepResult, terminalStopReason } from "./rpc-step-result-builder.ts";
+import { handleRpcToolEvent } from "./rpc-tool-event-handler.ts";
 import type { RpcChildControllerOptions, RpcStepResult } from "./rpc-child-types.ts";
 
 const ACK_TIMEOUT_MS = 10_000;
-const EXIT_CLOSE_GRACE_MS = 500;
-
 export class RpcChildController {
 	private readonly options: RpcChildControllerOptions;
 	private readonly commands: RpcCommandQueue;
@@ -31,6 +33,7 @@ export class RpcChildController {
 	private agentEndErrorMessage: string | undefined;
 	private lastAssistantStopReason: string | undefined;
 	private lastAssistantErrorMessage: string | undefined;
+	private agentEndWillRetry = false;
 	private recoveringOverflow = false;
 	private output = "";
 	private assistantFinals: string[] = [];
@@ -38,6 +41,7 @@ export class RpcChildController {
 	private liveText = "";
 	private stderr = "";
 	private readonly parentMessageBudget = new ParentMessageBudget();
+	private readonly observability: RpcChildObservability;
 	private timeoutTimer: ReturnType<typeof setTimeout> | undefined;
 	private killTimer: ReturnType<typeof setTimeout> | undefined;
 	private exitCloseTimer: ReturnType<typeof setTimeout> | undefined;
@@ -50,13 +54,16 @@ export class RpcChildController {
 		this.outputBudget = new AssistantOutputBudget(options.outputLimit);
 		const ackTimeoutMs = Number.isFinite(options.ackTimeoutMs) && options.ackTimeoutMs !== undefined && options.ackTimeoutMs > 0 ? Math.trunc(options.ackTimeoutMs) : ACK_TIMEOUT_MS;
 		this.commands = new RpcCommandQueue(ackTimeoutMs);
+		this.observability = new RpcChildObservability({ sessionDir: options.sessionDir, progressWatchdogMs: options.progressWatchdogMs, onEvent: options.onEvent, onChildSession: options.onChildSession });
 	}
 
 	async run(task: string): Promise<RpcStepResult> {
-		const args = buildPiArgs(this.options.agent, this.options.defaults, this.options.promptPath);
+		const args = buildPiArgs(this.options.agent, this.options.defaults, this.options.promptPath, { sessionDir: this.options.sessionDir, sessionName: this.options.sessionName });
 		const invocation = getPiInvocation(args, this.options.cwd);
 		this.child = this.spawnProcess(invocation.command, invocation.args, { cwd: this.options.cwd, shell: false, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
 		this.child.unref?.();
+		this.observability.progress("spawn");
+		this.observability.start();
 		this.options.onEvent({ type: "rpc", label: "spawn", preview: "child spawned", status: "running" });
 		this.listeners.attach(this.child, { onRecord: (record) => this.handleRecord(record), onStdoutError: (message) => this.handleStdoutError(message), onStderrData: (text) => this.appendStderr(text), onStderrError: (error) => this.handleStderrError(error), onStdinError: (error) => this.handleStdinError(error), onChildError: (error) => this.fail("failed", `Subagent process error: ${error.message}`), onExit: () => this.handleExit(), onClose: () => this.handleClose() });
 		this.timeoutTimer = setTimeout(() => this.fail("timed_out", this.recoveringOverflow ? `context-overflow-unrecovered: timeoutSecondsPerStep=${this.options.limits.timeoutSecondsPerStep} exceeded before a valid post-recovery assistant final.` : `timeoutSecondsPerStep=${this.options.limits.timeoutSecondsPerStep} exceeded.`, this.recoveringOverflow ? "context-overflow-unrecovered" : "timed_out"), this.options.limits.timeoutSecondsPerStep * 1000);
@@ -64,10 +71,15 @@ export class RpcChildController {
 		const completion = new Promise<RpcStepResult>((resolve) => {
 			this.completionResolve = resolve;
 		});
+		await this.observability.captureChildSession((command) => this.sendCommand(command));
+		if (this.closingResult || this.finalized) return completion;
 		this.options.onEvent({ type: "rpc", label: "prompt", preview: "sent", status: "running" });
 		const ack = await this.sendCommand({ type: "prompt", message: task });
 		if (!ack.success) this.fail("failed", ack.error ?? "Prompt rejected.");
-		else this.options.onEvent({ type: "rpc", label: "prompt", preview: "accepted", status: "done" });
+		else {
+			this.observability.progress("prompt accepted");
+			this.options.onEvent({ type: "rpc", label: "prompt", preview: "accepted", status: "done" });
+		}
 		return completion;
 	}
 
@@ -76,8 +88,10 @@ export class RpcChildController {
 		const budgetError = this.parentMessageBudget.reserve(text);
 		if (budgetError) return { success: false, error: budgetError };
 		const commandType = channel === "steer" ? "steer" : "follow_up";
-		const ack = await this.sendCommand({ type: commandType, message: envelopeParentMessage(channel, text) });
-		this.options.onEvent({ type: "parent_message", label: channel, preview: ack.success ? "accepted for delivery" : ack.error, status: ack.success ? "done" : "error" });
+		const message = envelopeParentMessage(channel, text);
+		this.observability.messageSending(channel);
+		const ack = await this.sendCommand({ type: commandType, message });
+		this.observability.messageAck(channel, message, ack);
 		this.maybeFinalize();
 		return ack;
 	}
@@ -130,10 +144,12 @@ export class RpcChildController {
 	private handleRecord(record: RpcJsonRecord): void {
 		if (this.finalized || this.closingResult) return;
 		const type = typeof record.type === "string" ? record.type : "unknown";
+		this.observability.progress(type);
 		if (type === "response") {
 			this.handleResponse(record);
 			return;
 		}
+		if (this.observability.handleQueueUpdate(record)) return;
 		if (type === "message_update") this.handleMessageUpdate(record);
 		else if (type === "message_end") this.handleMessageEnd(record);
 		else if (type === "agent_end") this.handleAgentEnd(record);
@@ -150,6 +166,7 @@ export class RpcChildController {
 
 	private handleAgentEnd(record: RpcJsonRecord): void {
 		this.sawAgentEnd = true;
+		this.agentEndWillRetry = record.willRetry === true;
 		this.agentEndStopReason = extractAgentEndStopReason(record);
 		this.agentEndErrorMessage = extractAgentEndErrorMessage(record);
 		const preview = this.agentEndStopReason ? `stopReason=${this.agentEndStopReason}` : "terminal event";
@@ -160,51 +177,32 @@ export class RpcChildController {
 			return;
 		}
 		if (hasAgentEndErrorMetadata(record) && (!this.agentEndStopReason || this.agentEndStopReason === "stop")) this.agentEndStopReason = "error";
+		if (this.agentEndWillRetry) {
+			this.options.onEvent({ type: "rpc", label: "agent_end_retry", preview: "child reported a continuation after agent_end", status: "running" });
+			this.sawAgentEnd = false;
+			this.agentEndStopReason = undefined;
+			this.agentEndErrorMessage = undefined;
+			return;
+		}
+		this.observability.terminalNoRetry();
 		this.maybeFinalize();
 	}
 
 	private handleMessageUpdate(record: RpcJsonRecord): void {
+		this.observability.progress("assistant message update");
 		this.liveText = handleAssistantMessageUpdate(record, { liveText: this.liveText, outputBudget: this.outputBudget, failOutputBudget: (failure) => this.failOutputBudget(failure), onText: this.options.onText, onEvent: this.options.onEvent });
 	}
 
 	private handleMessageEnd(record: RpcJsonRecord): void {
-		const text = extractAssistantText(record);
-		const stopReason = extractAssistantStopReason(record);
-		const errorMessage = extractAssistantErrorMessage(record);
-		this.lastAssistantStopReason = stopReason;
-		this.lastAssistantErrorMessage = errorMessage;
-		if (isContextOverflowStop(stopReason, errorMessage, extractEventText(record))) {
-			this.enterContextOverflowRecovery("assistant", errorMessage ?? extractEventText(record));
-			return;
-		}
-		if (text === undefined) return;
-		const check = this.outputBudget.measureText(text, "assistant final");
-		if (!check.ok) {
-			this.failOutputBudget(check.failure);
-			return;
-		}
-		const nonEmpty = text.trim().length > 0;
-		const finalFailure = nonEmpty ? this.outputBudget.canAcceptAssistantFinal(text) : undefined;
-		if (finalFailure) {
-			this.failOutputBudget(finalFailure);
-			return;
-		}
-		this.output = text;
-		this.liveText = text;
-		this.outputBudget.setLiveTextBytes(check.bytes);
-		this.options.onText?.(text);
-		if (!nonEmpty) {
-			this.options.onEvent({ type: "rpc", label: "assistant_final_empty", preview: "empty assistant final ignored", status: "done" });
-			return;
-		}
-		if (stopReason && stopReason !== "stop") {
-			const message = errorMessage ? `assistant message ended with stopReason ${stopReason}: ${errorMessage}` : `assistant message ended with stopReason ${stopReason}`;
-			this.options.onEvent({ type: "rpc", label: "assistant_nonfinal", preview: message, status: stopReason === "tooluse" ? "done" : "error" });
-			return;
-		}
-		this.outputBudget.recordAssistantFinal(text);
-		this.assistantFinals.push(text);
-		this.options.onEvent({ type: "assistant_final", label: "assistant", preview: text, status: "done" });
+		this.observability.progress("assistant message_end");
+		const result = processAssistantMessageEnd(record, { output: this.output, liveText: this.liveText, assistantFinals: this.assistantFinals }, { outputBudget: this.outputBudget, onText: this.options.onText, onEvent: this.options.onEvent });
+		this.output = result.output;
+		this.liveText = result.liveText;
+		this.assistantFinals = result.assistantFinals;
+		this.lastAssistantStopReason = result.stopReason;
+		this.lastAssistantErrorMessage = result.errorMessage;
+		if (result.contextOverflowMessage !== undefined) this.enterContextOverflowRecovery("assistant", result.contextOverflowMessage);
+		else if (result.outputBudgetFailure) this.failOutputBudget(result.outputBudgetFailure);
 	}
 
 	private failOutputBudget(failure: OutputBudgetFailure): void {
@@ -212,12 +210,8 @@ export class RpcChildController {
 	}
 
 	private handleToolEvent(type: string, record: RpcJsonRecord): void {
-		const name = stringField(record.toolName) ?? "tool";
-		const isEnd = type === "tool_execution_end";
-		const isError = isEnd && record.isError === true;
-		const status = isEnd ? (isError ? "error" : "done") : "running";
-		const preview = isError ? toolErrorPreview(record) : type.replace("tool_execution_", "");
-		this.options.onEvent({ type: "tool", label: name, preview, status });
+		this.observability.progress(type);
+		handleRpcToolEvent(type, record, this.options.onEvent);
 	}
 
 	private handleUiRequest(record: RpcJsonRecord): void {
@@ -226,8 +220,7 @@ export class RpcChildController {
 
 	private maybeFinalize(): void {
 		if (!this.sawAgentEnd || this.commands.pendingCount > 0 || this.finalized || this.closingResult) return;
-		const stopReason = this.agentEndStopReason ?? this.lastAssistantStopReason;
-		const errorMessage = this.agentEndErrorMessage ?? this.lastAssistantErrorMessage;
+		const { stopReason, errorMessage } = terminalStopReason(this.agentEndStopReason, this.agentEndErrorMessage, this.lastAssistantStopReason, this.lastAssistantErrorMessage);
 		if (stopReason && stopReason !== "stop") {
 			const message = errorMessage ? `Subagent RPC ended with stopReason ${stopReason}: ${errorMessage}` : `Subagent RPC ended with stopReason ${stopReason}.`;
 			this.fail("failed", message, stopReason === "error" ? "assistant-error" : "assistant-stop");
@@ -235,20 +228,15 @@ export class RpcChildController {
 		}
 		const text = combinedAssistantFinals(this.assistantFinals);
 		if (text.trim().length === 0) {
-			if (this.recoveringOverflow) {
-				this.fail("failed", "context-overflow-unrecovered: child reported context overflow but did not produce a valid post-recovery assistant final.", "context-overflow-unrecovered");
-				return;
-			}
-			this.fail("failed", "assistant-final-empty: no assistant final text captured after agent_end and command ACKs.", "assistant-final-empty");
+			const failure = emptyAssistantFinalFailure(this.recoveringOverflow);
+			this.fail("failed", failure.message, failure.label);
 			return;
 		}
-		this.finalize({ status: "succeeded", text, assistantFinals: [...this.assistantFinals], stderr: this.stderr, errorMessage: undefined });
+		this.finalize(successRpcStepResult({ text, assistantFinals: [...this.assistantFinals], stderr: this.stderr, childSession: this.observability.session, parentMessagesAccepted: this.observability.parentMessagesAccepted }));
 	}
 
 	private failureResult(status: StepStatus, message: string): RpcStepResult {
-		const assistantFinals = [...this.assistantFinals];
-		const nonFinalText = assistantFinals.length === 0 ? firstNonBlank(this.output, this.liveText) : undefined;
-		return { status, text: this.output, assistantFinals, stderr: this.stderr, errorMessage: message, ...(nonFinalText ? { nonFinalText } : {}) };
+		return failureRpcStepResult({ status, message, output: this.output, liveText: this.liveText, assistantFinals: [...this.assistantFinals], stderr: this.stderr, lastAssistantStopReason: this.lastAssistantStopReason, childSession: this.observability.session, parentMessagesAccepted: this.observability.parentMessagesAccepted });
 	}
 
 	private enterContextOverflowRecovery(label: string, message: string): void {
@@ -259,12 +247,14 @@ export class RpcChildController {
 		this.agentEndErrorMessage = undefined;
 		this.lastAssistantStopReason = undefined;
 		this.lastAssistantErrorMessage = undefined;
+		this.agentEndWillRetry = false;
 		this.output = "";
 		this.liveText = "";
 		this.assistantFinals = [];
 		this.outputBudget.resetLiveText();
 		this.outputBudget.resetAssistantFinals();
 		this.options.onText?.(this.liveText);
+		this.observability.progress("context overflow recovery");
 		this.options.onEvent({ type: "diagnostic", label: "context_overflow_recovering", preview: `recovering after ${label}: ${message}`, status: "running" });
 	}
 
@@ -276,28 +266,22 @@ export class RpcChildController {
 
 	private finalize(result: RpcStepResult): void {
 		if (this.finalized || this.closingResult) return;
-		this.closingResult = result;
-		this.options.onEvent({ type: "rpc", label: "terminalizing", preview: result.status, status: "running" });
+		this.observability.terminalNoRetry();
+		const closingResult = { ...result, childSession: result.childSession ?? this.observability.session };
+		this.closingResult = closingResult;
+		this.observability.stop();
+		this.options.onEvent({ type: "rpc", label: "terminalizing", preview: closingResult.status, status: "running" });
 		if (this.timeoutTimer) clearTimeout(this.timeoutTimer);
 		this.commands.closeWith((command) => `RPC command ${command} closed by finalization.`);
 		this.listeners.detachIo(false, true);
 		this.terminateChild();
-		if (!this.child || this.childClosed || this.childExited || this.child.exitCode !== null) this.complete(result);
+		if (!this.child || this.childClosed || this.childExited || this.child.exitCode !== null) this.complete(closingResult);
 	}
 
 	private handleExit(): void {
 		this.childExited = true;
 		if (this.childClosed || this.finalized) return;
-		this.exitCloseTimer = setTimeout(() => {
-			if (this.childClosed || this.finalized) return;
-			if (this.closingResult) {
-				this.options.onEvent({ type: "diagnostic", label: "process-exit", preview: `stdio close open ${EXIT_CLOSE_GRACE_MS}ms after exit; closeout forced`, status: "error" });
-				this.complete(this.closingResult);
-				return;
-			}
-			this.fail("failed", this.recoveringOverflow ? "context-overflow-unrecovered: child process exited before a valid post-recovery assistant final." : "Subagent process exited before terminal agent_end.", this.recoveringOverflow ? "context-overflow-unrecovered" : "failed");
-		}, EXIT_CLOSE_GRACE_MS);
-		this.exitCloseTimer.unref?.();
+		this.exitCloseTimer = scheduleRpcExitCloseout({ childClosed: () => this.childClosed, finalized: () => this.finalized, closingResult: () => this.closingResult, recoveringOverflow: () => this.recoveringOverflow, onEvent: this.options.onEvent, complete: (result) => this.complete(result), fail: (status, message, label) => this.fail(status, message, label) });
 	}
 
 	private handleClose(): void {
@@ -314,6 +298,7 @@ export class RpcChildController {
 	private complete(result: RpcStepResult): void {
 		if (this.finalized) return;
 		this.finalized = true;
+		this.observability.stop();
 		if (this.timeoutTimer) clearTimeout(this.timeoutTimer);
 		if (this.killTimer) clearTimeout(this.killTimer);
 		if (this.exitCloseTimer) clearTimeout(this.exitCloseTimer);
@@ -328,7 +313,9 @@ export class RpcChildController {
 
 	private appendStderr(text: string): void {
 		if (text.length === 0) return;
+		this.observability.progress("stderr");
 		this.stderr = `${this.stderr}${text}`;
 		if (this.stderr.length > STDERR_PREVIEW_CHARS) this.stderr = this.stderr.slice(this.stderr.length - STDERR_PREVIEW_CHARS);
 	}
+
 }

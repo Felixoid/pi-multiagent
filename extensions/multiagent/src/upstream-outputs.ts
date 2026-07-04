@@ -1,5 +1,6 @@
 /** Dependency output selection for delegated step prompts. */
 
+import { formatStepOutputText } from "./detached-output.ts";
 import type { StepState } from "./detached-state.ts";
 import type { StepOutput, TeamStepSpec } from "./types.ts";
 import { INLINE_HANDOFF_CHARS, INLINE_HANDOFF_PREVIEW_CHARS } from "./types.ts";
@@ -15,7 +16,7 @@ function upstreamRefs(step: TeamStepSpec): string[] {
 function upstreamOutput(stepId: string, states: Map<string, StepState>): StepOutput | undefined {
 	const state = states.get(stepId);
 	if (!state?.output) return undefined;
-	const fullText = state.finalText;
+	const fullText = state.finalText === undefined ? undefined : formatStepOutputText(state.finalText, state.assistantFinals, state.nonFinalText);
 	if (fullText === undefined) return { ...state.output, text: undefined };
 	if (fullText.length <= INLINE_HANDOFF_CHARS) return { ...state.output, text: fullText };
 	return { ...state.output, text: oversizedUpstreamPreview(fullText, state.output.filePath) };

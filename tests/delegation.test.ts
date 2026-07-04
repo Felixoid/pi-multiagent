@@ -92,13 +92,19 @@ type HarnessMode =
 	"agent-end-tool-use" |
 	"delay-message-ack" |
 	"empty-final" |
+	"final-then-live-timeout" |
+	"first-transport-error-then-auto" |
 	"exit-no-close-after-terminal" |
 	"exit-no-close-before-terminal" |
 	"first-empty-then-auto" |
+	"first-final-then-nonstop" |
+	"first-final-then-nonstop-agent-stop" |
+	"get-state-unavailable" |
 	"hold" |
 	"ignore-kill" |
 	"message-deny" |
 	"message-timeout" |
+	"nonstop-message-end-no-final" |
 	"context-overflow-no-recovery" |
 	"context-overflow-recover" |
 	"context-overflow-stale-final-recover" |
@@ -111,8 +117,12 @@ function rpcHarness(mode: HarnessMode = "auto", onSpawn?: (args: string[]) => vo
 	const children: FakeChild[] = [];
 	const messages: { type: string; message: string }[] = [];
 	let held: FakeChild | undefined;
+	let pendingReleaseText: string | undefined;
 	const release = (text = "ok") => {
-		if (!held) return;
+		if (!held) {
+			pendingReleaseText = text;
+			return;
+		}
 		sendAssistantFinal(held, text);
 		held = undefined;
 	};
@@ -135,6 +145,12 @@ function rpcHarness(mode: HarnessMode = "auto", onSpawn?: (args: string[]) => vo
 					const line = buffer.slice(0, newline);
 					buffer = buffer.slice(newline + 1);
 					handleCommand(child, line, mode, childIndex, messages, (liveChild) => {
+						if (pendingReleaseText !== undefined) {
+							const text = pendingReleaseText;
+							pendingReleaseText = undefined;
+							setImmediate(() => sendAssistantFinal(liveChild, text));
+							return;
+						}
 						held = liveChild;
 					});
 					newline = buffer.indexOf("\n");
@@ -148,6 +164,11 @@ function rpcHarness(mode: HarnessMode = "auto", onSpawn?: (args: string[]) => vo
 function handleCommand(child: FakeChild, line: string, mode: HarnessMode, childIndex: number, messages: RpcHarness["messages"], hold: (child: FakeChild) => void): void {
 	const command = JSON.parse(line) as { id: string; type: string; message?: string };
 	if (command.message) messages.push({ type: command.type, message: command.message });
+	if (command.type === "get_state") {
+		if (mode === "get-state-unavailable") sendRpcAck(child, command.id, command.type, false, "get_state unavailable");
+		else sendRpcAck(child, command.id, command.type, true, undefined, { sessionId: `child-${childIndex}`, sessionName: `fake child ${childIndex}`, sessionFile: `/tmp/pi-agent-team-child-${childIndex}.jsonl`, pendingMessageCount: 0 });
+		return;
+	}
 	if (command.type === "prompt" && mode === "agent-end-before-ack") {
 		sendAssistantEvents(child, "ok");
 		setImmediate(() => {
@@ -170,6 +191,31 @@ function handleCommand(child: FakeChild, line: string, mode: HarnessMode, childI
 			sendAssistantFinal(child, "ok");
 		});
 		else if (mode === "empty-final" || (mode === "first-empty-then-auto" && childIndex === 0)) setImmediate(() => sendAssistantFinal(child, ""));
+		else if (mode === "final-then-live-timeout") setImmediate(() => {
+			sendAssistantMessageEnd(child, "first accepted final");
+			sendAssistantLiveText(child, "later partial before timeout");
+		});
+		else if (mode === "first-transport-error-then-auto" && childIndex === 0) setImmediate(() => {
+			child.stdout.write(`${JSON.stringify({ type: "agent_end", stopReason: "error", error: { message: "upstream connect error or disconnect/reset before headers. reset reason: connection termination" }, messages: [] })}\n`);
+			child.close(0);
+		});
+		else if (mode === "nonstop-message-end-no-final") setImmediate(() => {
+			sendAssistantMessageEnd(child, "partial text before length stop", "length", "Length limit reached.");
+			sendAgentEnd(child, "");
+			child.close(0);
+		});
+		else if (mode === "first-final-then-nonstop" && childIndex === 0) setImmediate(() => {
+			sendAssistantMessageEnd(child, "accepted final before stop");
+			sendAssistantMessageEnd(child, "partial after accepted final", "length", "Length limit reached.");
+			sendAgentEnd(child, "length", "Length limit reached.");
+			child.close(0);
+		});
+		else if (mode === "first-final-then-nonstop-agent-stop" && childIndex === 0) setImmediate(() => {
+			sendAssistantMessageEnd(child, "accepted final before stop");
+			sendAssistantMessageEnd(child, "partial after accepted final", "length", "Length limit reached.");
+			sendAgentEnd(child);
+			child.close(0);
+		});
 		else if (mode === "exit-no-close-after-terminal") setImmediate(() => sendAssistantEvents(child, "ok"));
 		else if (mode === "exit-no-close-before-terminal") setImmediate(() => child.exitOnly(null, "SIGTERM"));
 		else if (mode === "agent-end-nested-length") setImmediate(() => sendNestedStopReasonFinal(child, "ok", "length", "Length limit reached."));
@@ -218,8 +264,8 @@ function handleCommand(child: FakeChild, line: string, mode: HarnessMode, childI
 	sendRpcAck(child, command.id, command.type);
 }
 
-function sendRpcAck(child: FakeChild, id: string, command: string, success = true, error?: string): void {
-	child.stdout.write(`${JSON.stringify({ type: "response", id, command, success, ...(error ? { error } : {}) })}\n`);
+function sendRpcAck(child: FakeChild, id: string, command: string, success = true, error?: string, data?: unknown): void {
+	child.stdout.write(`${JSON.stringify({ type: "response", id, command, success, ...(error ? { error } : {}), ...(data === undefined ? {} : { data }) })}\n`);
 }
 
 function sendAssistantEvents(child: FakeChild, text: string): void {
@@ -365,6 +411,9 @@ test("start returns a registered runId and run_status exposes final output", asy
 	assert.equal(compact.details.outputs[0]?.text, undefined);
 	const runStatusResult = await runAgentTeam({ action: "run_status", runId: runId ?? "", preview: true }, options);
 	assert.equal(runStatusResult.details.outputs[0]?.text, "ok");
+	assert.equal(runStatusResult.details.steps[0]?.childSession?.sessionFile, "/tmp/pi-agent-team-child-0.jsonl");
+	assert.equal(runStatusResult.details.outputs[0]?.childSession?.sessionId, "child-0");
+	assert.match(runStatusResult.content[0].text, /childSession=.*pi-agent-team-child-0\.jsonl/);
 	const artifactPath = runStatusResult.details.outputs[0]?.filePath;
 	assert.ok(artifactPath);
 	const artifact = await readFile(artifactPath, "utf8");
@@ -380,6 +429,9 @@ test("start returns a registered runId and run_status exposes final output", asy
 	assert.match(artifact, /cwd: .*pi-multiagent-detached-/);
 	assert.match(artifact, /needs: none/);
 	assert.match(artifact, /after: none/);
+	assert.match(artifact, /## Child session\nsessionId: child-0/);
+	assert.match(artifact, /sessionFile: \/tmp\/pi-agent-team-child-0\.jsonl/);
+	assert.match(artifact, /## Retry history\nnone/);
 	assert.match(artifact, /## Upstream artifacts\nnone/);
 	assert.match(artifact, /## Task\n\nReturn ok\./);
 	assert.match(artifact, /\n\nok\n?$/);
@@ -389,6 +441,26 @@ test("start returns a registered runId and run_status exposes final output", asy
 	assert.equal(debug.details.run?.lastEvent, "terminal: succeeded");
 	assert.equal(harness.messages[0]?.type, "prompt");
 	assert.equal(harness.messages[0]?.message.includes("Objective:"), true);
+});
+
+test("unavailable child session metadata does not compact a launch dir as an audit pointer", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-child-session-unavailable-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("get-state-unavailable");
+	const options = makeOptions(root, harness.spawn, { sessionDir: "/tmp/pi-agent-team-custom-sessions" });
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "succeeded");
+	assert.equal(terminal.details.steps[0]?.childSession?.stateSource, "unavailable");
+	assert.equal(terminal.details.steps[0]?.childSession?.sessionDir, undefined);
+	assert.equal(terminal.details.steps[0]?.childSession?.launchSessionDir, "/tmp/pi-agent-team-custom-sessions");
+	assert.match(terminal.content[0].text, /childSession=unavailable/);
+	assert.doesNotMatch(terminal.content[0].text, /childSession="\/tmp\/pi-agent-team-custom-sessions"/);
+	const artifact = await readFile(terminal.details.outputs[0]?.filePath ?? "", "utf8");
+	assert.match(artifact, /sessionDir: unknown/);
+	assert.match(artifact, /launchSessionDir: \/tmp\/pi-agent-team-custom-sessions/);
+	assert.match(artifact, /source: unavailable/);
+	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
 test("child tool_execution_end error is visible without forcing step failure", async () => {
@@ -570,6 +642,40 @@ test("start launches write-capable package worker when graph authority grants th
 	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
+test("transport failure retries one read-only idempotent step and records retry history", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-transport-retry-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("first-transport-error-then-auto");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "succeeded");
+	assert.equal(harness.children.length, 2);
+	assert.equal(terminal.details.steps[0]?.retryHistory?.length, 1);
+	assert.equal(terminal.details.outputs[0]?.retryHistory?.length, 1);
+	assert.match(terminal.content[0].text, /retries=1/);
+	const artifact = await readFile(terminal.details.outputs[0]?.filePath ?? "", "utf8");
+	assert.match(artifact, /## Retry history\n- attempt 1: .*upstream connect error/);
+	const debug = await runAgentTeam({ action: "run_status", runId, cursor: "0", debugEvents: true }, options);
+	assert.equal(debug.details.events.some((event) => event.label === "transport_retry"), true);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("transport failure is not retried when the step has non-read-only built-ins", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-transport-no-retry-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("first-transport-error-then-auto");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam({ action: "start", graph: { objective: "no retry", authority: { allowFilesystemRead: true, allowShellTools: true }, steps: [{ id: "one", agent: { system: "Probe with bash.", tools: ["bash"] }, task: "Probe with bash." }], limits: { timeoutSecondsPerStep: 30 } }, options: { terminalRetentionSeconds: 30 } }, options);
+	const runId = started.details.run?.runId ?? "";
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "failed");
+	assert.equal(harness.children.length, 1);
+	assert.equal(terminal.details.steps[0]?.retryHistory, undefined);
+	assert.equal(terminal.details.outputs[0]?.retryHistory, undefined);
+	assert.match(terminal.details.steps[0]?.errorMessage ?? "", /upstream connect error/);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
 test("empty assistant final fails the step instead of succeeding with an empty artifact", async () => {
 	const root = await mkdir(join(tmpdir(), `pi-multiagent-empty-final-${Date.now()}`), { recursive: true });
 	const harness = rpcHarness("empty-final");
@@ -641,6 +747,106 @@ test("message_update text streaming without final text is treated as failed term
 	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
+test("non-stop assistant message_end is retained as non-final failure evidence", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-nonstop-message-end-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("nonstop-message-end-no-final");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "failed");
+	assert.equal(terminal.details.outputs[0]?.status, "failed");
+	assert.match(terminal.details.steps[0]?.errorMessage ?? "", /stopReason length/);
+	assert.match(terminal.details.outputs[0]?.text ?? "", /## Non-final assistant evidence/);
+	assert.match(terminal.details.outputs[0]?.text ?? "", /partial text before length stop/);
+	assert.doesNotMatch(terminal.details.outputs[0]?.text ?? "", /## Final text/);
+	const artifact = await readFile(terminal.details.outputs[0]?.filePath ?? "", "utf8");
+	assert.match(artifact, /## Non-final assistant evidence/);
+	assert.match(artifact, /partial text before length stop/);
+	assert.doesNotMatch(artifact, /## Final text/);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("non-stop message_end after accepted final bypasses final-count budget and remains non-final evidence", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-nonstop-after-final-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("first-final-then-nonstop");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph([{ id: "one", agent: { system: "Return ok." }, task: "Return ok.", outputLimit: { maxBytes: 4 * 1024 * 1024, maxAssistantFinals: 1 } }]), options);
+	const runId = started.details.run?.runId ?? "";
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "failed");
+	assert.equal(terminal.details.outputs[0]?.status, "failed");
+	assert.match(terminal.details.steps[0]?.errorMessage ?? "", /stopReason length/);
+	assert.doesNotMatch(terminal.details.steps[0]?.errorMessage ?? "", /too many non-empty assistant finals/);
+	assert.match(terminal.details.outputs[0]?.text ?? "", /accepted final before stop/);
+	assert.match(terminal.details.outputs[0]?.text ?? "", /## Non-final assistant evidence/);
+	assert.match(terminal.details.outputs[0]?.text ?? "", /partial after accepted final/);
+	const artifact = await readFile(terminal.details.outputs[0]?.filePath ?? "", "utf8");
+	assert.match(artifact, /accepted final before stop/);
+	assert.match(artifact, /## Non-final assistant evidence/);
+	assert.match(artifact, /partial after accepted final/);
+	assert.doesNotMatch(artifact, /too many non-empty assistant finals/);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("agent_end stop does not mask a later non-stop assistant message_end", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-nonstop-mask-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("first-final-then-nonstop-agent-stop");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "failed");
+	assert.equal(terminal.details.outputs[0]?.status, "failed");
+	assert.match(terminal.details.steps[0]?.errorMessage ?? "", /stopReason length/);
+	assert.match(terminal.details.outputs[0]?.text ?? "", /accepted final before stop/);
+	assert.match(terminal.details.outputs[0]?.text ?? "", /## Non-final assistant evidence/);
+	assert.match(terminal.details.outputs[0]?.text ?? "", /partial after accepted final/);
+	const artifact = await readFile(terminal.details.outputs[0]?.filePath ?? "", "utf8");
+	assert.match(artifact, /accepted final before stop/);
+	assert.match(artifact, /## Non-final assistant evidence/);
+	assert.match(artifact, /partial after accepted final/);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("after handoff preserves non-final evidence label from failed upstream", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-after-nonfinal-label-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("first-final-then-nonstop");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam(graph([
+		{ id: "bad", agent: { system: "Return partial." }, task: "Return partial.", outputLimit: { maxBytes: 4 * 1024 * 1024, maxAssistantFinals: 1 } },
+		{ id: "afterer", agent: { system: "Use failed evidence." }, task: "Use failed evidence.", after: ["bad"] },
+	]), options);
+	const runId = started.details.run?.runId ?? "";
+	const terminal = await waitTerminal(root, runId, options);
+	assert.equal(terminal.details.run?.status, "mixed");
+	assert.equal(terminal.details.steps.find((step) => step.id === "bad")?.status, "failed");
+	assert.equal(terminal.details.steps.find((step) => step.id === "afterer")?.status, "succeeded");
+	const afterPrompt = harness.messages.find((message) => message.message.includes("### bad [failed]"))?.message ?? "";
+	assert.match(afterPrompt, /accepted final before stop/);
+	assert.match(afterPrompt, /## Non-final assistant evidence/);
+	assert.match(afterPrompt, /partial after accepted final/);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
+test("failure artifact preserves accepted finals plus later non-final text", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-final-plus-partial-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("final-then-live-timeout");
+	const options = makeOptions(root, harness.spawn);
+	const started = await runAgentTeam({ action: "start", graph: { objective: "partial evidence", authority: { allowFilesystemRead: true }, steps: [{ id: "one", agent: { system: "Return staged output." }, task: "Return staged output." }], limits: { timeoutSecondsPerStep: 1 } }, options: { terminalRetentionSeconds: 30 } }, options);
+	const runId = started.details.run?.runId ?? "";
+	const terminal = await waitTerminal(root, runId, options, 100);
+	assert.equal(terminal.details.outputs[0]?.status, "timed_out");
+	assert.match(terminal.details.outputs[0]?.text ?? "", /first accepted final/);
+	assert.match(terminal.details.outputs[0]?.text ?? "", /## Non-final assistant evidence/);
+	assert.match(terminal.details.outputs[0]?.text ?? "", /later partial before timeout/);
+	const artifact = await readFile(terminal.details.outputs[0]?.filePath ?? "", "utf8");
+	assert.match(artifact, /first accepted final/);
+	assert.match(artifact, /## Non-final assistant evidence/);
+	assert.match(artifact, /later partial before timeout/);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
 test("unattended blocking or unknown extension UI requests fail closed", async () => {
 	const root = await mkdir(join(tmpdir(), `pi-multiagent-ui-request-${Date.now()}`), { recursive: true });
 	const harness = rpcHarness("ui-request");
@@ -704,7 +910,13 @@ for (const fixture of [
 			assert.match(terminal.details.steps[0]?.errorMessage ?? "", new RegExp(fixture.errorMessage));
 		}
 		assert.equal(terminal.details.outputs[0]?.status, "failed");
-		assert.equal(terminal.details.outputs[0]?.text, "ok");
+		if (fixture.mode === "agent-end-nested-length") {
+			assert.match(terminal.details.outputs[0]?.text ?? "", /## Non-final assistant evidence/);
+			assert.match(terminal.details.outputs[0]?.text ?? "", /ok/);
+			assert.doesNotMatch(terminal.details.outputs[0]?.text ?? "", /## Final text/);
+		} else {
+			assert.equal(terminal.details.outputs[0]?.text, "ok");
+		}
 		await runAgentTeam({ action: "cleanup", runId }, options);
 	});
 }
@@ -1081,6 +1293,27 @@ test("fire-and-forget UI requests show suppressed liveness instead of denied", a
 	await runAgentTeam({ action: "cleanup", runId }, options);
 });
 
+test("progress watchdog emits nonfatal heartbeat and stale-progress diagnostic", async () => {
+	const root = await mkdir(join(tmpdir(), `pi-multiagent-progress-watchdog-${Date.now()}`), { recursive: true });
+	const harness = rpcHarness("hold");
+	const options = makeOptions(root, harness.spawn, { rpcProgressWatchdogMs: 20 });
+	const started = await runAgentTeam(graph(), options);
+	const runId = started.details.run?.runId ?? "";
+	let observed: AgentToolResult<AgentTeamDetails> | undefined;
+	for (let attempt = 0; attempt < 40; attempt += 1) {
+		observed = await runAgentTeam({ action: "run_status", runId, cursor: "0", debugEvents: true }, options);
+		if (observed.details.events.some((event) => event.label === "progress-watchdog")) break;
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+	assert.equal(observed?.details.events.some((event) => event.label === "heartbeat" && event.status === "running"), true);
+	assert.equal(observed?.details.events.some((event) => event.label === "progress-watchdog" && event.status === "error"), true);
+	const live = await runAgentTeam({ action: "run_status", runId }, options);
+	assert.equal(live.details.run?.terminal, false);
+	await runAgentTeam({ action: "cancel", runId, reason: "watchdog test complete" }, options);
+	await waitTerminal(root, runId, options);
+	await runAgentTeam({ action: "cleanup", runId }, options);
+});
+
 test("run_status waitSeconds ignores routine activity and wakes for material completion", async () => {
 	const root = await mkdir(join(tmpdir(), `pi-multiagent-run_status-wait-${Date.now()}`), { recursive: true });
 	const harness = rpcHarness("hold");
@@ -1396,6 +1629,8 @@ test("run_status uses sink finals, step_result exposes one step, and terminal no
 	const step_result = await runAgentTeam({ action: "step_result", runId, stepId: "one", preview: true }, options);
 	assert.equal(step_result.details.outputs[0]?.stepId, "one");
 	assert.equal(step_result.details.outputs[0]?.text, "ok");
+	assert.equal(step_result.details.outputs[0]?.childSession?.sessionFile, "/tmp/pi-agent-team-child-0.jsonl");
+	assert.match(step_result.content[0].text, /childSession=.*pi-agent-team-child-0\.jsonl/);
 	assert.ok(step_result.details.outputs[0]?.filePath);
 });
 
@@ -1570,6 +1805,10 @@ test("message writes bounded live channel messages to a running step only", asyn
 	const receipt = await runAgentTeam({ action: "message", runId, stepId: "one", channel: "steer", text: "tighten scope", clientMessageId: "m1" }, options);
 	assert.equal(receipt.details.message?.accepted, true);
 	assert.equal(receipt.details.message?.reused, false);
+	const steerMessage = harness.messages.find((message) => message.type === "steer")?.message;
+	assert.ok(steerMessage);
+	harness.children[0]?.stdout.write(`${JSON.stringify({ type: "queue_update", steering: [steerMessage], followUp: [] })}\n`);
+	harness.children[0]?.stdout.write(`${JSON.stringify({ type: "queue_update", steering: [], followUp: [] })}\n`);
 	const duplicate = await runAgentTeam({ action: "message", runId, stepId: "one", channel: "steer", text: "tighten scope", clientMessageId: "m1" }, options);
 	assert.equal(duplicate.details.message?.accepted, true);
 	assert.equal(duplicate.details.message?.reused, true);
@@ -1589,7 +1828,11 @@ test("message writes bounded live channel messages to a running step only", asyn
 	assert.equal(harness.messages.some((message) => message.type === "follow_up" && message.message.includes("summarize after stop")), true);
 	assert.equal(harness.messages.filter((message) => message.type === "steer").length, 1);
 	const debugMessages = await runAgentTeam({ action: "run_status", runId, debugEvents: true }, options);
-	assert.equal(debugMessages.details.events.filter((event) => event.type === "parent_message" && event.status === "done").length, 2);
+	assert.equal(debugMessages.details.events.some((event) => event.type === "parent_message" && event.label === "steer" && event.status === "running"), true);
+	assert.equal(debugMessages.details.events.some((event) => event.type === "parent_message" && event.label === "steer" && event.preview?.includes("transport-accepted")), true);
+	assert.equal(debugMessages.details.events.some((event) => event.type === "parent_message" && event.label === "steer_queued"), true);
+	assert.equal(debugMessages.details.events.some((event) => event.type === "parent_message" && event.label === "steer_consumed"), true);
+	assert.equal(debugMessages.details.events.filter((event) => event.type === "parent_message" && event.status === "done").length >= 3, true);
 	harness.release("done after steer");
 	const terminal = await waitTerminal(root, runId, options);
 	assert.equal(terminal.details.outputs[0]?.text, "done after steer");

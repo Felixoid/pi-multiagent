@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PACKAGE_SURFACE_BUDGET } from "./package-policy.ts";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const result = spawnSync("npm", ["pack", "--dry-run", "--json"], { cwd: packageRoot, encoding: "utf8" });
@@ -19,7 +20,7 @@ assert.equal(typeof manifest === "object" && manifest !== null && "files" in man
 const rawFiles = manifest.files;
 assert.equal(Array.isArray(rawFiles), true, "npm pack files should be an array");
 const rawUnpackedSize = "unpackedSize" in manifest ? manifest.unpackedSize : undefined;
-assert.equal(typeof rawUnpackedSize === "number" && rawUnpackedSize < 750000, true, "packed artifact should stay below the package surface budget");
+assert.equal(typeof rawUnpackedSize === "number" && rawUnpackedSize <= PACKAGE_SURFACE_BUDGET.maxUnpackedSizeBytes, true, `packed artifact should stay at or below the ${PACKAGE_SURFACE_BUDGET.maxUnpackedSizeBytes}-byte package surface budget`);
 
 const paths = new Set<string>();
 for (const rawFile of rawFiles) {
@@ -36,11 +37,11 @@ for (const forbidden of [
 	".gitignore",
 	".npmignore",
 	".npmrc",
-		"CONTINUE.md",
-		"PLAN.md",
-		"HANDOFF.md",
-		"meta_study.md",
-		"package-lock.json",
+	"CONTINUE.md",
+	"PLAN.md",
+	"HANDOFF.md",
+	"meta_study.md",
+	"package-lock.json",
 	"pnpm-lock.yaml",
 	"tests/smoke-fake-pi.ts",
 	"tests/check-pack.ts",
@@ -50,7 +51,7 @@ for (const forbidden of [
 ]) {
 	assert.equal(paths.has(forbidden), false, `packed artifact should not include ${forbidden}`);
 }
-assert.equal(paths.size < 120, true, "packed artifact should stay within the expected file-count budget");
+assert.equal(paths.size <= PACKAGE_SURFACE_BUDGET.maxPackedFiles, true, `packed artifact should stay within the ${PACKAGE_SURFACE_BUDGET.maxPackedFiles}-file package surface budget`);
 for (const path of paths) {
 	assert.equal(isAllowedPackedPath(path), true, `packed artifact includes an unexpected package surface: ${path}`);
 	assert.equal(path.startsWith("tests/"), false, `packed artifact should not include tests: ${path}`);

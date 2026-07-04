@@ -14,7 +14,7 @@ function selectStepResultOutput(stepId: string, maxBytes: number, includePreview
 	for (const state of states) {
 		if (state.spec.id !== stepId) continue;
 		if (state.output) return [previewSelection(state.output, maxBytes, includePreview)];
-		return [previewSelection({ stepId, status: state.status, text: state.liveText, filePath: undefined, chars: state.liveText.length }, maxBytes, includePreview)];
+		return [previewSelection({ stepId, status: state.status, text: state.liveText, filePath: undefined, chars: state.liveText.length, childSession: state.childSession, retryHistory: state.retryHistory.length > 0 ? state.retryHistory : undefined }, maxBytes, includePreview)];
 	}
 	return [];
 }

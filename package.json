@@ -45,7 +45,9 @@
     "check:pi-load": "node --no-warnings --experimental-strip-types --loader ./tests/pi-peer-loader.mjs tests/check-package-load.ts",
     "check:public-docs": "node --experimental-strip-types tests/check-public-docs.ts",
     "check:source-size": "node --experimental-strip-types tests/check-source-size.ts",
-    "check:release": "node --experimental-strip-types tests/check-release-ready.ts",
+    "check:release:offline": "node --experimental-strip-types tests/check-release-ready.ts --offline",
+    "check:release:npm": "node --experimental-strip-types tests/check-release-ready.ts --npm",
+    "check:release": "pnpm run check:release:offline && pnpm run check:release:npm",
     "gate": "pnpm run typecheck && pnpm test && pnpm run smoke:fake-pi && pnpm run check:pack && pnpm run check:pi-load && pnpm run check:public-docs && pnpm run check:source-size"
   },
   "peerDependencies": {

@@ -3,32 +3,56 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { RELEASE_PACKAGE_MANAGER } from "./package-policy.ts";
+
+type ReleaseCheckMode = "all" | "offline" | "npm";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const packageJson = readPackageJson();
-const changelog = readFileSync(join(packageRoot, "CHANGELOG.md"), "utf8");
 
-assert.equal(packageJson.name, "pi-multiagent", "release guard is scoped to pi-multiagent");
-assert.equal(packageJson.private, undefined, "package must not be private");
-assert.equal(typeof packageJson.version, "string", "package.json version must be a string");
-assert.match(packageJson.version, /^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/, "package.json version must be semver-shaped");
-assert.equal(typeof packageJson.packageManager, "string", "package.json must record packageManager for release reproducibility");
-assert.equal(isRecord(packageJson.engines) && typeof packageJson.engines.node === "string", true, "package.json must record supported Node engine");
-assert.equal(isRecord(packageJson.publishConfig) && packageJson.publishConfig.access === "public", true, "package.json publishConfig.access must be public");
-const headPackageJson = readHeadPackageJson();
-assert.equal(headPackageJson.name, packageJson.name, "HEAD package.json package name must match the working release package");
-assert.equal(headPackageJson.version, packageJson.version, "HEAD package.json version must match the working release version; commit intended release files before publish");
-assert.equal(gitStdout(["status", "--porcelain"]).trim(), "", "release source tree must be clean; commit intended changes before publish");
+const mode = releaseCheckMode(process.argv.slice(2));
+assertPackageIdentity(packageJson);
+if (mode === "all" || mode === "offline") checkOfflineReleaseLineage(packageJson);
+if (mode === "all" || mode === "npm") checkNpmVersionAvailability(packageJson);
 
-const unreleased = sectionBody(changelog, "Unreleased");
-assert.equal(unreleased.trim(), "", "CHANGELOG.md Unreleased must be empty before npm publish");
-const releaseHeading = releaseHeadingForVersion(changelog, packageJson.version);
-assert.ok(releaseHeading, `CHANGELOG.md must contain a release heading for ${packageJson.version}`);
-assert.match(releaseHeading, new RegExp(`^## ${escapeRegExp(packageJson.version)} - [0-9]{4}-[0-9]{2}-[0-9]{2}$`), "current release heading must include an ISO date");
-assert.match(sectionBody(changelog, releaseHeading.slice(3)), /^- /m, "current changelog release section must contain bullet entries");
+function checkOfflineReleaseLineage(packageRecord: Record<string, unknown>): void {
+	const changelog = readFileSync(join(packageRoot, "CHANGELOG.md"), "utf8");
+	assert.equal(packageRecord.private, undefined, "package must not be private");
+	assert.equal(packageRecord.packageManager, RELEASE_PACKAGE_MANAGER, "package.json must record the release package manager used by this repository");
+	assert.equal(isRecord(packageRecord.engines) && typeof packageRecord.engines.node === "string", true, "package.json must record supported Node engine");
+	assert.equal(isRecord(packageRecord.publishConfig) && packageRecord.publishConfig.access === "public", true, "package.json publishConfig.access must be public");
+	const headPackageJson = readHeadPackageJson();
+	assert.equal(headPackageJson.name, packageRecord.name, "HEAD package.json package name must match the working release package");
+	assert.equal(headPackageJson.version, packageRecord.version, "HEAD package.json version must match the working release version; commit intended release files before publish");
+	assert.equal(gitStdout(["status", "--porcelain"]).trim(), "", "release source tree must be clean; commit intended changes before publish");
 
-const versions = npmPublishedVersions(packageJson.name);
-assert.equal(versions.includes(packageJson.version), false, `${packageJson.name}@${packageJson.version} already exists on npm`);
+	const unreleased = sectionBody(changelog, "Unreleased");
+	assert.equal(unreleased.trim(), "", "CHANGELOG.md Unreleased must be empty before npm publish");
+	const releaseHeading = releaseHeadingForVersion(changelog, packageRecord.version);
+	assert.ok(releaseHeading, `CHANGELOG.md must contain a release heading for ${packageRecord.version}`);
+	assert.match(releaseHeading, new RegExp(`^## ${escapeRegExp(String(packageRecord.version))} - [0-9]{4}-[0-9]{2}-[0-9]{2}$`), "current release heading must include an ISO date");
+	assert.match(sectionBody(changelog, releaseHeading.slice(3)), /^- /m, "current changelog release section must contain bullet entries");
+}
+
+function checkNpmVersionAvailability(packageRecord: Record<string, unknown>): void {
+	assert.equal(typeof packageRecord.name, "string", "package name must be a string before npm lookup");
+	assert.equal(typeof packageRecord.version, "string", "package.json version must be a string before npm lookup");
+	const versions = npmPublishedVersions(packageRecord.name);
+	assert.equal(versions.includes(packageRecord.version), false, `${packageRecord.name}@${packageRecord.version} already exists on npm`);
+}
+
+function assertPackageIdentity(packageRecord: Record<string, unknown>): void {
+	assert.equal(packageRecord.name, "pi-multiagent", "release guard is scoped to pi-multiagent");
+	assert.equal(typeof packageRecord.version, "string", "package.json version must be a string");
+	assert.match(packageRecord.version, /^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/, "package.json version must be semver-shaped");
+}
+
+function releaseCheckMode(args: string[]): ReleaseCheckMode {
+	if (args.length === 0) return "all";
+	if (args.length === 1 && args[0] === "--offline") return "offline";
+	if (args.length === 1 && args[0] === "--npm") return "npm";
+	throw new Error("Usage: check-release-ready.ts [--offline|--npm]");
+}
 
 function readPackageJson(): Record<string, unknown> {
 	const parsed: unknown = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
@@ -49,8 +73,7 @@ function gitStdout(args: string[]): string {
 	return result.stdout;
 }
 
-function npmPublishedVersions(name: unknown): string[] {
-	assert.equal(typeof name, "string", "package name must be a string before npm lookup");
+function npmPublishedVersions(name: string): string[] {
 	const result = spawnSync("npm", ["view", name, "versions", "--json"], { cwd: packageRoot, encoding: "utf8" });
 	if (result.stderr.length > 0) process.stderr.write(result.stderr);
 	assert.equal(result.status, 0, result.error?.message ?? result.stderr);
@@ -69,7 +92,8 @@ function sectionBody(markdown: string, heading: string): string {
 	return markdown.slice(bodyStart + 1, next === -1 ? markdown.length : next);
 }
 
-function releaseHeadingForVersion(markdown: string, version: string): string {
+function releaseHeadingForVersion(markdown: string, version: unknown): string {
+	assert.equal(typeof version, "string", "package.json version must be a string before changelog lookup");
 	const pattern = new RegExp(`^## ${escapeRegExp(version)} - [^\n]+$`, "m");
 	return markdown.match(pattern)?.[0] ?? "";
 }

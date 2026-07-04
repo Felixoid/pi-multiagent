@@ -35,7 +35,16 @@ function formatStepArtifact(step: StepSnapshot, output: StepOutput | undefined):
 	const cwd = step.cwd ? ` cwd=${JSON.stringify(boundedModelText(step.cwd, CWD_CHARS))}` : "";
 	const stopReason = step.stopReason ? ` stopReason=${JSON.stringify(boundedModelText(step.stopReason, CWD_CHARS))}` : "";
 	const task = step.taskPreview ? ` task=${JSON.stringify(boundedModelText(step.taskPreview, TASK_CHARS))}` : "";
-	return `- ${step.id} [${step.status}]: artifact=${artifact} chars=${chars}${cwd}${formatStepUpstreamArtifacts(step)}${stopReason}${task}`;
+	const childSession = formatChildSession(step);
+	const retries = step.retryHistory && step.retryHistory.length > 0 ? ` retries=${step.retryHistory.length}` : "";
+	return `- ${step.id} [${step.status}]: artifact=${artifact} chars=${chars}${cwd}${childSession}${retries}${formatStepUpstreamArtifacts(step)}${stopReason}${task}`;
+}
+
+function formatChildSession(step: StepSnapshot): string {
+	const session = step.childSession;
+	if (!session) return "";
+	const value = session.sessionFile ?? session.sessionId ?? session.sessionDir;
+	return value ? ` childSession=${JSON.stringify(boundedModelText(value, PATH_CHARS))}` : " childSession=unavailable";
 }
 
 function formatStepUpstreamArtifacts(step: StepSnapshot): string {

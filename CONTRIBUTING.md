@@ -57,7 +57,7 @@ Before requesting review:
 
 1. Keep the PR scoped to one coherent change.
 2. Preserve the current public contract unless an accepted proposal explicitly changes it.
-3. Do not reintroduce removed compatibility paths, old action names, stale trust gates, or non-enforced authority paperwork.
+3. Keep one current `agent_team` public surface: the strict action set, schema-owned graph fields, catalog provenance routing, and real graph authority/tool gates.
 4. Do not weaken package role capability truth: `package:validator` requires effective `bash`, and `package:worker` requires effective `edit` or `write`.
 5. Do not bump `package.json` version.
 6. Do not create a dated release section in `CHANGELOG.md`.
@@ -74,7 +74,29 @@ pnpm run gate
 git diff --check
 ```
 
-For docs-only GitHub metadata changes, a maintainer may accept a smaller proof surface such as `pnpm run check:public-docs`, `pnpm run check:pack`, and `git diff --check`.
+For docs-only GitHub metadata changes, a maintainer may accept a smaller proof surface such as:
+
+```bash
+pnpm run check:public-docs
+pnpm run check:pack
+git diff --check
+```
+
+For package-surface changes, include the dry-run package readback in the PR notes. Package budgets live in `tests/package-policy.ts`; `pnpm run check:pack` enforces the package file allowlist, packed file count, and unpacked-size budget.
+
+```bash
+npm pack --dry-run --json
+```
+
+Release readiness is split from the normal development gate. `pnpm run check:release:offline` is a clean-commit lineage/changelog guard, `pnpm run check:release:npm` is the network npm-version availability check, and `pnpm run check:release` runs both before maintainer-owned publish work. Do not treat release checks as dirty-tree PR validation.
+
+Real Pi smoke may spend model/API credentials or invoke local provider state. Run it only with explicit operator approval:
+
+```bash
+PI_MULTIAGENT_REAL_SMOKE=1 PI_MULTIAGENT_REAL_SMOKE_TIMEOUT_MS=180000 pnpm run smoke:pi
+```
+
+Major runtime or live-integration changes need more than static gates or toy smoke: when approved, observe a meaningful articulated graph through terminal state, inspect its final artifacts, and do not count final-less, stalled, or canceled runs as GO evidence.
 
 ## Changelog and release ownership
 

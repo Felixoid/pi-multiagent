@@ -76,7 +76,7 @@ async function loadPackageRoot(root: string, label: string): Promise<void> {
 		assert.match(modelGuidance, /suppressed non-error activity/, `${label}: agent_team should expose suppressed UI semantics`);
 		assert.match(modelGuidance, /structured wait receipt/, `${label}: agent_team should expose wait receipt semantics`);
 		assert.match(modelGuidance, /accepted-for-delivery receipts prove only Pi accepted live-child transport/, `${label}: agent_team should expose transport-only message receipt semantics`);
-		assert.doesNotMatch(modelGuidance, /ignores fire-and-forget extension UI updates|messages prove queueing only/, `${label}: agent_team should not expose stale supervision copy`);
+		assert.match(modelGuidance, /routine assistant\/tool\/UI activity/, `${label}: agent_team should describe which live activity does not wake run_status waits`);
 		assert.match(tool.promptSnippet ?? "", /catalog.*start.*run_status.*step_result.*message.*cancel.*cleanup/);
 		assert.equal(tool.promptGuidelines?.some((line) => /Action decision tree/.test(line) && /step_result.*exactly one step/.test(line)), true, `${label}: agent_team should expose a compact action decision tree`);
 		const catalog = await tool.execute(

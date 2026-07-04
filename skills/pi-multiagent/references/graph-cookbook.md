@@ -22,15 +22,21 @@ Graph design ladder:
 14. Command validation or validation matrix when parent-named shell proof should be observed by validator lanes.
 15. Completed-proof review or release-readiness review when final judgment needs evidence from multiple terminal lanes.
 
-## Tool and authority reminders
+## Contract quick links
 
-- Every child keeps mandatory read/discovery (`read`, `grep`, `find`, `ls`), so graphs need `authority.allowFilesystemRead:true`.
+This cookbook chooses graph shapes and task packets. The canonical action, graph schema, authority, tool, model/thinking, `outputLimit`, limits, and troubleshooting contract lives in [`/skill:pi-multiagent`](../SKILL.md).
+
+Before starting a copied graph:
+
+- Inspect authority, tools, extension grants, prompts, tasks, and `cwd` values.
+- Keep read-only graphs read-only; every runnable child still needs `authority.allowFilesystemRead:true` because mandatory read/discovery (`read`, `grep`, `find`, `ls`) is always present.
 - Omitted `agent.tools` inherits catalog defaults capped by graph authority. Explicit `agent.tools` replaces the catalog profile, then mandatory read/discovery is added.
-- `allowShellTools` grants trusted shell execution. Put exact trusted commands or a bounded command class in the task, and prefer `package:validator` for command proof. `package:validator` fails planning without effective `bash`.
-- `allowMutationTools` grants trusted mutation execution through `edit` and `write`. Put current human authorization, owned files, exclusions, and validation commands in the worker task. `package:worker` fails planning without effective `edit` or `write`.
-- `cwd` changes launch working context and is checked before launch. It is a launch boundary, not a file policy.
-- Extension tools require copied catalog provenance and `allowExtensionCode:true`.
-- Subagent skills are controlled only by `--agent-team-subagent-skills enabled|disabled` (default enabled/all caller-visible skills), not by `agent.skills`.
+- Use trusted shell execution only when the task names the exact commands or bounded command class; prefer `package:validator` for command proof.
+- Use trusted mutation execution only after current parent authorization names owned files, exclusions, and validation commands; `package:worker` needs effective `edit` or `write`.
+- Graph `needs` / `after` gates are model dependencies, not human approval checkpoints; stop with a decision question and start a separate mutation-capable run only after approval.
+- Treat `cwd` as a launch context boundary, not a file policy; it must stay inside the invocation cwd and is checked again before launch.
+- Copy extension-tool provenance from live `catalog` output when a graph needs web research.
+- Treat `--agent-team-subagent-skills enabled|disabled` as a product flag, not a graph field.
 
 ## Task packet templates
 
@@ -277,6 +283,46 @@ Web research with explicit catalog-copied provenance:
   }
 }
 ```
+
+Fallback synthesis after mixed lanes:
+
+```json
+{
+  "objective": "Review independent evidence lanes and preserve partial findings when one lane fails.",
+  "authority": {
+    "allowFilesystemRead": true
+  },
+  "steps": [
+    {
+      "id": "runtime-map",
+      "agent": {
+        "ref": "package:scout"
+      },
+      "task": "Map runtime files for the named claim. Return paths, evidence, conflicts, and unknowns. Do not edit."
+    },
+    {
+      "id": "docs-map",
+      "agent": {
+        "ref": "package:docs-auditor"
+      },
+      "task": "Map public docs for the same claim. Return paths, evidence, conflicts, and unknowns. Do not edit."
+    },
+    {
+      "id": "fallback-decision",
+      "agent": {
+        "ref": "package:synthesizer"
+      },
+      "after": [
+        "runtime-map",
+        "docs-map"
+      ],
+      "task": "Synthesize from all terminal upstream artifacts, including failed, timed-out, blocked, or partial lanes. State which evidence is missing and whether the parent must inspect artifacts or start a narrower follow-up graph."
+    }
+  ]
+}
+```
+
+Use `after` for fallback synthesis when terminal evidence from failed lanes should still reach the sink. Use `needs` when the downstream step must require successful upstream completion. This is explicit graph choreography, not a hidden runtime fallback.
 
 ## Supervision quick guide
 

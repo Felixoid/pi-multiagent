@@ -1,6 +1,8 @@
 /** Shared RPC child controller types. */
 
-import type { AgentInvocationDefaults, ResolvedAgent, StepOutputLimit, StepStatus, TeamLimits } from "./types.ts";
+import type { AgentInvocationDefaults, ChildSessionMetadata, ResolvedAgent, StepOutputLimit, StepStatus, TeamLimits } from "./types.ts";
+
+export type RpcChildEventInput = { type: "rpc" | "assistant_final" | "tool" | "diagnostic" | "parent_message" | "ui"; label?: string; preview?: string; status?: string };
 
 export interface RpcChildControllerOptions {
 	agent: ResolvedAgent;
@@ -9,10 +11,14 @@ export interface RpcChildControllerOptions {
 	outputLimit: StepOutputLimit;
 	cwd: string;
 	promptPath: string;
+	sessionDir?: string;
+	sessionName?: string;
 	spawnProcess?: import("./child-launch.ts").SpawnProcess;
 	ackTimeoutMs?: number;
-	onEvent: (input: { type: "rpc" | "assistant_final" | "tool" | "diagnostic" | "parent_message" | "ui"; label?: string; preview?: string; status?: string }) => void;
+	progressWatchdogMs?: number;
+	onEvent: (input: RpcChildEventInput) => void;
 	onText?: (text: string) => void;
+	onChildSession?: (metadata: ChildSessionMetadata) => void;
 }
 
 export interface RpcStepResult {
@@ -22,4 +28,6 @@ export interface RpcStepResult {
 	stderr: string;
 	errorMessage: string | undefined;
 	nonFinalText?: string;
+	childSession?: ChildSessionMetadata;
+	parentMessagesAccepted?: boolean;
 }

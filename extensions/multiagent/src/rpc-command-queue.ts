@@ -4,6 +4,7 @@ import { stringField } from "./rpc-record-utils.ts";
 export interface RpcCommandAck {
 	success: boolean;
 	error: string | undefined;
+	data?: unknown;
 }
 
 interface PendingRpcCommand {
@@ -62,7 +63,9 @@ export class RpcCommandQueue {
 			onDiagnostic({ command, message: `Unexpected RPC response id ${id}.` });
 			return;
 		}
-		this.resolvePending(id, { success: record.success === true, error: record.success === true ? undefined : stringField(record.error) ?? `RPC command ${command} failed.` });
+		const ack: RpcCommandAck = { success: record.success === true, error: record.success === true ? undefined : stringField(record.error) ?? `RPC command ${command} failed.` };
+		if (Object.hasOwn(record, "data")) ack.data = record.data;
+		this.resolvePending(id, ack);
 	}
 
 	closeWith(errorForCommand: (command: string) => string): void {

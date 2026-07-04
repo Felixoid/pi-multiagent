@@ -13,11 +13,10 @@ const theme = {
 };
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
-test("production code has no agent_team live footer status path", () => {
+test("production code routes live progress through the agent_team widget and notices", () => {
 	for (const file of productionFiles(join(packageRoot, "extensions", "multiagent"))) {
 		const source = readFileSync(file, "utf8");
 		assert.doesNotMatch(source, /\bctx\.ui\.setStatus\b/, `${file}: use agent_team:live widget and notices, not Pi's shared footer status row`);
-		assert.doesNotMatch(source, /\bformatAgentTeamLiveStatus\b/, `${file}: live footer status formatter should stay removed`);
 	}
 });
 

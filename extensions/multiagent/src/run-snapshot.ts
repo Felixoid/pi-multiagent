@@ -35,6 +35,8 @@ export function buildStepSnapshots(states: Iterable<StepState>, activity: StepAc
 			cwd: state.spec.cwd,
 			stopReason: state.errorMessage ?? (isTerminalStepStatus(state.status) ? state.status : undefined),
 			upstreamArtifacts: upstreamArtifactReferences(state.spec, byId),
+			childSession: state.childSession,
+			retryHistory: state.retryHistory.length > 0 ? state.retryHistory : undefined,
 		};
 	});
 }

@@ -348,6 +348,21 @@ export interface StepArtifactReference {
 	chars: number | undefined;
 }
 
+export interface ChildSessionMetadata {
+	sessionId: string | undefined;
+	sessionName: string | undefined;
+	sessionFile: string | undefined;
+	sessionDir: string | undefined;
+	launchSessionDir: string | undefined;
+	stateSource: "rpc_get_state" | "unavailable";
+}
+
+export interface StepRetryRecord {
+	attempt: number;
+	reason: string;
+	childSession: ChildSessionMetadata | undefined;
+}
+
 export interface StepSnapshot {
 	id: string;
 	status: StepStatus;
@@ -370,6 +385,8 @@ export interface StepSnapshot {
 	cwd?: string;
 	stopReason?: string;
 	upstreamArtifacts?: StepArtifactReference[];
+	childSession?: ChildSessionMetadata;
+	retryHistory?: StepRetryRecord[];
 }
 
 export interface StepOutput {
@@ -378,6 +395,8 @@ export interface StepOutput {
 	text: string | undefined;
 	filePath: string | undefined;
 	chars: number;
+	childSession?: ChildSessionMetadata;
+	retryHistory?: StepRetryRecord[];
 }
 
 export type RunStatusWaitOutcome = "material" | "timeout" | "already-material" | "terminal";

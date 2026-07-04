@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { SOURCE_FILE_BUDGET } from "./package-policy.ts";
 
-const MAX_LINES = 500;
-const MAX_BYTES = 18 * 1024;
-const roots = [join(process.cwd(), "extensions")];
+const roots = SOURCE_FILE_BUDGET.rootDirectories.map((directory) => join(process.cwd(), directory));
 
 async function collectTypeScriptFiles(dir: string): Promise<string[]> {
 	const entries = await readdir(dir, { withFileTypes: true });
@@ -22,6 +21,6 @@ const failures: string[] = [];
 for (const file of files) {
 	const content = await readFile(file);
 	const lines = content.toString("utf8").split("\n").length;
-	if (lines > MAX_LINES || content.length > MAX_BYTES) failures.push(`${file}: ${lines} lines, ${content.length} bytes`);
+	if (lines > SOURCE_FILE_BUDGET.maxLines || content.length > SOURCE_FILE_BUDGET.maxBytes) failures.push(`${file}: ${lines} lines, ${content.length} bytes`);
 }
-assert.equal(failures.length, 0, `Source files exceed ${MAX_LINES} lines or ${MAX_BYTES} bytes:\n${failures.join("\n")}`);
+assert.equal(failures.length, 0, `Source files exceed ${SOURCE_FILE_BUDGET.maxLines} lines or ${SOURCE_FILE_BUDGET.maxBytes} bytes:\n${failures.join("\n")}`);

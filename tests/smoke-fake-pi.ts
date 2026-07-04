@@ -21,7 +21,7 @@ interface ExtensionCtx {
 	cwd: string;
 	hasUI: boolean;
 	model: undefined;
-	sessionManager: { getSessionId: () => string };
+	sessionManager: { getSessionId: () => string; getSessionDir: () => string; getSessionFile: () => string; usesDefaultSessionDir?: () => boolean };
 	ui: {
 		confirm: () => Promise<boolean>;
 		setWidget: (id: string, value: unknown) => void;
@@ -61,6 +61,7 @@ const uiEvents: { sessionId: string; kind: "widget"; value: unknown }[] = [];
 const delayedNoticeChildren: FakeChild[] = [];
 const tasks: string[] = [];
 const shutdownHandlers: ShutdownHandler[] = [];
+let expectForwardedSessionDir = true;
 
 registerMultiagentExtension(
 	{
@@ -167,6 +168,44 @@ assert.equal(graphFileTerminal.details.outputs[0]?.text, "smoke-ok");
 const graphFileCleanup = await tool.execute("smoke-graph-file-cleanup", { action: "cleanup", runId: graphFileRunId }, undefined, undefined, makeCtx(true, async () => false, graphFileRoot));
 assert.equal(graphFileCleanup.details.cleanup?.runId, graphFileRunId);
 await rm(graphFileRoot, { recursive: true, force: true });
+
+expectForwardedSessionDir = false;
+const defaultSessionStarted = await tool.execute(
+	"smoke-default-session-dir-start",
+	{ action: "start", graph: { objective: "default session dir smoke", authority: { allowFilesystemRead: true }, steps: [{ id: "default-session", agent: { system: "Return smoke-ok." }, task: "default session dir task" }], limits: { timeoutSecondsPerStep: 30 } }, options: { terminalRetentionSeconds: 30, notify: { mode: "none" } } },
+	undefined,
+	undefined,
+	makeCtx(true, async () => false, packageRoot, "default-dir-session", true),
+);
+const defaultSessionRunId = defaultSessionStarted.details.run?.runId ?? "";
+assert.match(defaultSessionRunId, /^r[1-9][0-9]{0,6}$/);
+let defaultSessionTerminal = await tool.execute("smoke-default-session-dir-run_status-0", { action: "run_status", runId: defaultSessionRunId, preview: true }, undefined, undefined, makeCtx(true, async () => false, packageRoot, "default-dir-session", true));
+for (let attempt = 0; !defaultSessionTerminal.details.run?.terminal && attempt < 20; attempt += 1) {
+	await new Promise((resolve) => setTimeout(resolve, 5));
+	defaultSessionTerminal = await tool.execute(`smoke-default-session-dir-run_status-${attempt + 1}`, { action: "run_status", runId: defaultSessionRunId, cursor: defaultSessionTerminal.details.cursor, preview: true }, undefined, undefined, makeCtx(true, async () => false, packageRoot, "default-dir-session", true));
+}
+assert.equal(defaultSessionTerminal.details.run?.status, "succeeded");
+const defaultSessionCleanup = await tool.execute("smoke-default-session-dir-cleanup", { action: "cleanup", runId: defaultSessionRunId }, undefined, undefined, makeCtx(true, async () => false, packageRoot, "default-dir-session", true));
+assert.equal(defaultSessionCleanup.details.cleanup?.runId, defaultSessionRunId);
+
+const unknownSessionModeStarted = await tool.execute(
+	"smoke-unknown-session-dir-start",
+	{ action: "start", graph: { objective: "unknown session dir smoke", authority: { allowFilesystemRead: true }, steps: [{ id: "unknown-session", agent: { system: "Return smoke-ok." }, task: "unknown session dir task" }], limits: { timeoutSecondsPerStep: 30 } }, options: { terminalRetentionSeconds: 30, notify: { mode: "none" } } },
+	undefined,
+	undefined,
+	makeCtx(true, async () => false, packageRoot, "unknown-dir-session", "missing"),
+);
+const unknownSessionRunId = unknownSessionModeStarted.details.run?.runId ?? "";
+assert.match(unknownSessionRunId, /^r[1-9][0-9]{0,6}$/);
+let unknownSessionTerminal = await tool.execute("smoke-unknown-session-dir-run_status-0", { action: "run_status", runId: unknownSessionRunId, preview: true }, undefined, undefined, makeCtx(true, async () => false, packageRoot, "unknown-dir-session", "missing"));
+for (let attempt = 0; !unknownSessionTerminal.details.run?.terminal && attempt < 20; attempt += 1) {
+	await new Promise((resolve) => setTimeout(resolve, 5));
+	unknownSessionTerminal = await tool.execute(`smoke-unknown-session-dir-run_status-${attempt + 1}`, { action: "run_status", runId: unknownSessionRunId, cursor: unknownSessionTerminal.details.cursor, preview: true }, undefined, undefined, makeCtx(true, async () => false, packageRoot, "unknown-dir-session", "missing"));
+}
+assert.equal(unknownSessionTerminal.details.run?.status, "succeeded");
+const unknownSessionCleanup = await tool.execute("smoke-unknown-session-dir-cleanup", { action: "cleanup", runId: unknownSessionRunId }, undefined, undefined, makeCtx(true, async () => false, packageRoot, "unknown-dir-session", "missing"));
+assert.equal(unknownSessionCleanup.details.cleanup?.runId, unknownSessionRunId);
+expectForwardedSessionDir = true;
 
 const holdStarted = await tool.execute(
 	"smoke-start-hold",
@@ -275,7 +314,11 @@ function spawnProcess(_command: string, args: string[], spawnOptions: SpawnOptio
 	assert.deepEqual(spawnOptions.stdio, ["pipe", "pipe", "pipe"]);
 	assert.equal(args.includes("--mode"), true);
 	assert.equal(args.includes("rpc"), true);
-	assert.equal(args.includes("--no-session"), true);
+	assert.equal(args.includes("--no-session"), false);
+	assert.equal(args.includes("--name"), true);
+	assert.match(args[args.indexOf("--name") + 1] ?? "", /^agent_team r[1-9][0-9]{0,6}\//);
+	assert.equal(args.includes("--session-dir"), expectForwardedSessionDir);
+	if (expectForwardedSessionDir) assert.equal(args[args.indexOf("--session-dir") + 1], "/tmp/pi-multiagent-smoke-sessions");
 	assert.equal(args.includes("--no-extensions"), false);
 	assert.equal(args.includes("--no-context-files"), true);
 	const child = new FakeChild();
@@ -289,7 +332,8 @@ function spawnProcess(_command: string, args: string[], spawnOptions: SpawnOptio
 			buffer = buffer.slice(newline + 1);
 			const command = JSON.parse(line) as { id: string; type: string; message?: string };
 			if (command.message) tasks.push(command.message);
-			child.stdout.write(`${JSON.stringify({ type: "response", id: command.id, command: command.type, success: true })}\n`);
+			const data = command.type === "get_state" ? { sessionId: "smoke-child-session", sessionName: args[args.indexOf("--name") + 1], sessionFile: "/tmp/pi-multiagent-smoke-sessions/child.jsonl", pendingMessageCount: 0 } : undefined;
+			child.stdout.write(`${JSON.stringify({ type: "response", id: command.id, command: command.type, success: true, ...(data ? { data } : {}) })}\n`);
 			if (command.type === "prompt" && command.message?.includes("delayed notice task") === true) {
 				delayedNoticeChildren.push(child);
 			} else if (command.type === "prompt" && command.message?.includes("hold task") !== true) {
@@ -303,13 +347,15 @@ function spawnProcess(_command: string, args: string[], spawnOptions: SpawnOptio
 	return child as unknown as ChildProcessWithoutNullStreams;
 }
 
-function makeCtx(hasUI: boolean, confirm: () => Promise<boolean> = async () => false, cwd = packageRoot, sessionId: string | (() => string) = "default-session"): ExtensionCtx {
+function makeCtx(hasUI: boolean, confirm: () => Promise<boolean> = async () => false, cwd = packageRoot, sessionId: string | (() => string) = "default-session", usesDefaultSessionDir: boolean | "missing" = false): ExtensionCtx {
 	const getSessionId = typeof sessionId === "function" ? sessionId : () => sessionId;
+	const sessionManager: ExtensionCtx["sessionManager"] = { getSessionId, getSessionDir: () => "/tmp/pi-multiagent-smoke-sessions", getSessionFile: () => "/tmp/pi-multiagent-smoke-sessions/parent.jsonl" };
+	if (usesDefaultSessionDir !== "missing") sessionManager.usesDefaultSessionDir = () => usesDefaultSessionDir;
 	return {
 		cwd,
 		hasUI,
 		model: undefined,
-		sessionManager: { getSessionId },
+		sessionManager,
 		ui: {
 			confirm,
 			setWidget(_id, value) {

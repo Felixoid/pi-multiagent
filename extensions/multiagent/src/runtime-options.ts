@@ -15,6 +15,8 @@ export interface AgentTeamRuntimeOptions {
 	catalogPreparationDiagnostics: AgentDiagnostic[];
 	/** Stable owner for process-local retained runs; follow-up actions only see runs from the same Pi session when available. */
 	sessionId?: string;
+	/** Parent custom Pi session storage directory, forwarded only so child sessions stay under the same Pi-owned session root when customized. */
+	sessionDir?: string;
 	defaults: AgentInvocationDefaults;
 	parentTools?: ParentToolInventory;
 	parentSkills?: ParentSkillInventory;
@@ -27,6 +29,8 @@ export interface AgentTeamRuntimeOptions {
 	spawnProcess?: SpawnProcess;
 	/** Internal test hook: shorten command-ack timeout for deterministic message-idempotency regressions. */
 	rpcCommandAckTimeoutMs?: number;
+	/** Internal test hook: shorten stale-progress diagnostics without changing step timeout. */
+	rpcProgressWatchdogMs?: number;
 }
 
 export function makeDetails(action: AgentTeamDetails["action"], ok: boolean, diagnostics: AgentDiagnostic[], options: AgentTeamRuntimeOptions, data: Partial<AgentTeamDetails> = {}, error?: { code: string; message: string }): AgentTeamDetails {

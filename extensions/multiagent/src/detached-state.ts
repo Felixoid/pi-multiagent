@@ -1,7 +1,7 @@
 /** Mutable per-step detached-run state. */
 
 import type { RpcChildController } from "./rpc-child-controller.ts";
-import type { StepOutput, StepStatus, TeamStepSpec } from "./types.ts";
+import type { ChildSessionMetadata, StepOutput, StepRetryRecord, StepStatus, TeamStepSpec } from "./types.ts";
 
 export interface StepState {
 	spec: TeamStepSpec;
@@ -11,7 +11,10 @@ export interface StepState {
 	errorMessage: string | undefined;
 	output: StepOutput | undefined;
 	finalText: string | undefined;
+	nonFinalText: string | undefined;
 	assistantFinals: string[];
+	childSession: ChildSessionMetadata | undefined;
+	retryHistory: StepRetryRecord[];
 	liveText: string;
 	liveTextEventChars: number;
 	controller: RpcChildController | undefined;
@@ -19,5 +22,5 @@ export interface StepState {
 }
 
 export function createPendingStepState(spec: TeamStepSpec): StepState {
-	return { spec, status: "pending", startedAt: undefined, endedAt: undefined, errorMessage: undefined, output: undefined, finalText: undefined, assistantFinals: [], liveText: "", liveTextEventChars: 0, controller: undefined, promise: undefined };
+	return { spec, status: "pending", startedAt: undefined, endedAt: undefined, errorMessage: undefined, output: undefined, finalText: undefined, nonFinalText: undefined, assistantFinals: [], childSession: undefined, retryHistory: [], liveText: "", liveTextEventChars: 0, controller: undefined, promise: undefined };
 }
