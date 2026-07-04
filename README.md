@@ -253,7 +253,7 @@ Before starting any graph with `bash`, verify the graph authority is limited to 
 | Extension tool is rejected | Keep callable extension grants in `extensionTools` and copy source/scope/origin from `catalog`. |
 | Which model did a child run? | Check `run_status` step rows; they report the launch-time model/thinking lane. Parent model changes after `start` do not affect live children. |
 | Step model override is rejected | `steps[].agent.model` must contain non-whitespace text. Omit it to use agent metadata or parent launch defaults. |
-| Output seems capped | `steps[].outputLimit` is a hard retained-output cap; raise it only when retaining larger child evidence is worth the memory/IPC/artifact footprint. Use `preview.maxBytes` only for display trimming. |
+| Output seems capped | `steps[].outputLimit` is a hard retained-output cap; raise it only when retaining larger child evidence is worth the memory/IPC/artifact footprint. Use `run_status` / `step_result` top-level `maxBytes` with `preview:true` only for display trimming. |
 | Provider model is unavailable in a child | Install or enable the provider extension through normal Pi extension discovery for the child cwd/agent dir; one-off parent `pi -e` provider extensions are not inherited. |
 | Bash child is refused | Step cwd is inside a tree with `.pi/settings.json`; remove `bash`, change cwd, or run outside that settings tree. |
 | Message is denied or seems ignored | Target step may not be live, the run may be terminal/canceling, budget may be spent, or the accepted-for-delivery receipt may not have produced child output/compliance. |
