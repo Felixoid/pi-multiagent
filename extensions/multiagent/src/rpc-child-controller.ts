@@ -184,7 +184,7 @@ export class RpcChildController {
 			return;
 		}
 		const nonEmpty = text.trim().length > 0;
-		const finalFailure = nonEmpty ? this.outputBudget.canAcceptAssistantFinal(check.bytes) : undefined;
+		const finalFailure = nonEmpty ? this.outputBudget.canAcceptAssistantFinal(text) : undefined;
 		if (finalFailure) {
 			this.failOutputBudget(finalFailure);
 			return;
@@ -202,7 +202,7 @@ export class RpcChildController {
 			this.options.onEvent({ type: "rpc", label: "assistant_nonfinal", preview: message, status: stopReason === "tooluse" ? "done" : "error" });
 			return;
 		}
-		this.outputBudget.recordAssistantFinal(check.bytes);
+		this.outputBudget.recordAssistantFinal(text);
 		this.assistantFinals.push(text);
 		this.options.onEvent({ type: "assistant_final", label: "assistant", preview: text, status: "done" });
 	}

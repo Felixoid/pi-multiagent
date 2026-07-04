@@ -1212,6 +1212,17 @@ test("per-step outputLimit enforces retained assistant byte and final-count hard
 	assert.match(finalsTerminal.details.steps[0]?.errorMessage ?? "", /too many non-empty assistant finals; limit=1/);
 	assert.match(finalsTerminal.content[0].text, /outputLimit=maxBytes=4194304, maxAssistantFinals=1/);
 	await runAgentTeam({ action: "cleanup", runId: finalsRunId }, finalsOptions);
+
+	const formattedRoot = await mkdir(join(tmpdir(), `pi-multiagent-step-output-formatted-finals-${Date.now()}`), { recursive: true });
+	const formattedHarness = rpcHarness("two-finals");
+	const formattedOptions = makeOptions(formattedRoot, formattedHarness.spawn);
+	const formattedStarted = await runAgentTeam(graph([{ id: "one", agent: { system: "Return two finals." }, task: "Return two finals.", outputLimit: { maxBytes: 20, maxAssistantFinals: 2 } }]), formattedOptions);
+	const formattedRunId = formattedStarted.details.run?.runId ?? "";
+	const formattedTerminal = await waitTerminal(formattedRoot, formattedRunId, formattedOptions, 40, false);
+	assert.equal(formattedTerminal.details.run?.status, "failed");
+	assert.match(formattedTerminal.details.steps[0]?.errorMessage ?? "", /assistant finals would retain \d+ bytes; per-step assistant output limit=20 bytes/);
+	assert.match(formattedTerminal.content[0].text, /outputLimit=maxBytes=20, maxAssistantFinals=2/);
+	await runAgentTeam({ action: "cleanup", runId: formattedRunId }, formattedOptions);
 });
 
 test("default concurrency remains six while explicit limit can fan out to ten", async () => {

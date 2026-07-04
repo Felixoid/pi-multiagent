@@ -1,6 +1,7 @@
 /** Retained assistant-output budget for one RPC child step. */
 
 import type { StepOutputLimit } from "./types.ts";
+import { formatAssistantFinalMessages } from "./detached-output.ts";
 import { DEFAULT_STEP_OUTPUT_LIMIT } from "./step-output-limit.ts";
 
 const OUTPUT_BUDGET_LABEL = "step-output-budget-exceeded";
@@ -14,8 +15,7 @@ export type OutputBudgetCheck = { ok: true; bytes: number } | { ok: false; failu
 
 export class AssistantOutputBudget {
 	private liveTextBytes = 0;
-	private assistantFinalBytes = 0;
-	private assistantFinalCount = 0;
+	private assistantFinals: string[] = [];
 	private readonly limit: StepOutputLimit;
 
 	constructor(limit: StepOutputLimit = DEFAULT_STEP_OUTPUT_LIMIT) {
@@ -42,22 +42,21 @@ export class AssistantOutputBudget {
 		this.liveTextBytes = bytes;
 	}
 
-	canAcceptAssistantFinal(bytes: number): OutputBudgetFailure | undefined {
-		if (this.assistantFinalCount >= this.limit.maxAssistantFinals) {
+	canAcceptAssistantFinal(text: string): OutputBudgetFailure | undefined {
+		if (this.assistantFinals.length >= this.limit.maxAssistantFinals) {
 			return { label: OUTPUT_BUDGET_LABEL, message: `step-output-budget-exceeded: Subagent emitted too many non-empty assistant finals; limit=${this.limit.maxAssistantFinals}.` };
 		}
-		const nextBytes = this.assistantFinalBytes + bytes;
+		const nextFinals = [...this.assistantFinals, text];
+		const nextBytes = Buffer.byteLength(nextFinals.length === 1 ? text : formatAssistantFinalMessages(nextFinals), "utf8");
 		return nextBytes <= this.limit.maxBytes ? undefined : budgetExceeded("assistant finals", nextBytes, this.limit).failure;
 	}
 
-	recordAssistantFinal(bytes: number): void {
-		this.assistantFinalCount += 1;
-		this.assistantFinalBytes += bytes;
+	recordAssistantFinal(text: string): void {
+		this.assistantFinals.push(text);
 	}
 
 	resetAssistantFinals(): void {
-		this.assistantFinalBytes = 0;
-		this.assistantFinalCount = 0;
+		this.assistantFinals = [];
 	}
 }
 
